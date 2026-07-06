@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package opentelemetry.querier.qdata.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "qdata/v1/common.proto";
+
+// MetricType is the QLSWG metric type enum (spec §3.1 Type). It lets functions
+// and processors warn or refuse when applied to an incompatible type (e.g.
+// rate() on a GAUGE). UNSPECIFIED corresponds to the spec's UNKNOWN: TSDBs that
+// store bare numbers without a type; callers must not assume GAUGE.
+enum MetricType {
+  METRIC_TYPE_UNSPECIFIED = 0;
+  METRIC_TYPE_GAUGE = 1;
+  METRIC_TYPE_CUMULATIVE_COUNTER = 2;
+  METRIC_TYPE_DELTA_COUNTER = 3;
+  METRIC_TYPE_RATE = 4;
+  METRIC_TYPE_SUMMARY = 5;
+  METRIC_TYPE_HISTOGRAM = 6;
+}
+
+// Exemplar is a sample of a raw measurement carried with a metric summary
+// (spec §Exemplar).
+message Exemplar {
+  google.protobuf.Timestamp timestamp = 1;
+  double value = 2;
+  KeyValueList attributes = 3;
+}
+
+// MetricPoint is a single (windowed) measurement. Per spec §3.7 it carries start
+// and end timestamps; for point-in-time samples start == end.
+message MetricPoint {
+  google.protobuf.Timestamp start = 1;
+  google.protobuf.Timestamp end = 2;
+  // value is the measurement. For windowed data it is an ArrayValue with one
+  // entry per step (unset entries allowed), matching the spec's windowed example.
+  Value value = 3;
+  repeated Exemplar exemplars = 4;
+}
+
+// MetricSeries is a set of measurements sharing an identity: name + type +
+// attributes (the QLSWG raw/intermediate/output metric row).
+message MetricSeries {
+  string name = 1;
+  MetricType type = 2;
+  KeyValueList attributes = 3;
+
+  // temporal_aggregation / group_aggregation record how the series was rolled up
+  // over time and across series (spec §Temporal/Group Aggregation); empty when raw.
+  string temporal_aggregation = 4;
+  string group_aggregation = 5;
+
+  // step is the window size when points carry array values; zero for raw series.
+  google.protobuf.Duration step = 6;
+  // temporal_boundaries holds explicit window edges for non-normal calendar or
+  // timezone stepping (spec §Temporal Boundaries).
+  repeated google.protobuf.Timestamp temporal_boundaries = 7;
+
+  repeated MetricPoint points = 8;
+}
+
+// Metrics is a collection of series (a query result payload).
+message Metrics {
+  repeated MetricSeries series = 1;
+}

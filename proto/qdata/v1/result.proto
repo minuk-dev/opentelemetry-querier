@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package opentelemetry.querier.qdata.v1;
+
+import "qdata/v1/logs.proto";
+import "qdata/v1/metrics.proto";
+import "qdata/v1/query.proto";
+import "qdata/v1/spans.proto";
+
+// NotificationSeverity classifies a side-channel notification.
+enum NotificationSeverity {
+  NOTIFICATION_SEVERITY_UNSPECIFIED = 0;
+  NOTIFICATION_SEVERITY_INFO = 1;
+  NOTIFICATION_SEVERITY_WARNING = 2;
+  NOTIFICATION_SEVERITY_ERROR = 3;
+}
+
+// Notification is one side-channel message explaining a result (spec §Feedback
+// and Debugging / Side Channel Feedback). Example: a best-effort proxy warning
+// that a query was transpiled with differing rate/window semantics, or that a
+// raw cumulative counter was returned without a rate() function.
+message Notification {
+  NotificationSeverity severity = 1;
+  string code = 2;    // stable machine code, e.g. "counter_without_rate".
+  string message = 3; // human-readable explanation.
+  string source = 4;  // component that emitted it, e.g. "queryrewrite".
+}
+
+// Feedback is the side channel carried alongside a Result so a UI or API can
+// surface warnings without failing the query.
+message Feedback {
+  repeated Notification notifications = 1;
+}
+
+// Result is the standardized query response: one signal payload plus the
+// feedback side channel. A Dispatcher produces it from a backend response;
+// response-side Processors mutate it; the Acceptor serializes it to the client
+// wire format.
+message Result {
+  Signal signal = 1;
+  oneof data {
+    Metrics metrics = 2;
+    Logs logs = 3;
+    Spans spans = 4;
+  }
+  Feedback feedback = 5;
+}

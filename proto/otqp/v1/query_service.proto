@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+// Package opentelemetry.querier.otqp.v1 defines OTQP (OpenTelemetry Query
+// Protocol): the native query protocol of the querier, analogous to OTLP for
+// telemetry export. Where OTLP pushes telemetry, OTQP carries a qdata Query to
+// the querier and returns a qdata Result. It is served over both gRPC and HTTP
+// (protobuf or JSON body) by the default acceptor.
+package opentelemetry.querier.otqp.v1;
+
+import "qdata/v1/query.proto";
+import "qdata/v1/result.proto";
+
+// QueryRequest wraps a single qdata Query, following the OTLP convention of a
+// request envelope (cf. ExportTraceServiceRequest).
+message QueryRequest {
+  opentelemetry.querier.qdata.v1.Query query = 1;
+}
+
+// QueryResponse wraps the qdata Result, including its feedback side channel.
+message QueryResponse {
+  opentelemetry.querier.qdata.v1.Result result = 1;
+}
+
+// QueryService is the OTQP service.
+service QueryService {
+  // Query evaluates a single query (instant or range context) and returns one
+  // result.
+  rpc Query(QueryRequest) returns (QueryResponse);
+
+  // QueryStream evaluates a streaming-context query, emitting one QueryResponse
+  // per flushed window (spec §Contexts / Streaming).
+  rpc QueryStream(QueryRequest) returns (stream QueryResponse);
+}

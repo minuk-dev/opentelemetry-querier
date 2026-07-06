@@ -1,0 +1,22 @@
+version: v2
+modules:
+  - path: proto
+lint:
+  use:
+    - STANDARD
+  except:
+    # Our proto files live under proto/qdata/v1 rather than a directory that
+    # mirrors the full package (opentelemetry/querier/qdata/v1); keep the tree
+    # shallow.
+    - PACKAGE_DIRECTORY_MATCH
+    # The zero value of QueryContext (INSTANT) and MatchOp (EQUAL) is a
+    # deliberate, meaningful default rather than an "unspecified" sentinel.
+    - ENUM_ZERO_VALUE_SUFFIX
+    # OTQP reuses one QueryRequest/QueryResponse envelope across the unary and
+    # streaming RPCs, matching the OTLP export-service convention.
+    - RPC_REQUEST_RESPONSE_UNIQUE
+    - RPC_REQUEST_STANDARD_NAME
+    - RPC_RESPONSE_STANDARD_NAME
+breaking:
+  use:
+    - FILE

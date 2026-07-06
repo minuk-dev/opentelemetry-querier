@@ -1,0 +1,67 @@
+syntax = "proto3";
+
+// Package opentelemetry.querier.qdata.v1 is the standardized query & result
+// model (qdata) that flows through the querier pipeline: the equivalent of the
+// opentelemetry-collector pdata, generated from protobuf so it doubles as a
+// cross-language wire format / intermediate representation (CNCF QLSWG spec
+// §4.3 Commoditization with IR).
+package opentelemetry.querier.qdata.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+// DataType enumerates the QLSWG standard data types (spec §Data Types).
+enum DataType {
+  DATA_TYPE_UNSPECIFIED = 0;
+  DATA_TYPE_DOUBLE = 1;    // IEEE-754 float64, the observability default.
+  DATA_TYPE_INT = 2;       // signed int64.
+  DATA_TYPE_UINT = 3;      // unsigned int64 (profiles, 64-bit addresses).
+  DATA_TYPE_STRING = 4;    // UTF-8.
+  DATA_TYPE_BYTES = 5;     // opaque binary.
+  DATA_TYPE_BOOL = 6;
+  DATA_TYPE_TIMESTAMP = 7; // SQL-style timestamp.
+  DATA_TYPE_DURATION = 8;  // ISO-8601 / SQL INTERVAL.
+  DATA_TYPE_MAP = 9;
+  DATA_TYPE_ARRAY = 10;
+  DATA_TYPE_JSON = 11;     // wide events / structured bodies.
+}
+
+// Value is a tagged union over the QLSWG data types (spec §Data Types). A null /
+// absent measurement (e.g. an empty windowed step) is an unset oneof.
+message Value {
+  oneof value {
+    double double_value = 1;
+    sint64 int_value = 2;
+    uint64 uint_value = 3;
+    string string_value = 4;
+    bytes bytes_value = 5;
+    bool bool_value = 6;
+    google.protobuf.Timestamp timestamp_value = 7;
+    google.protobuf.Duration duration_value = 8;
+    KeyValueList map_value = 9;
+    ArrayValue array_value = 10;
+    // Raw JSON text; kept as a string so backends with real columns can
+    // intercept JSON-path access instead of serializing (spec §JSON Types).
+    string json_value = 11;
+  }
+}
+
+// ArrayValue holds an ordered list of values, used for windowed metric points so
+// densely populated series can be processed as vectors (spec §3.1 Value).
+message ArrayValue {
+  repeated Value values = 1;
+}
+
+// KeyValue is one attribute entry.
+message KeyValue {
+  string key = 1;
+  Value value = 2;
+}
+
+// KeyValueList is the flattened attribute map (spec §Attributes): the OTel
+// resource, instrumentation scope and attribute collections merged into a single
+// ordered set. Ordering is preserved (repeated, not map) to keep the spec's open
+// question about attribute ordering answerable and to build stable fingerprints.
+message KeyValueList {
+  repeated KeyValue values = 1;
+}

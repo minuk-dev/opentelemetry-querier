@@ -1,0 +1,64 @@
+# Runtime configuration for the OpenTelemetry Querier distribution.
+#
+# Layout mirrors the opentelemetry-collector: declare component instances under
+# acceptors / processors / dispatchers (keyed by component ID, "type" or
+# "type/name"), then wire them into named pipelines under service.pipelines.
+#
+# This is the RUNTIME layer. Which component *types* are available here is fixed
+# at build time by builder.yaml.
+#
+#   Client -> otqp acceptor -> [processors] -> prometheus dispatcher -> storage
+#             (results flow back out through the processors in reverse)
+
+acceptors:
+  # Default acceptor: OpenTelemetry Query Protocol over gRPC and HTTP.
+  otqp:
+    grpc_endpoint: "0.0.0.0:4327"
+    http_endpoint: "0.0.0.0:4328"
+
+processors:
+  # Gateway: bearer auth + per-tenant rate limiting. Runs first.
+  authratelimit:
+    require_bearer: true
+    tokens:
+      - "dev-token"
+    requests_per_second: 50
+    burst: 100
+    per_tenant: true
+
+  # Tenant control: resolve X-Scope-OrgID and register an isolation matcher.
+  tenant:
+    header: "X-Scope-OrgID"
+    default: "anonymous"
+    required: false
+    enforce_label: "tenant_id"
+
+  # Query transformation: inject enforced label matchers into the PromQL AST.
+  queryrewrite:
+    enforce_labels:
+      - name: "tenant_id"
+        from_tenant: true
+
+  # Response transformation: drop internal labels, mask secrets, warn on raw
+  # cumulative counters returned without rate().
+  responsefilter:
+    drop_labels:
+      - "__internal__"
+    mask_labels:
+      - "user_email"
+    mask_with: "***"
+    warn_counter_without_rate: true
+
+dispatchers:
+  # Storage backend: an upstream Prometheus-compatible query API.
+  prometheus:
+    endpoint: "http://localhost:9090"
+    tenant_header: "X-Scope-OrgID"
+    timeout: 30s
+
+service:
+  pipelines:
+    query/default:
+      acceptors: [otqp]
+      processors: [authratelimit, tenant, queryrewrite, responsefilter]
+      dispatchers: [prometheus]

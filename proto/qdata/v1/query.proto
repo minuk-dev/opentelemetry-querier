@@ -1,0 +1,92 @@
+syntax = "proto3";
+
+package opentelemetry.querier.qdata.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+// Signal is the telemetry signal a query targets (spec §Data Models). The model
+// is multi-signal so processors and dispatchers can behave differently per
+// signal.
+enum Signal {
+  SIGNAL_UNSPECIFIED = 0;
+  SIGNAL_METRICS = 1;
+  SIGNAL_LOGS = 2; // logs + events + wide events (spec §4.0).
+  SIGNAL_SPANS = 3;
+  SIGNAL_PROFILES = 4;
+}
+
+// QueryContext is the evaluation context (spec §Selection / §Contexts). The same
+// DSL text is reusable across contexts; time range and step live outside the DSL
+// per the spec's recommendation to avoid requiring timestamps in the syntax.
+enum QueryContext {
+  QUERY_CONTEXT_INSTANT = 0;   // single value per series (Prometheus /query, alerting).
+  QUERY_CONTEXT_RANGE = 1;     // windowed values Start..End at Step (/query_range).
+  QUERY_CONTEXT_STREAMING = 2; // unbounded stream windowed at Step.
+}
+
+// TimeRange is a query time window. Per the spec, Start is inclusive and End
+// inclusive by default; the *_exclusive flags allow the (start, end] event
+// convention.
+message TimeRange {
+  google.protobuf.Timestamp start = 1;
+  google.protobuf.Timestamp end = 2;
+  bool start_exclusive = 3;
+  bool end_exclusive = 4;
+}
+
+// Modifier captures out-of-range fetch adjustments (spec §Out of Range
+// Modifiers).
+message Modifier {
+  // offset shifts the whole window into the past for period-over-period
+  // comparison (Prometheus `offset`).
+  google.protobuf.Duration offset = 1;
+  // lookback is the largest range-selector / sliding window; the dispatcher
+  // extends Start backwards by this much so charts are complete.
+  google.protobuf.Duration lookback = 2;
+}
+
+// MatchOp is a label matcher operator (mirrors PromQL / spec equi-join filters).
+enum MatchOp {
+  MATCH_OP_EQUAL = 0;
+  MATCH_OP_NOT_EQUAL = 1;
+  MATCH_OP_REGEXP = 2;
+  MATCH_OP_NOT_REGEXP = 3;
+}
+
+// LabelMatcher is a single attribute predicate to enforce on a query.
+message LabelMatcher {
+  string name = 1;
+  MatchOp op = 2;
+  string value = 3;
+}
+
+// HeaderValues wraps the repeated values of one HTTP header (proto3 maps cannot
+// have repeated values directly).
+message HeaderValues {
+  repeated string values = 1;
+}
+
+// Query is the standardized, DSL-agnostic representation of an incoming query.
+// An Acceptor produces it, Processors mutate it, a Dispatcher renders it to a
+// concrete backend request. expr retains the source DSL so a best-effort proxy
+// (spec §4.1) can transpile without a full IR.
+message Query {
+  Signal signal = 1;
+  QueryContext context = 2;
+  TimeRange range = 3;
+  google.protobuf.Duration step = 4;
+  Modifier modifier = 5;
+
+  string expr = 6;    // source DSL text (PromQL for the Prometheus acceptor).
+  string dialect = 7; // DSL name of expr, e.g. "promql".
+
+  string tenant_id = 8; // resolved tenant; empty means unresolved.
+
+  // enforced_matchers are additional label matchers to inject into expr, kept
+  // separate so the query-rewrite processor can weave them into the DSL AST.
+  repeated LabelMatcher enforced_matchers = 9;
+
+  map<string, HeaderValues> header = 10; // inbound request headers.
+  map<string, string> metadata = 11;     // processor-to-processor hints.
+}

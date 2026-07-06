@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package opentelemetry.querier.qdata.v1;
+
+import "google/protobuf/timestamp.proto";
+import "qdata/v1/common.proto";
+
+// Severity follows the application-level (not full syslog) set the spec settles
+// on for logs/events (spec §4.0 Severity). Wide events without a severity
+// default to INFO.
+enum Severity {
+  SEVERITY_UNSPECIFIED = 0;
+  SEVERITY_TRACE = 1;
+  SEVERITY_DEBUG = 2;
+  SEVERITY_INFO = 3;
+  SEVERITY_WARN = 4;
+  SEVERITY_ERROR = 5;
+  SEVERITY_FATAL = 6;
+}
+
+// LogRecord unifies unstructured logs, structured logs, events and wide events
+// into one model (spec §4.0). Structured bodies are addressed as JSON so
+// backends with real columns can intercept JSON-path access rather than
+// serialize.
+message LogRecord {
+  google.protobuf.Timestamp start = 1;
+  google.protobuf.Timestamp end = 2;
+  Severity severity = 3;
+
+  // body is the log body: a string Value for unstructured lines, a JSON Value
+  // for structured logs / wide events.
+  Value body = 4;
+
+  string trace_id = 5;
+  string span_id = 6;
+
+  string fingerprint = 7; // groups similar records (spec §Fingerprint).
+  double sampling = 8;    // sample ratio in [0,1]; 1 means fully sampled.
+
+  KeyValueList attributes = 9;
+}
+
+// Logs is a collection of records (a query result payload).
+message Logs {
+  repeated LogRecord records = 1;
+}

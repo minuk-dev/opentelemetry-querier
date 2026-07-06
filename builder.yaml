@@ -1,0 +1,26 @@
+# Builder manifest (analogous to the opentelemetry-collector-builder / ocb
+# manifest). It selects which components are compiled into the distribution.
+# Run `go run ./cmd/builder --config builder.yaml` to (re)generate the
+# distribution's main.go and components.go under dist.output_path.
+#
+# This is the BUILD-TIME layer. The RUNTIME layer (which instances to create and
+# how to wire them into pipelines) lives in config.yaml.
+
+dist:
+  name: querier
+  description: OpenTelemetry Querier default distribution
+  module: github.com/minuk-dev/opentelemetry-querier
+  version: dev
+  output_path: ./cmd/querier
+
+acceptors:
+  - gomod: github.com/minuk-dev/opentelemetry-querier/acceptor/otqp
+
+processors:
+  - gomod: github.com/minuk-dev/opentelemetry-querier/processor/authratelimit
+  - gomod: github.com/minuk-dev/opentelemetry-querier/processor/tenant
+  - gomod: github.com/minuk-dev/opentelemetry-querier/processor/queryrewrite
+  - gomod: github.com/minuk-dev/opentelemetry-querier/processor/responsefilter
+
+dispatchers:
+  - gomod: github.com/minuk-dev/opentelemetry-querier/dispatcher/promdispatcher

@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package opentelemetry.querier.qdata.v1;
+
+import "google/protobuf/timestamp.proto";
+import "qdata/v1/common.proto";
+
+// SpanKind mirrors the OTel span kind (spec §5 Spans).
+enum SpanKind {
+  SPAN_KIND_UNSPECIFIED = 0;
+  SPAN_KIND_INTERNAL = 1;
+  SPAN_KIND_SERVER = 2;
+  SPAN_KIND_CLIENT = 3;
+  SPAN_KIND_PRODUCER = 4;
+  SPAN_KIND_CONSUMER = 5;
+}
+
+// SpanEvent is a timestamped event within a span.
+message SpanEvent {
+  google.protobuf.Timestamp timestamp = 1;
+  string name = 2;
+  KeyValueList attributes = 3;
+}
+
+// SpanLink references another span, enabling the property-graph modeling in
+// spec §5.3.
+message SpanLink {
+  string trace_id = 1;
+  string span_id = 2;
+  KeyValueList attributes = 3;
+}
+
+// Span keeps the formally-defined OTel span fields as columns rather than
+// smooshing them into a log body (spec §5). Duration is derived from start/end.
+message Span {
+  google.protobuf.Timestamp start = 1;
+  google.protobuf.Timestamp end = 2;
+
+  string trace_id = 3;
+  string span_id = 4;
+  string parent_id = 5;
+
+  SpanKind kind = 6;
+  string name = 7;
+
+  int64 status_code = 8;
+  string status_message = 9;
+
+  repeated SpanEvent events = 10;
+  repeated SpanLink links = 11;
+
+  double sampling = 12;
+  KeyValueList attributes = 13;
+}
+
+// Spans is a collection of spans (a query result payload).
+message Spans {
+  repeated Span spans = 1;
+}
