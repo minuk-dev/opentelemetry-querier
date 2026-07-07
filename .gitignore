@@ -1,10 +1,6 @@
 # Binaries
 /bin/
 *.exe
-querier
-/builder
-!cmd/querier/
-!cmd/builder/
 
 # Test / build artifacts
 *.out
