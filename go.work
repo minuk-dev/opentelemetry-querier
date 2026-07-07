@@ -1,0 +1,21 @@
+go 1.25.4
+
+use (
+	./acceptor
+	./acceptor/otqp
+	./cmd/builder
+	./cmd/querier
+	./component
+	./dispatcher
+	./dispatcher/promdispatcher
+	./gen
+	./pipeline
+	./processor
+	./processor/authratelimit
+	./processor/queryrewrite
+	./processor/responsefilter
+	./processor/tenant
+	./qdata
+	./qerror
+	./querier
+)

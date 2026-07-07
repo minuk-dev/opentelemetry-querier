@@ -159,8 +159,34 @@ cmd/builder/           the ocb-style builder (reads builder.yaml)
 cmd/querier/           the generated default distribution
 ```
 
+## Multi-module workspace
+
+Like the opentelemetry-collector, **every component is its own Go module** — so a
+`builder.yaml` can select components by `gomod` path and a distribution depends
+only on what it uses. The core packages (`component`, `qdata`, `qerror`,
+`pipeline`, the `acceptor` / `processor` / `dispatcher` category interfaces,
+`querier`, `gen`) and each concrete component (`acceptor/otqp`,
+`processor/tenant`, …) and the distribution (`cmd/querier`) are separate modules,
+tied together for local development by a root `go.work`.
+
+Because there is no single root module, build/test/lint run per module:
+
+```console
+$ for m in $(find . -name go.mod -not -path './.git/*'); do (cd "$(dirname "$m")" && go build ./... && go test ./...); done
+```
+
+Config is decoded with `mapstructure` (snake_case keys), matching the collector's
+`confmap`; OTQP's JSON wire format stays camelCase via protojson.
+
+Lint runs the full golangci-lint linter set (all non-deprecated linters,
+`depguard` enabled) — see `.golangci.yml`.
+
 ## Status
 
 Early scaffold. The metrics signal is wired end to end against Prometheus; logs,
 spans and profiles exist in `qdata` but are not yet dispatched. Streaming context
 returns a single window for now.
+
+## License
+
+[Apache License 2.0](LICENSE).

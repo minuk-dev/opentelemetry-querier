@@ -7,9 +7,18 @@ package component
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
+)
+
+var (
+	// typeNameRegexp constrains component type names to lowercase alphanumerics
+	// and underscores, starting with a letter (matches the collector's rule).
+	typeNameRegexp = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+	// errInvalidType is returned when a component type name is malformed.
+	errInvalidType = errors.New("component: invalid type name")
 )
 
 // Component is the lifecycle contract shared by every querier component,
@@ -38,6 +47,7 @@ func (f StartFunc) Start(ctx context.Context, host Host) error {
 	if f == nil {
 		return nil
 	}
+
 	return f(ctx, host)
 }
 
@@ -49,11 +59,12 @@ func (f ShutdownFunc) Shutdown(ctx context.Context) error {
 	if f == nil {
 		return nil
 	}
+
 	return f(ctx)
 }
 
 // Config is the marker type for a component's configuration, matching
-// component.Config. Concrete configs are plain structs decoded from YAML.
+// component.Config. Concrete configs are plain structs decoded from the config.
 type Config any
 
 // Validator is optionally implemented by a Config to validate itself after
@@ -64,9 +75,16 @@ type Validator interface {
 
 // ValidateConfig runs Config.Validate if implemented.
 func ValidateConfig(cfg Config) error {
-	if v, ok := cfg.(Validator); ok {
-		return v.Validate()
+	validator, ok := cfg.(Validator)
+	if !ok {
+		return nil
 	}
+
+	err := validator.Validate()
+	if err != nil {
+		return fmt.Errorf("component: validate config: %w", err)
+	}
+
 	return nil
 }
 
@@ -94,44 +112,34 @@ type Settings struct {
 type Factory interface {
 	// Type returns the component type this factory produces.
 	Type() Type
-	// CreateDefaultConfig returns a fresh, fully-defaulted config value that YAML
-	// is decoded into.
+	// CreateDefaultConfig returns a fresh, fully-defaulted config value that the
+	// config is decoded into.
 	CreateDefaultConfig() Config
-
-	unexportedFactory()
 }
-
-// BaseFactory is embedded by category factories to satisfy the sealed Factory
-// interface; it is not used directly.
-type BaseFactory struct{}
-
-func (BaseFactory) unexportedFactory() {}
-
-// typeRegexp constrains component type names, matching the collector's rule
-// (lowercase alphanumerics and underscores, starting with a letter).
-var typeRegexp = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 // Type is a validated component type name (e.g. "otqp", "queryrewrite").
 type Type struct {
 	name string
 }
 
-// String returns the type name.
-func (t Type) String() string { return t.name }
-
 // NewType validates and constructs a Type.
 func NewType(name string) (Type, error) {
-	if !typeRegexp.MatchString(name) {
-		return Type{}, fmt.Errorf("invalid component type %q: must match %s", name, typeRegexp.String())
+	if !typeNameRegexp.MatchString(name) {
+		return Type{}, fmt.Errorf("%w %q: must match %s", errInvalidType, name, typeNameRegexp.String())
 	}
+
 	return Type{name: name}, nil
 }
 
 // MustNewType panics on an invalid type; use it for package-level factory types.
 func MustNewType(name string) Type {
-	t, err := NewType(name)
+	typ, err := NewType(name)
 	if err != nil {
 		panic(err)
 	}
-	return t
+
+	return typ
 }
+
+// String returns the type name.
+func (t Type) String() string { return t.name }

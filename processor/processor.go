@@ -6,11 +6,15 @@ package processor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/minuk-dev/opentelemetry-querier/component"
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
 )
+
+// errDuplicateFactory is returned when two factories share a type.
+var errDuplicateFactory = errors.New("processor: duplicate factory type")
 
 // Processor is a single pipeline stage. The pipeline calls ProcessQuery on every
 // processor in order on the request path, then (after the dispatcher runs)
@@ -34,9 +38,16 @@ type Processor interface {
 // processor can embed it and override only what it needs.
 type Base struct{}
 
-func (Base) Start(context.Context, component.Host) error                      { return nil }
-func (Base) Shutdown(context.Context) error                                   { return nil }
-func (Base) ProcessQuery(context.Context, *qdata.Query) error                 { return nil }
+// Start is a no-op.
+func (Base) Start(context.Context, component.Host) error { return nil }
+
+// Shutdown is a no-op.
+func (Base) Shutdown(context.Context) error { return nil }
+
+// ProcessQuery is a no-op.
+func (Base) ProcessQuery(context.Context, *qdata.Query) error { return nil }
+
+// ProcessResult is a no-op.
 func (Base) ProcessResult(context.Context, *qdata.Query, *qdata.Result) error { return nil }
 
 // Factory creates Processors of a single type (cf. processor.Factory).
@@ -48,10 +59,13 @@ type Factory interface {
 }
 
 // CreateProcessorFunc is the function form of Factory.CreateProcessor.
-type CreateProcessorFunc func(ctx context.Context, set component.Settings, cfg component.Config) (Processor, error)
+type CreateProcessorFunc func(
+	ctx context.Context,
+	set component.Settings,
+	cfg component.Config,
+) (Processor, error)
 
 type factory struct {
-	component.BaseFactory
 	typ           component.Type
 	defaultConfig func() component.Config
 	createFunc    CreateProcessorFunc
@@ -60,7 +74,11 @@ type factory struct {
 func (f *factory) Type() component.Type                  { return f.typ }
 func (f *factory) CreateDefaultConfig() component.Config { return f.defaultConfig() }
 
-func (f *factory) CreateProcessor(ctx context.Context, set component.Settings, cfg component.Config) (Processor, error) {
+func (f *factory) CreateProcessor(
+	ctx context.Context,
+	set component.Settings,
+	cfg component.Config,
+) (Processor, error) {
 	return f.createFunc(ctx, set, cfg)
 }
 
@@ -72,11 +90,14 @@ func NewFactory(typ component.Type, defaultConfig func() component.Config, creat
 // MakeFactoryMap indexes factories by type, erroring on duplicates.
 func MakeFactoryMap(factories ...Factory) (map[component.Type]Factory, error) {
 	out := make(map[component.Type]Factory, len(factories))
+
 	for _, f := range factories {
 		if _, dup := out[f.Type()]; dup {
-			return nil, fmt.Errorf("duplicate processor factory %q", f.Type())
+			return nil, fmt.Errorf("%w %q", errDuplicateFactory, f.Type())
 		}
+
 		out[f.Type()] = f
 	}
+
 	return out, nil
 }

@@ -13,6 +13,7 @@ import (
 // Code is a transport-agnostic error class, loosely aligned with gRPC codes.
 type Code int
 
+// Error classes, loosely aligned with gRPC codes.
 const (
 	CodeInternal Code = iota
 	CodeInvalidArgument
@@ -40,6 +41,8 @@ func New(code Code, format string, args ...any) *Error {
 // HTTPStatus maps a Code onto an HTTP status code.
 func (e *Error) HTTPStatus() int {
 	switch e.Code {
+	case CodeInternal:
+		return http.StatusInternalServerError
 	case CodeInvalidArgument:
 		return http.StatusBadRequest
 	case CodeUnauthenticated:
@@ -59,9 +62,10 @@ func (e *Error) HTTPStatus() int {
 
 // CodeOf extracts the Code from an error, defaulting to CodeInternal.
 func CodeOf(err error) Code {
-	var e *Error
-	if errors.As(err, &e) {
-		return e.Code
+	var codedErr *Error
+	if errors.As(err, &codedErr) {
+		return codedErr.Code
 	}
+
 	return CodeInternal
 }

@@ -15,19 +15,23 @@ import (
 // Config configures response reshaping.
 type Config struct {
 	// DropLabels are attribute keys removed from every returned series/record.
-	DropLabels []string `yaml:"drop_labels"`
+	DropLabels []string `mapstructure:"drop_labels"`
 	// MaskLabels are attribute keys whose values are replaced with MaskWith.
-	MaskLabels []string `yaml:"mask_labels"`
+	MaskLabels []string `mapstructure:"mask_labels"`
 	// MaskWith is the replacement value for masked attributes.
-	MaskWith string `yaml:"mask_with"`
+	MaskWith string `mapstructure:"mask_with"`
 	// WarnCounterWithoutRate emits a feedback notification when a raw cumulative
 	// counter is returned (spec: warn that data reflects raw counts).
-	WarnCounterWithoutRate bool `yaml:"warn_counter_without_rate"`
+	WarnCounterWithoutRate bool `mapstructure:"warn_counter_without_rate"`
 }
+
+// typeStr is the component type name.
+const typeStr = "responsefilter"
 
 // Processor reshapes results.
 type Processor struct {
 	processor.Base
+
 	cfg Config
 }
 
@@ -36,33 +40,34 @@ func New(cfg Config) *Processor {
 	if cfg.MaskWith == "" {
 		cfg.MaskWith = "***"
 	}
-	return &Processor{cfg: cfg}
-}
 
-func (p *Processor) Name() string { return "responsefilter" }
+	return &Processor{Base: processor.Base{}, cfg: cfg}
+}
 
 // ProcessResult applies drop/mask to every signal's attributes and emits
 // feedback where configured.
-func (p *Processor) ProcessResult(_ context.Context, _ *qdata.Query, r *qdata.Result) error {
+func (p *Processor) ProcessResult(_ context.Context, _ *qdata.Query, result *qdata.Result) error {
 	switch {
-	case r.GetMetrics() != nil:
-		for _, s := range r.GetMetrics().GetSeries() {
-			p.scrub(s.GetAttributes())
-			if p.cfg.WarnCounterWithoutRate && s.GetType() == qdata.MetricCumulativeCounter {
-				qdata.Warn(r, "counter_without_rate",
-					"series '"+s.GetName()+"' is a raw cumulative counter; apply rate() for per-second values",
-					p.Name())
+	case result.GetMetrics() != nil:
+		for _, series := range result.GetMetrics().GetSeries() {
+			p.scrub(series.GetAttributes())
+
+			if p.cfg.WarnCounterWithoutRate && series.GetType() == qdata.MetricCumulativeCounter {
+				qdata.Warn(result, "counter_without_rate",
+					"series '"+series.GetName()+"' is a raw cumulative counter; apply rate() for per-second values",
+					typeStr)
 			}
 		}
-	case r.GetLogs() != nil:
-		for _, rec := range r.GetLogs().GetRecords() {
-			p.scrub(rec.GetAttributes())
+	case result.GetLogs() != nil:
+		for _, record := range result.GetLogs().GetRecords() {
+			p.scrub(record.GetAttributes())
 		}
-	case r.GetSpans() != nil:
-		for _, sp := range r.GetSpans().GetSpans() {
-			p.scrub(sp.GetAttributes())
+	case result.GetSpans() != nil:
+		for _, span := range result.GetSpans().GetSpans() {
+			p.scrub(span.GetAttributes())
 		}
 	}
+
 	return nil
 }
 
@@ -70,12 +75,14 @@ func (p *Processor) scrub(attrs *qdata.KeyValueList) {
 	if attrs == nil {
 		return
 	}
-	for _, k := range p.cfg.DropLabels {
-		qdata.AttrDelete(attrs, k)
+
+	for _, key := range p.cfg.DropLabels {
+		qdata.AttrDelete(attrs, key)
 	}
-	for _, k := range p.cfg.MaskLabels {
-		if _, ok := qdata.AttrGet(attrs, k); ok {
-			qdata.AttrPutString(attrs, k, p.cfg.MaskWith)
+
+	for _, key := range p.cfg.MaskLabels {
+		if _, ok := qdata.AttrGet(attrs, key); ok {
+			qdata.AttrPutString(attrs, key, p.cfg.MaskWith)
 		}
 	}
 }

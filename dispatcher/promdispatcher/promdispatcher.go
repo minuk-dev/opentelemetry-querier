@@ -24,19 +24,34 @@ import (
 // DefaultTenantHeader is forwarded to the upstream to scope multi-tenant reads.
 const DefaultTenantHeader = "X-Scope-OrgID"
 
+// defaultTimeout bounds each upstream request when the config leaves it unset.
+const defaultTimeout = 30 * time.Second
+
+const (
+	// nanosPerSecond converts between Prometheus float seconds and Go nanos.
+	nanosPerSecond = 1e9
+	// floatBitSize is the bit size used for float parsing/formatting.
+	floatBitSize = 64
+	// fullPrecision asks strconv to use the minimal digits round-tripping the value.
+	fullPrecision = -1
+	// sampleFields is the length of a Prometheus [timestamp, value] sample pair.
+	sampleFields = 2
+)
+
 // Config configures the upstream Prometheus.
 type Config struct {
 	// Endpoint is the upstream base URL, e.g. http://localhost:9090.
-	Endpoint string `yaml:"endpoint"`
+	Endpoint string `mapstructure:"endpoint"`
 	// TenantHeader is the header used to forward the resolved tenant id.
-	TenantHeader string `yaml:"tenant_header"`
+	TenantHeader string `mapstructure:"tenant_header"`
 	// Timeout bounds each upstream request; defaults to 30s.
-	Timeout time.Duration `yaml:"timeout"`
+	Timeout time.Duration `mapstructure:"timeout"`
 }
 
 // Dispatcher talks to an upstream Prometheus.
 type Dispatcher struct {
 	dispatcher.Base
+
 	cfg    Config
 	client *http.Client
 }
@@ -46,75 +61,90 @@ func New(cfg Config) *Dispatcher {
 	if cfg.TenantHeader == "" {
 		cfg.TenantHeader = DefaultTenantHeader
 	}
+
 	if cfg.Timeout == 0 {
-		cfg.Timeout = 30 * time.Second
+		cfg.Timeout = defaultTimeout
 	}
-	return &Dispatcher{cfg: cfg, client: &http.Client{Timeout: cfg.Timeout}}
+
+	return &Dispatcher{
+		Base:   dispatcher.Base{},
+		cfg:    cfg,
+		client: &http.Client{Timeout: cfg.Timeout},
+	}
 }
 
-func (d *Dispatcher) Name() string { return "prometheus" }
-
 // Dispatch executes the query and returns a metrics result.
-func (d *Dispatcher) Dispatch(ctx context.Context, q *qdata.Query) (*qdata.Result, error) {
-	endpoint, form := d.buildRequest(q)
+func (d *Dispatcher) Dispatch(ctx context.Context, query *qdata.Query) (*qdata.Result, error) {
+	endpoint, form := d.buildRequest(query)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, qerror.New(qerror.CodeInternal, "promdispatcher: build request: %v", err)
 	}
+
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	if q.GetTenantId() != "" {
-		req.Header.Set(d.cfg.TenantHeader, q.GetTenantId())
+
+	if query.GetTenantId() != "" {
+		req.Header.Set(d.cfg.TenantHeader, query.GetTenantId())
 	}
 
 	resp, err := d.client.Do(req)
 	if err != nil {
 		return nil, qerror.New(qerror.CodeUnavailable, "promdispatcher: upstream request: %v", err)
 	}
+
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, qerror.New(qerror.CodeUnavailable, "promdispatcher: read upstream: %v", err)
 	}
+
 	if resp.StatusCode != http.StatusOK {
-		return nil, qerror.New(qerror.CodeUnavailable, "promdispatcher: upstream status %d: %s", resp.StatusCode, string(body))
+		return nil, qerror.New(
+			qerror.CodeUnavailable,
+			"promdispatcher: upstream status %d: %s", resp.StatusCode, string(body),
+		)
 	}
 
 	return parseResponse(body)
 }
 
 // buildRequest picks the instant vs range endpoint and encodes the form.
-func (d *Dispatcher) buildRequest(q *qdata.Query) (string, url.Values) {
+func (d *Dispatcher) buildRequest(query *qdata.Query) (string, url.Values) {
 	base := strings.TrimRight(d.cfg.Endpoint, "/")
 	form := url.Values{}
-	form.Set("query", q.GetExpr())
+	form.Set("query", query.GetExpr())
 
-	if q.GetContext() == qdata.ContextRange {
-		form.Set("start", formatTime(q.GetRange().GetStart().AsTime()))
-		form.Set("end", formatTime(q.GetRange().GetEnd().AsTime()))
-		form.Set("step", formatStep(q.GetStep().AsDuration()))
+	if query.GetContext() == qdata.ContextRange {
+		form.Set("start", formatTime(query.GetRange().GetStart().AsTime()))
+		form.Set("end", formatTime(query.GetRange().GetEnd().AsTime()))
+		form.Set("step", formatStep(query.GetStep().AsDuration()))
+
 		return base + "/api/v1/query_range", form
 	}
 
 	// Instant: evaluate at the range end, or now when unset.
-	evalAt := q.GetRange().GetEnd().AsTime()
+	evalAt := query.GetRange().GetEnd().AsTime()
 	if evalAt.IsZero() || evalAt.Unix() <= 0 {
 		evalAt = time.Now()
 	}
+
 	form.Set("time", formatTime(evalAt))
+
 	return base + "/api/v1/query", form
 }
 
-func formatTime(t time.Time) string {
-	return strconv.FormatFloat(float64(t.UnixNano())/1e9, 'f', -1, 64)
+func formatTime(instant time.Time) string {
+	return strconv.FormatFloat(float64(instant.UnixNano())/nanosPerSecond, 'f', fullPrecision, floatBitSize)
 }
 
-func formatStep(d time.Duration) string {
-	if d <= 0 {
-		d = time.Minute
+func formatStep(step time.Duration) string {
+	if step <= 0 {
+		step = time.Minute
 	}
-	return strconv.FormatFloat(d.Seconds(), 'f', -1, 64)
+
+	return strconv.FormatFloat(step.Seconds(), 'f', fullPrecision, floatBitSize)
 }
 
 // ---- Prometheus JSON response model ----
@@ -140,82 +170,111 @@ type promSample struct {
 
 // parseResponse converts a Prometheus JSON body into a qdata metrics Result.
 func parseResponse(body []byte) (*qdata.Result, error) {
-	var pr promResponse
-	if err := json.Unmarshal(body, &pr); err != nil {
+	var resp promResponse
+
+	err := json.Unmarshal(body, &resp)
+	if err != nil {
 		return nil, qerror.New(qerror.CodeUnavailable, "promdispatcher: decode response: %v", err)
 	}
-	if pr.Status != "success" {
-		return nil, qerror.New(qerror.CodeInvalidArgument, "promdispatcher: upstream error (%s): %s", pr.ErrorType, pr.Error)
+
+	if resp.Status != "success" {
+		return nil, qerror.New(
+			qerror.CodeInvalidArgument,
+			"promdispatcher: upstream error (%s): %s", resp.ErrorType, resp.Error,
+		)
 	}
 
 	result := &qdata.Result{Signal: qdata.SignalMetrics}
 
-	switch pr.Data.ResultType {
+	switch resp.Data.ResultType {
 	case "vector", "matrix":
 		var samples []promSample
-		if err := json.Unmarshal(pr.Data.Result, &samples); err != nil {
-			return nil, qerror.New(qerror.CodeUnavailable, "promdispatcher: decode %s: %v", pr.Data.ResultType, err)
+
+		err := json.Unmarshal(resp.Data.Result, &samples)
+		if err != nil {
+			return nil, qerror.New(qerror.CodeUnavailable, "promdispatcher: decode %s: %v", resp.Data.ResultType, err)
 		}
+
 		result.Data = &qdatav1.Result_Metrics{Metrics: samplesToMetrics(samples)}
 	default:
 		// scalar/string results carry no series; return an empty metrics payload.
 		result.Data = &qdatav1.Result_Metrics{Metrics: &qdata.Metrics{}}
 	}
 
-	for _, w := range pr.Warnings {
-		qdata.Warn(result, "upstream_warning", w, "prometheus")
+	for _, warning := range resp.Warnings {
+		qdata.Warn(result, "upstream_warning", warning, "prometheus")
 	}
+
 	return result, nil
 }
 
 func samplesToMetrics(samples []promSample) *qdata.Metrics {
 	metrics := &qdata.Metrics{}
-	for _, s := range samples {
+
+	for _, sample := range samples {
+		// Prometheus does not report the metric type; per the QLSWG spec this is
+		// UNKNOWN rather than an assumed GAUGE.
 		series := &qdata.MetricSeries{
-			// Prometheus does not report the metric type; per the QLSWG spec this
-			// is UNKNOWN rather than an assumed GAUGE.
-			Type:       qdata.MetricUnknown,
-			Attributes: &qdata.KeyValueList{},
+			Name:                "",
+			Type:                qdata.MetricUnknown,
+			Attributes:          &qdata.KeyValueList{},
+			TemporalAggregation: "",
+			GroupAggregation:    "",
+			Step:                nil,
+			TemporalBoundaries:  nil,
+			Points:              nil,
 		}
-		for k, v := range s.Metric {
-			if k == "__name__" {
-				series.Name = v
+
+		for key, value := range sample.Metric {
+			if key == "__name__" {
+				series.Name = value
+
 				continue
 			}
-			qdata.AttrPutString(series.Attributes, k, v)
+
+			qdata.AttrPutString(series.Attributes, key, value)
 		}
-		if len(s.Value) == 2 {
-			if pt := sampleToPoint(s.Value); pt != nil {
-				series.Points = append(series.Points, pt)
+
+		if len(sample.Value) == sampleFields {
+			if point := sampleToPoint(sample.Value); point != nil {
+				series.Points = append(series.Points, point)
 			}
 		}
-		for _, val := range s.Values {
-			if pt := sampleToPoint(val); pt != nil {
-				series.Points = append(series.Points, pt)
+
+		for _, pair := range sample.Values {
+			if point := sampleToPoint(pair); point != nil {
+				series.Points = append(series.Points, point)
 			}
 		}
+
 		metrics.Series = append(metrics.Series, series)
 	}
+
 	return metrics
 }
 
 // sampleToPoint converts a [unixSeconds, "value"] pair into a MetricPoint.
 func sampleToPoint(pair []any) *qdata.MetricPoint {
-	if len(pair) != 2 {
+	if len(pair) != sampleFields {
 		return nil
 	}
-	tsFloat, ok := pair[0].(float64)
+
+	seconds, ok := pair[0].(float64)
 	if !ok {
 		return nil
 	}
-	str, ok := pair[1].(string)
+
+	raw, ok := pair[1].(string)
 	if !ok {
 		return nil
 	}
-	f, err := strconv.ParseFloat(str, 64)
+
+	parsed, err := strconv.ParseFloat(raw, floatBitSize)
 	if err != nil {
 		return nil
 	}
-	ts := timestamppb.New(time.Unix(0, int64(tsFloat*1e9)))
-	return &qdata.MetricPoint{Start: ts, End: ts, Value: qdata.Double(f)}
+
+	stamp := timestamppb.New(time.Unix(0, int64(seconds*nanosPerSecond)))
+
+	return &qdata.MetricPoint{Start: stamp, End: stamp, Value: qdata.Double(parsed), Exemplars: nil}
 }

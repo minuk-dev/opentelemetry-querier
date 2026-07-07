@@ -12,6 +12,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -35,10 +37,14 @@ const (
 	HTTPQueryPath = "/v1/query"
 )
 
+// readHeaderTimeout bounds how long the HTTP server waits for request headers
+// (mitigates Slowloris).
+const readHeaderTimeout = 10 * time.Second
+
 // Config configures the OTQP acceptor. An empty endpoint disables that transport.
 type Config struct {
-	GRPCEndpoint string `yaml:"grpc_endpoint"`
-	HTTPEndpoint string `yaml:"http_endpoint"`
+	GRPCEndpoint string `mapstructure:"grpc_endpoint"`
+	HTTPEndpoint string `mapstructure:"http_endpoint"`
 }
 
 // Acceptor serves OTQP over gRPC and/or HTTP.
@@ -56,36 +62,50 @@ func New(cfg Config, handler pipeline.Handler) *Acceptor {
 		cfg.GRPCEndpoint = DefaultGRPCEndpoint
 		cfg.HTTPEndpoint = DefaultHTTPEndpoint
 	}
-	return &Acceptor{cfg: cfg, handler: handler}
+
+	return &Acceptor{cfg: cfg, handler: handler, grpcServer: nil, httpServer: nil}
 }
 
-func (a *Acceptor) Name() string { return "otqp" }
-
 // Start binds the configured listeners and serves in the background.
-func (a *Acceptor) Start(_ context.Context, _ component.Host) error {
+func (a *Acceptor) Start(ctx context.Context, _ component.Host) error {
+	var listenConfig net.ListenConfig
+
 	if a.cfg.GRPCEndpoint != "" {
-		lis, err := net.Listen("tcp", a.cfg.GRPCEndpoint)
+		listener, err := listenConfig.Listen(ctx, "tcp", a.cfg.GRPCEndpoint)
 		if err != nil {
 			return fmt.Errorf("otqp: listen grpc %s: %w", a.cfg.GRPCEndpoint, err)
 		}
+
 		a.grpcServer = grpc.NewServer()
-		otqpv1.RegisterQueryServiceServer(a.grpcServer, &grpcService{handler: a.handler})
-		go func() { _ = a.grpcServer.Serve(lis) }()
+		otqpv1.RegisterQueryServiceServer(a.grpcServer, &grpcService{
+			UnimplementedQueryServiceServer: otqpv1.UnimplementedQueryServiceServer{},
+			handler:                         a.handler,
+		})
+
+		go func() { _ = a.grpcServer.Serve(listener) }()
 	}
 
 	if a.cfg.HTTPEndpoint != "" {
 		mux := http.NewServeMux()
 		mux.HandleFunc(HTTPQueryPath, a.handleHTTPQuery)
-		mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusOK)
+		mux.HandleFunc("/healthz", func(writer http.ResponseWriter, _ *http.Request) {
+			writer.WriteHeader(http.StatusOK)
 		})
-		a.httpServer = &http.Server{Addr: a.cfg.HTTPEndpoint, Handler: mux}
-		lis, err := net.Listen("tcp", a.cfg.HTTPEndpoint)
+
+		a.httpServer = &http.Server{
+			Addr:              a.cfg.HTTPEndpoint,
+			Handler:           mux,
+			ReadHeaderTimeout: readHeaderTimeout,
+		}
+
+		listener, err := listenConfig.Listen(ctx, "tcp", a.cfg.HTTPEndpoint)
 		if err != nil {
 			return fmt.Errorf("otqp: listen http %s: %w", a.cfg.HTTPEndpoint, err)
 		}
-		go func() { _ = a.httpServer.Serve(lis) }()
+
+		go func() { _ = a.httpServer.Serve(listener) }()
 	}
+
 	return nil
 }
 
@@ -94,9 +114,11 @@ func (a *Acceptor) Shutdown(ctx context.Context) error {
 	if a.httpServer != nil {
 		_ = a.httpServer.Shutdown(ctx)
 	}
+
 	if a.grpcServer != nil {
 		a.grpcServer.GracefulStop()
 	}
+
 	return nil
 }
 
@@ -104,6 +126,7 @@ func (a *Acceptor) Shutdown(ctx context.Context) error {
 
 type grpcService struct {
 	otqpv1.UnimplementedQueryServiceServer
+
 	handler pipeline.Handler
 }
 
@@ -112,21 +135,33 @@ func (s *grpcService) Query(ctx context.Context, req *otqpv1.QueryRequest) (*otq
 	if err != nil {
 		return nil, status.Error(grpcCode(err), err.Error())
 	}
+
 	return &otqpv1.QueryResponse{Result: result}, nil
 }
 
 // QueryStream evaluates a streaming-context query. The single-window MVP emits
 // one response; a future streaming dispatcher would emit one per flushed window.
-func (s *grpcService) QueryStream(req *otqpv1.QueryRequest, stream grpc.ServerStreamingServer[otqpv1.QueryResponse]) error {
+func (s *grpcService) QueryStream(
+	req *otqpv1.QueryRequest,
+	stream grpc.ServerStreamingServer[otqpv1.QueryResponse],
+) error {
 	result, err := s.handler.Handle(stream.Context(), req.GetQuery())
 	if err != nil {
 		return status.Error(grpcCode(err), err.Error())
 	}
-	return stream.Send(&otqpv1.QueryResponse{Result: result})
+
+	sendErr := stream.Send(&otqpv1.QueryResponse{Result: result})
+	if sendErr != nil {
+		return fmt.Errorf("otqp: send response: %w", sendErr)
+	}
+
+	return nil
 }
 
 func grpcCode(err error) codes.Code {
 	switch qerror.CodeOf(err) {
+	case qerror.CodeInternal:
+		return codes.Internal
 	case qerror.CodeInvalidArgument:
 		return codes.InvalidArgument
 	case qerror.CodeUnauthenticated:
@@ -148,84 +183,103 @@ func grpcCode(err error) codes.Code {
 
 // handleHTTPQuery serves OTQP/HTTP: POST HTTPQueryPath with a QueryRequest body
 // encoded as protobuf (application/x-protobuf) or JSON (application/json).
-func (a *Acceptor) handleHTTPQuery(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
+func (a *Acceptor) handleHTTPQuery(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost {
+		http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+
 		return
 	}
 
-	useJSON := isJSON(r.Header.Get("Content-Type"))
+	body, err := io.ReadAll(request.Body)
+	if err != nil {
+		http.Error(writer, "read body: "+err.Error(), http.StatusBadRequest)
+
+		return
+	}
+
+	useJSON := isJSON(request.Header.Get("Content-Type"))
+
 	req := &otqpv1.QueryRequest{}
 	if useJSON {
 		err = protojson.Unmarshal(body, req)
 	} else {
 		err = proto.Unmarshal(body, req)
 	}
+
 	if err != nil {
-		http.Error(w, "decode request: "+err.Error(), http.StatusBadRequest)
+		http.Error(writer, "decode request: "+err.Error(), http.StatusBadRequest)
+
 		return
 	}
 
 	// Carry inbound HTTP headers onto the query so downstream processors (auth,
 	// tenant) can read them.
-	injectHeaders(req.GetQuery(), r.Header)
+	injectHeaders(req.GetQuery(), request.Header)
 
-	result, herr := a.handler.Handle(r.Context(), req.GetQuery())
-	if herr != nil {
-		writeHTTPError(w, herr)
-		return
-	}
-
-	resp := &otqpv1.QueryResponse{Result: result}
-	var out []byte
-	if useJSON {
-		w.Header().Set("Content-Type", "application/json")
-		out, err = protojson.Marshal(resp)
-	} else {
-		w.Header().Set("Content-Type", "application/x-protobuf")
-		out, err = proto.Marshal(resp)
-	}
+	result, err := a.handler.Handle(request.Context(), req.GetQuery())
 	if err != nil {
-		http.Error(w, "encode response: "+err.Error(), http.StatusInternalServerError)
+		writeHTTPError(writer, err)
+
 		return
 	}
-	_, _ = w.Write(out)
+
+	writeResponse(writer, useJSON, &otqpv1.QueryResponse{Result: result})
 }
 
-func writeHTTPError(w http.ResponseWriter, err error) {
-	var qe *qerror.Error
-	if errors.As(err, &qe) {
-		http.Error(w, qe.Msg, qe.HTTPStatus())
+func writeResponse(writer http.ResponseWriter, useJSON bool, resp *otqpv1.QueryResponse) {
+	var (
+		out         []byte
+		err         error
+		contentType string
+	)
+
+	if useJSON {
+		contentType = "application/json"
+		out, err = protojson.Marshal(resp)
+	} else {
+		contentType = "application/x-protobuf"
+		out, err = proto.Marshal(resp)
+	}
+
+	if err != nil {
+		http.Error(writer, "encode response: "+err.Error(), http.StatusInternalServerError)
+
 		return
 	}
-	http.Error(w, err.Error(), http.StatusInternalServerError)
+
+	writer.Header().Set("Content-Type", contentType)
+	_, _ = writer.Write(out)
+}
+
+func writeHTTPError(writer http.ResponseWriter, err error) {
+	var codedErr *qerror.Error
+	if errors.As(err, &codedErr) {
+		http.Error(writer, codedErr.Msg, codedErr.HTTPStatus())
+
+		return
+	}
+
+	http.Error(writer, err.Error(), http.StatusInternalServerError)
 }
 
 func isJSON(contentType string) bool {
 	// Treat anything that isn't explicitly protobuf as JSON, matching OTLP/HTTP's
 	// lenient content negotiation.
-	for i := 0; i < len(contentType); i++ {
-		if contentType[i] == ';' {
-			contentType = contentType[:i]
-			break
-		}
-	}
-	return contentType != "application/x-protobuf" && contentType != "application/protobuf"
+	mediaType, _, _ := strings.Cut(contentType, ";")
+
+	return mediaType != "application/x-protobuf" && mediaType != "application/protobuf"
 }
 
-func injectHeaders(q *qdata.Query, h http.Header) {
-	if q == nil || len(h) == 0 {
+func injectHeaders(query *qdata.Query, header http.Header) {
+	if query == nil || len(header) == 0 {
 		return
 	}
-	if q.Header == nil {
-		q.Header = make(map[string]*qdata.HeaderValues, len(h))
+
+	if query.Header == nil {
+		query.Header = make(map[string]*qdata.HeaderValues, len(header))
 	}
-	for k, v := range h {
-		q.Header[k] = &qdata.HeaderValues{Values: v}
+
+	for key, values := range header {
+		query.Header[key] = &qdata.HeaderValues{Values: values}
 	}
 }

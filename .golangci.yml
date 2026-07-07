@@ -1,0 +1,82 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  # Enable every non-deprecated linter (v2 "all" excludes deprecated ones).
+  default: all
+
+  disable:
+    # Deprecated (since v2.2.0), superseded by wsl_v5, which stays enabled.
+    - wsl
+
+  settings:
+    # This is a multi-module workspace (each component is its own module), so
+    # local relative-path replace directives are expected.
+    gomoddirectives:
+      replace-local: true
+
+    depguard:
+      rules:
+        main:
+          list-mode: lax # everything is allowed except what is denied below
+          deny:
+            - pkg: github.com/pkg/errors
+              desc: use the standard library errors package and fmt.Errorf
+            - pkg: io/ioutil
+              desc: deprecated; use the io and os packages
+            - pkg: github.com/sirupsen/logrus
+              desc: use log/slog
+            - pkg: go.uber.org/zap
+              desc: use log/slog
+
+    # exhaustruct is impractical for protobuf-generated structs (unexported
+    # state/sizeCache/unknownFields fields) and for large stdlib structs.
+    exhaustruct:
+      exclude:
+        - '.*/gen/.*'
+        - 'net/http\.Server'
+        - 'net/http\.Client'
+        - 'github.com/go-viper/mapstructure/v2\.DecoderConfig'
+
+    # Factories and components intentionally return interface types, mirroring the
+    # opentelemetry-collector component model.
+    ireturn:
+      allow:
+        - error
+        - empty
+        - stdlib
+        - generic
+        - Factory$
+        - Acceptor$
+        - Processor$
+        - Dispatcher$
+        - Config$
+        - Component$
+
+    # Only "id" and "ok" are exempt; every other identifier must be descriptive.
+    varnamelen:
+      ignore-names:
+        - id
+        - ok
+
+    # grpc status errors must be returned as-is so the client can extract the
+    # gRPC code; wrapping them with %w would hide the status.
+    wrapcheck:
+      ignore-package-globs:
+        - google.golang.org/grpc/status
+
+  exclusions:
+    generated: strict
+    paths:
+      - gen
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: strict
+    paths:
+      - gen

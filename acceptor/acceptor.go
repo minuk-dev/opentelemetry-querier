@@ -7,11 +7,15 @@ package acceptor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/minuk-dev/opentelemetry-querier/component"
 	"github.com/minuk-dev/opentelemetry-querier/pipeline"
 )
+
+// errDuplicateFactory is returned when two factories share a type.
+var errDuplicateFactory = errors.New("acceptor: duplicate factory type")
 
 // Acceptor is a component that accepts client queries. It is a component.Component
 // (Start binds listeners, Shutdown stops them).
@@ -25,14 +29,23 @@ type Factory interface {
 
 	// CreateAcceptor builds an acceptor instance that forwards accepted queries
 	// to next.
-	CreateAcceptor(ctx context.Context, set component.Settings, cfg component.Config, next pipeline.Handler) (Acceptor, error)
+	CreateAcceptor(
+		ctx context.Context,
+		set component.Settings,
+		cfg component.Config,
+		next pipeline.Handler,
+	) (Acceptor, error)
 }
 
 // CreateAcceptorFunc is the function form of Factory.CreateAcceptor.
-type CreateAcceptorFunc func(ctx context.Context, set component.Settings, cfg component.Config, next pipeline.Handler) (Acceptor, error)
+type CreateAcceptorFunc func(
+	ctx context.Context,
+	set component.Settings,
+	cfg component.Config,
+	next pipeline.Handler,
+) (Acceptor, error)
 
 type factory struct {
-	component.BaseFactory
 	typ           component.Type
 	defaultConfig func() component.Config
 	createFunc    CreateAcceptorFunc
@@ -41,7 +54,12 @@ type factory struct {
 func (f *factory) Type() component.Type                  { return f.typ }
 func (f *factory) CreateDefaultConfig() component.Config { return f.defaultConfig() }
 
-func (f *factory) CreateAcceptor(ctx context.Context, set component.Settings, cfg component.Config, next pipeline.Handler) (Acceptor, error) {
+func (f *factory) CreateAcceptor(
+	ctx context.Context,
+	set component.Settings,
+	cfg component.Config,
+	next pipeline.Handler,
+) (Acceptor, error) {
 	return f.createFunc(ctx, set, cfg, next)
 }
 
@@ -55,11 +73,14 @@ func NewFactory(typ component.Type, defaultConfig func() component.Config, creat
 // builder-generated distribution uses this to populate its factory set.
 func MakeFactoryMap(factories ...Factory) (map[component.Type]Factory, error) {
 	out := make(map[component.Type]Factory, len(factories))
+
 	for _, f := range factories {
 		if _, dup := out[f.Type()]; dup {
-			return nil, fmt.Errorf("duplicate acceptor factory %q", f.Type())
+			return nil, fmt.Errorf("%w %q", errDuplicateFactory, f.Type())
 		}
+
 		out[f.Type()] = f
 	}
+
 	return out, nil
 }

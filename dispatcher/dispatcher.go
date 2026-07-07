@@ -6,11 +6,15 @@ package dispatcher
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/minuk-dev/opentelemetry-querier/component"
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
 )
+
+// errDuplicateFactory is returned when two factories share a type.
+var errDuplicateFactory = errors.New("dispatcher: duplicate factory type")
 
 // Dispatcher sends a query to storage and returns the result. It is also a
 // component.Component for lifecycle (opening/closing backend clients).
@@ -25,8 +29,11 @@ type Dispatcher interface {
 // Base provides no-op lifecycle methods for dispatchers that need no setup.
 type Base struct{}
 
+// Start is a no-op.
 func (Base) Start(context.Context, component.Host) error { return nil }
-func (Base) Shutdown(context.Context) error              { return nil }
+
+// Shutdown is a no-op.
+func (Base) Shutdown(context.Context) error { return nil }
 
 // Factory creates Dispatchers of a single type (cf. exporter.Factory).
 type Factory interface {
@@ -37,10 +44,13 @@ type Factory interface {
 }
 
 // CreateDispatcherFunc is the function form of Factory.CreateDispatcher.
-type CreateDispatcherFunc func(ctx context.Context, set component.Settings, cfg component.Config) (Dispatcher, error)
+type CreateDispatcherFunc func(
+	ctx context.Context,
+	set component.Settings,
+	cfg component.Config,
+) (Dispatcher, error)
 
 type factory struct {
-	component.BaseFactory
 	typ           component.Type
 	defaultConfig func() component.Config
 	createFunc    CreateDispatcherFunc
@@ -49,7 +59,11 @@ type factory struct {
 func (f *factory) Type() component.Type                  { return f.typ }
 func (f *factory) CreateDefaultConfig() component.Config { return f.defaultConfig() }
 
-func (f *factory) CreateDispatcher(ctx context.Context, set component.Settings, cfg component.Config) (Dispatcher, error) {
+func (f *factory) CreateDispatcher(
+	ctx context.Context,
+	set component.Settings,
+	cfg component.Config,
+) (Dispatcher, error) {
 	return f.createFunc(ctx, set, cfg)
 }
 
@@ -61,11 +75,14 @@ func NewFactory(typ component.Type, defaultConfig func() component.Config, creat
 // MakeFactoryMap indexes factories by type, erroring on duplicates.
 func MakeFactoryMap(factories ...Factory) (map[component.Type]Factory, error) {
 	out := make(map[component.Type]Factory, len(factories))
+
 	for _, f := range factories {
 		if _, dup := out[f.Type()]; dup {
-			return nil, fmt.Errorf("duplicate dispatcher factory %q", f.Type())
+			return nil, fmt.Errorf("%w %q", errDuplicateFactory, f.Type())
 		}
+
 		out[f.Type()] = f
 	}
+
 	return out, nil
 }

@@ -20,19 +20,20 @@ const DefaultHeader = "X-Scope-OrgID"
 // Config configures tenant resolution.
 type Config struct {
 	// Header is the request header carrying the tenant id.
-	Header string `yaml:"header"`
+	Header string `mapstructure:"header"`
 	// Default is used when the header is absent; empty means no default.
-	Default string `yaml:"default"`
+	Default string `mapstructure:"default"`
 	// Required rejects queries with no resolvable tenant.
-	Required bool `yaml:"required"`
+	Required bool `mapstructure:"required"`
 	// EnforceLabel, when set, registers an enforced equality matcher on this
 	// label with the resolved tenant id, isolating the tenant's series.
-	EnforceLabel string `yaml:"enforce_label"`
+	EnforceLabel string `mapstructure:"enforce_label"`
 }
 
 // Processor resolves and enforces the tenant.
 type Processor struct {
 	processor.Base
+
 	cfg Config
 }
 
@@ -41,45 +42,50 @@ func New(cfg Config) *Processor {
 	if cfg.Header == "" {
 		cfg.Header = DefaultHeader
 	}
-	return &Processor{cfg: cfg}
-}
 
-func (p *Processor) Name() string { return "tenant" }
+	return &Processor{Base: processor.Base{}, cfg: cfg}
+}
 
 // ProcessQuery resolves the tenant and, if configured, registers the isolation
 // matcher.
-func (p *Processor) ProcessQuery(_ context.Context, q *qdata.Query) error {
-	tenant := q.GetTenantId()
-	if tenant == "" {
-		tenant = headerValue(q, p.cfg.Header)
+func (p *Processor) ProcessQuery(_ context.Context, query *qdata.Query) error {
+	tenantID := query.GetTenantId()
+	if tenantID == "" {
+		tenantID = headerValue(query, p.cfg.Header)
 	}
-	if tenant == "" {
-		tenant = p.cfg.Default
+
+	if tenantID == "" {
+		tenantID = p.cfg.Default
 	}
-	if tenant == "" {
+
+	if tenantID == "" {
 		if p.cfg.Required {
 			return qerror.New(qerror.CodeUnauthenticated, "tenant: missing %s header", p.cfg.Header)
 		}
+
 		return nil
 	}
 
-	q.TenantId = tenant
+	query.TenantId = tenantID
+
 	if p.cfg.EnforceLabel != "" {
-		q.EnforcedMatchers = append(q.EnforcedMatchers, &qdata.LabelMatcher{
+		query.EnforcedMatchers = append(query.EnforcedMatchers, &qdata.LabelMatcher{
 			Name:  p.cfg.EnforceLabel,
 			Op:    qdata.MatchEqual,
-			Value: tenant,
+			Value: tenantID,
 		})
 	}
+
 	return nil
 }
 
 // headerValue does a case-insensitive lookup of the first value of a header.
-func headerValue(q *qdata.Query, name string) string {
-	for k, v := range q.GetHeader() {
-		if strings.EqualFold(k, name) && len(v.GetValues()) > 0 {
-			return v.GetValues()[0]
+func headerValue(query *qdata.Query, name string) string {
+	for key, values := range query.GetHeader() {
+		if strings.EqualFold(key, name) && len(values.GetValues()) > 0 {
+			return values.GetValues()[0]
 		}
 	}
+
 	return ""
 }

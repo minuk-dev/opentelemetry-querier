@@ -10,6 +10,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"go/format"
@@ -20,26 +21,37 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/go-viper/mapstructure/v2"
 	"gopkg.in/yaml.v3"
+)
+
+// errNoModule is returned when the manifest omits dist.module.
+var errNoModule = errors.New("builder: manifest dist.module is required")
+
+const (
+	// dirPerm is the permission for generated output directories.
+	dirPerm = 0o750
+	// filePerm is the permission for generated files.
+	filePerm = 0o600
 )
 
 // Manifest is the builder.yaml schema.
 type Manifest struct {
 	Dist struct {
-		Name        string `yaml:"name"`
-		Description string `yaml:"description"`
-		Module      string `yaml:"module"`
-		Version     string `yaml:"version"`
-		OutputPath  string `yaml:"output_path"`
-	} `yaml:"dist"`
-	Acceptors   []Component `yaml:"acceptors"`
-	Processors  []Component `yaml:"processors"`
-	Dispatchers []Component `yaml:"dispatchers"`
+		Name        string `mapstructure:"name"`
+		Description string `mapstructure:"description"`
+		Module      string `mapstructure:"module"`
+		Version     string `mapstructure:"version"`
+		OutputPath  string `mapstructure:"output_path"`
+	} `mapstructure:"dist"`
+	Acceptors   []Component `mapstructure:"acceptors"`
+	Processors  []Component `mapstructure:"processors"`
+	Dispatchers []Component `mapstructure:"dispatchers"`
 }
 
 // Component is one selected component, identified by its Go module/import path.
 type Component struct {
-	GoMod string `yaml:"gomod"`
+	GoMod string `mapstructure:"gomod"`
 }
 
 // tmplComponent is the view passed to templates.
@@ -59,107 +71,150 @@ type tmplData struct {
 
 func main() {
 	configPath := flag.String("config", "builder.yaml", "path to the builder manifest")
+
 	flag.Parse()
 
-	m, err := loadManifest(*configPath)
+	manifest, err := loadManifest(*configPath)
 	if err != nil {
 		log.Fatalf("builder: %v", err)
 	}
 
 	data := tmplData{
-		Module:      m.Dist.Module,
-		Version:     orDefault(m.Dist.Version, "dev"),
-		Command:     orDefault(m.Dist.Name, "querier"),
-		Acceptors:   toTmpl(m.Acceptors),
-		Processors:  toTmpl(m.Processors),
-		Dispatchers: toTmpl(m.Dispatchers),
+		Module:      manifest.Dist.Module,
+		Version:     orDefault(manifest.Dist.Version, "dev"),
+		Command:     orDefault(manifest.Dist.Name, "querier"),
+		Acceptors:   toTmpl(manifest.Acceptors),
+		Processors:  toTmpl(manifest.Processors),
+		Dispatchers: toTmpl(manifest.Dispatchers),
 	}
 
-	outDir := m.Dist.OutputPath
+	outDir := manifest.Dist.OutputPath
 	if outDir == "" {
 		outDir = "./cmd/querier"
 	}
-	if err := os.MkdirAll(outDir, 0o755); err != nil {
+
+	err = os.MkdirAll(outDir, dirPerm)
+	if err != nil {
 		log.Fatalf("builder: mkdir %s: %v", outDir, err)
 	}
 
-	for name, tmpl := range map[string]*template.Template{
-		"components.go": componentsTmpl,
-		"main.go":       mainTmpl,
-	} {
-		if err := render(filepath.Join(outDir, name), tmpl, data); err != nil {
+	templates := map[string]*template.Template{
+		"components.go": componentsTemplate(),
+		"main.go":       mainTemplate(),
+	}
+
+	for name, tmpl := range templates {
+		err = render(filepath.Join(outDir, name), tmpl, data)
+		if err != nil {
 			log.Fatalf("builder: generate %s: %v", name, err)
 		}
 	}
+
 	log.Printf("builder: generated distribution %q in %s", data.Command, outDir)
 }
 
 func loadManifest(path string) (*Manifest, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("read manifest %s: %w", path, err)
 	}
-	var m Manifest
-	dec := yaml.NewDecoder(bytes.NewReader(raw))
-	dec.KnownFields(true)
-	if err := dec.Decode(&m); err != nil {
+
+	var tree map[string]any
+
+	err = yaml.Unmarshal(raw, &tree)
+	if err != nil {
 		return nil, fmt.Errorf("parse manifest %s: %w", path, err)
 	}
-	if m.Dist.Module == "" {
-		return nil, fmt.Errorf("manifest dist.module is required")
+
+	var manifest Manifest
+
+	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
+		Result:      &manifest,
+		ErrorUnused: true,
+		TagName:     "mapstructure",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("builder: build decoder: %w", err)
 	}
-	return &m, nil
+
+	err = decoder.Decode(tree)
+	if err != nil {
+		return nil, fmt.Errorf("decode manifest %s: %w", path, err)
+	}
+
+	if manifest.Dist.Module == "" {
+		return nil, errNoModule
+	}
+
+	return &manifest, nil
 }
 
 // toTmpl derives an import alias (the last path element, sanitized) for each
 // component, stripping any "@version" suffix from the gomod path.
-func toTmpl(cs []Component) []tmplComponent {
-	out := make([]tmplComponent, 0, len(cs))
-	for _, c := range cs {
-		imp := c.GoMod
+func toTmpl(components []Component) []tmplComponent {
+	out := make([]tmplComponent, 0, len(components))
+
+	for _, comp := range components {
+		imp := comp.GoMod
 		if at := strings.IndexByte(imp, '@'); at >= 0 {
 			imp = imp[:at]
 		}
+
 		if sp := strings.IndexByte(imp, ' '); sp >= 0 {
 			imp = imp[:sp]
 		}
-		alias := sanitizeAlias(path.Base(imp))
-		out = append(out, tmplComponent{Alias: alias, Import: imp})
+
+		out = append(out, tmplComponent{Alias: sanitizeAlias(path.Base(imp)), Import: imp})
 	}
+
 	return out
 }
 
-func sanitizeAlias(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		if r == '-' || r == '.' {
+func sanitizeAlias(name string) string {
+	var builder strings.Builder
+
+	for _, char := range name {
+		if char == '-' || char == '.' {
 			continue
 		}
-		b.WriteRune(r)
+
+		builder.WriteRune(char)
 	}
-	return b.String()
+
+	return builder.String()
 }
 
 func render(outPath string, tmpl *template.Template, data tmplData) error {
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return err
+
+	err := tmpl.Execute(&buf, data)
+	if err != nil {
+		return fmt.Errorf("execute template: %w", err)
 	}
+
 	formatted, err := format.Source(buf.Bytes())
 	if err != nil {
 		return fmt.Errorf("gofmt: %w\n%s", err, buf.String())
 	}
-	return os.WriteFile(outPath, formatted, 0o644)
-}
 
-func orDefault(v, def string) string {
-	if v == "" {
-		return def
+	err = os.WriteFile(outPath, formatted, filePerm)
+	if err != nil {
+		return fmt.Errorf("write %s: %w", outPath, err)
 	}
-	return v
+
+	return nil
 }
 
-var componentsTmpl = template.Must(template.New("components").Parse(`// Code generated by "cmd/builder"; DO NOT EDIT.
+func orDefault(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+
+	return value
+}
+
+func componentsTemplate() *template.Template {
+	return template.Must(template.New("components").Parse(`// Code generated by "cmd/builder"; DO NOT EDIT.
 
 package main
 
@@ -211,8 +266,10 @@ func components() (querier.Factories, error) {
 	return factories, nil
 }
 `))
+}
 
-var mainTmpl = template.Must(template.New("main").Parse(`// Code generated by "cmd/builder"; DO NOT EDIT.
+func mainTemplate() *template.Template {
+	return template.Must(template.New("main").Parse(`// Code generated by "cmd/builder"; DO NOT EDIT.
 
 // Command {{ .Command }} is the generated OpenTelemetry Querier distribution
 // entrypoint. It loads a runtime config, assembles the pipelines from the
@@ -272,3 +329,4 @@ func main() {
 	}
 }
 `))
+}

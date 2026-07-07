@@ -19,28 +19,48 @@ import (
 // Aliases keep call sites short and let the rest of the codebase depend on the
 // qdata package rather than the versioned generated import path.
 type (
-	Query        = qdatav1.Query
-	Result       = qdatav1.Result
-	TimeRange    = qdatav1.TimeRange
-	Modifier     = qdatav1.Modifier
+	// Query is the standardized, DSL-agnostic query request.
+	Query = qdatav1.Query
+	// Result is the standardized query response.
+	Result = qdatav1.Result
+	// TimeRange is a query time window.
+	TimeRange = qdatav1.TimeRange
+	// Modifier captures out-of-range fetch adjustments.
+	Modifier = qdatav1.Modifier
+	// LabelMatcher is a single attribute predicate to enforce on a query.
 	LabelMatcher = qdatav1.LabelMatcher
+	// HeaderValues wraps the repeated values of one header.
 	HeaderValues = qdatav1.HeaderValues
 
-	Value        = qdatav1.Value
-	ArrayValue   = qdatav1.ArrayValue
-	KeyValue     = qdatav1.KeyValue
+	// Value is a tagged union over the QLSWG data types.
+	Value = qdatav1.Value
+	// ArrayValue is an ordered list of values.
+	ArrayValue = qdatav1.ArrayValue
+	// KeyValue is one attribute entry.
+	KeyValue = qdatav1.KeyValue
+	// KeyValueList is the flattened attribute map.
 	KeyValueList = qdatav1.KeyValueList
 
-	Metrics      = qdatav1.Metrics
+	// Metrics is a collection of metric series.
+	Metrics = qdatav1.Metrics
+	// MetricSeries is a set of measurements sharing an identity.
 	MetricSeries = qdatav1.MetricSeries
-	MetricPoint  = qdatav1.MetricPoint
-	Exemplar     = qdatav1.Exemplar
-	Logs         = qdatav1.Logs
-	LogRecord    = qdatav1.LogRecord
-	Spans        = qdatav1.Spans
-	Span         = qdatav1.Span
+	// MetricPoint is a single (windowed) measurement.
+	MetricPoint = qdatav1.MetricPoint
+	// Exemplar is a sample of a raw measurement.
+	Exemplar = qdatav1.Exemplar
+	// Logs is a collection of log records.
+	Logs = qdatav1.Logs
+	// LogRecord unifies logs, events and wide events.
+	LogRecord = qdatav1.LogRecord
+	// Spans is a collection of spans.
+	Spans = qdatav1.Spans
+	// Span keeps the OTel span fields as columns.
+	Span = qdatav1.Span
 
-	Feedback     = qdatav1.Feedback
+	// Feedback is the side channel carried with a Result.
+	Feedback = qdatav1.Feedback
+	// Notification is one side-channel message explaining a result.
 	Notification = qdatav1.Notification
 )
 
@@ -73,21 +93,35 @@ const (
 
 // ---- Value constructors (spec §Data Types) ----
 
+// Double builds a double-typed Value.
 func Double(v float64) *Value { return &Value{Value: &qdatav1.Value_DoubleValue{DoubleValue: v}} }
-func Int(v int64) *Value      { return &Value{Value: &qdatav1.Value_IntValue{IntValue: v}} }
-func Uint(v uint64) *Value    { return &Value{Value: &qdatav1.Value_UintValue{UintValue: v}} }
-func Str(v string) *Value     { return &Value{Value: &qdatav1.Value_StringValue{StringValue: v}} }
-func Bool(v bool) *Value      { return &Value{Value: &qdatav1.Value_BoolValue{BoolValue: v}} }
-func JSON(raw string) *Value  { return &Value{Value: &qdatav1.Value_JsonValue{JsonValue: raw}} }
 
+// Int builds a signed-integer Value.
+func Int(v int64) *Value { return &Value{Value: &qdatav1.Value_IntValue{IntValue: v}} }
+
+// Uint builds an unsigned-integer Value.
+func Uint(v uint64) *Value { return &Value{Value: &qdatav1.Value_UintValue{UintValue: v}} }
+
+// Str builds a string Value.
+func Str(v string) *Value { return &Value{Value: &qdatav1.Value_StringValue{StringValue: v}} }
+
+// Bool builds a boolean Value.
+func Bool(v bool) *Value { return &Value{Value: &qdatav1.Value_BoolValue{BoolValue: v}} }
+
+// JSON builds a JSON-typed Value from raw JSON text.
+func JSON(raw string) *Value { return &Value{Value: &qdatav1.Value_JsonValue{JsonValue: raw}} }
+
+// Timestamp builds a timestamp Value.
 func Timestamp(t time.Time) *Value {
 	return &Value{Value: &qdatav1.Value_TimestampValue{TimestampValue: timestamppb.New(t)}}
 }
 
+// DurationVal builds a duration Value.
 func DurationVal(d time.Duration) *Value {
 	return &Value{Value: &qdatav1.Value_DurationValue{DurationValue: durationpb.New(d)}}
 }
 
+// Array builds an array Value.
 func Array(vs ...*Value) *Value {
 	return &Value{Value: &qdatav1.Value_ArrayValue{ArrayValue: &ArrayValue{Values: vs}}}
 }
@@ -97,57 +131,65 @@ func Array(vs ...*Value) *Value {
 // NewAttrs builds a KeyValueList from alternating key, value(*Value) pairs.
 func NewAttrs(pairs ...any) *KeyValueList {
 	kvl := &KeyValueList{}
+
 	for i := 0; i+1 < len(pairs); i += 2 {
 		key, _ := pairs[i].(string)
 		val, _ := pairs[i+1].(*Value)
 		AttrPut(kvl, key, val)
 	}
+
 	return kvl
 }
 
 // AttrPut inserts or replaces a key while preserving insertion order.
-func AttrPut(kvl *KeyValueList, key string, v *Value) {
-	for _, kv := range kvl.Values {
-		if kv.Key == key {
-			kv.Value = v
+func AttrPut(kvl *KeyValueList, key string, value *Value) {
+	for _, kv := range kvl.GetValues() {
+		if kv.GetKey() == key {
+			kv.Value = value
+
 			return
 		}
 	}
-	kvl.Values = append(kvl.Values, &KeyValue{Key: key, Value: v})
+
+	kvl.Values = append(kvl.Values, &KeyValue{Key: key, Value: value})
 }
 
 // AttrPutString is a shortcut for a string-valued attribute.
-func AttrPutString(kvl *KeyValueList, key, v string) { AttrPut(kvl, key, Str(v)) }
+func AttrPutString(kvl *KeyValueList, key, value string) { AttrPut(kvl, key, Str(value)) }
 
 // AttrGet returns the value for an exact key match.
 func AttrGet(kvl *KeyValueList, key string) (*Value, bool) {
 	for _, kv := range kvl.GetValues() {
-		if kv.Key == key {
-			return kv.Value, true
+		if kv.GetKey() == key {
+			return kv.GetValue(), true
 		}
 	}
+
 	return nil, false
 }
 
 // AttrGetFold resolves a key case-insensitively (spec §Key Case Sensitivity):
 // an exact match wins, otherwise the first insertion-order fold match.
 func AttrGetFold(kvl *KeyValueList, key string) (*Value, bool) {
-	if v, ok := AttrGet(kvl, key); ok {
-		return v, true
+	if value, ok := AttrGet(kvl, key); ok {
+		return value, true
 	}
+
 	for _, kv := range kvl.GetValues() {
-		if strings.EqualFold(kv.Key, key) {
-			return kv.Value, true
+		if strings.EqualFold(kv.GetKey(), key) {
+			return kv.GetValue(), true
 		}
 	}
+
 	return nil, false
 }
 
 // AttrDelete removes a key if present.
 func AttrDelete(kvl *KeyValueList, key string) {
-	for i, kv := range kvl.Values {
-		if kv.Key == key {
+	for i, kv := range kvl.GetValues() {
+		if kv.GetKey() == key {
 			kvl.Values = append(kvl.Values[:i], kvl.Values[i+1:]...)
+
 			return
 		}
 	}
@@ -156,36 +198,42 @@ func AttrDelete(kvl *KeyValueList, key string) {
 // Fingerprint returns a stable identity string for an attribute set, useful for
 // grouping series (spec §Attributes: sets of key/value pairs identify telemetry).
 func Fingerprint(kvl *KeyValueList) string {
-	kvs := kvl.GetValues()
-	keys := make([]string, 0, len(kvs))
-	byKey := make(map[string]string, len(kvs))
-	for _, kv := range kvs {
-		keys = append(keys, kv.Key)
-		byKey[kv.Key] = ValueString(kv.Value)
+	entries := kvl.GetValues()
+	keys := make([]string, 0, len(entries))
+	byKey := make(map[string]string, len(entries))
+
+	for _, kv := range entries {
+		keys = append(keys, kv.GetKey())
+		byKey[kv.GetKey()] = ValueString(kv.GetValue())
 	}
+
 	sort.Strings(keys)
-	var b strings.Builder
-	for i, k := range keys {
+
+	var builder strings.Builder
+
+	for i, key := range keys {
 		if i > 0 {
-			b.WriteByte(',')
+			builder.WriteByte(',')
 		}
-		b.WriteString(k)
-		b.WriteByte('=')
-		b.WriteString(byKey[k])
+
+		builder.WriteString(key)
+		builder.WriteByte('=')
+		builder.WriteString(byKey[key])
 	}
-	return b.String()
+
+	return builder.String()
 }
 
 // ValueString renders a Value's scalar payload as text (for fingerprints and
 // simple serialization); non-scalar values render as their type name.
-func ValueString(v *Value) string {
-	switch v.GetValue().(type) {
+func ValueString(value *Value) string {
+	switch value.GetValue().(type) {
 	case *qdatav1.Value_StringValue:
-		return v.GetStringValue()
+		return value.GetStringValue()
 	case *qdatav1.Value_JsonValue:
-		return v.GetJsonValue()
+		return value.GetJsonValue()
 	default:
-		return v.String()
+		return value.String()
 	}
 }
 
@@ -195,6 +243,7 @@ func SetMetadata(q *Query, key, value string) {
 	if q.Metadata == nil {
 		q.Metadata = make(map[string]string)
 	}
+
 	q.Metadata[key] = value
 }
 
@@ -206,7 +255,8 @@ func Notify(r *Result, sev qdatav1.NotificationSeverity, code, message, source s
 	if r.Feedback == nil {
 		r.Feedback = &Feedback{}
 	}
-	r.Feedback.Notifications = append(r.Feedback.Notifications, &Notification{
+
+	r.Feedback.Notifications = append(r.GetFeedback().GetNotifications(), &Notification{
 		Severity: sev,
 		Code:     code,
 		Message:  message,

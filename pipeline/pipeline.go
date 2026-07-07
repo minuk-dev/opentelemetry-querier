@@ -6,6 +6,7 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/minuk-dev/opentelemetry-querier/component"
 	"github.com/minuk-dev/opentelemetry-querier/dispatcher"
@@ -22,6 +23,7 @@ type Handler interface {
 // HandlerFunc adapts a function to Handler.
 type HandlerFunc func(ctx context.Context, q *qdata.Query) (*qdata.Result, error)
 
+// Handle calls the wrapped function.
 func (f HandlerFunc) Handle(ctx context.Context, q *qdata.Query) (*qdata.Result, error) {
 	return f(ctx, q)
 }
@@ -41,26 +43,30 @@ func New(name string, processors []processor.Processor, disp dispatcher.Dispatch
 // Handle runs the request path (processors in order), dispatches to storage,
 // then runs the response path (processors in reverse order). A processor error
 // on the request path short-circuits before the dispatcher is reached.
-func (p *Pipeline) Handle(ctx context.Context, q *qdata.Query) (*qdata.Result, error) {
+func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (*qdata.Result, error) {
 	for _, proc := range p.Processors {
-		if err := proc.ProcessQuery(ctx, q); err != nil {
-			return nil, err
+		err := proc.ProcessQuery(ctx, query)
+		if err != nil {
+			return nil, fmt.Errorf("pipeline %q: %w", p.Name, err)
 		}
 	}
 
-	result, err := p.Dispatcher.Dispatch(ctx, q)
+	result, err := p.Dispatcher.Dispatch(ctx, query)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("pipeline %q: %w", p.Name, err)
 	}
+
 	if result.GetSignal() == qdata.SignalUnspecified {
-		result.Signal = q.GetSignal()
+		result.Signal = query.GetSignal()
 	}
 
 	for i := len(p.Processors) - 1; i >= 0; i-- {
-		if err := p.Processors[i].ProcessResult(ctx, q, result); err != nil {
-			return nil, err
+		err := p.Processors[i].ProcessResult(ctx, query, result)
+		if err != nil {
+			return nil, fmt.Errorf("pipeline %q: %w", p.Name, err)
 		}
 	}
+
 	return result, nil
 }
 
@@ -68,14 +74,18 @@ func (p *Pipeline) Handle(ctx context.Context, q *qdata.Query) (*qdata.Result, e
 // separately since they call back into Handle). Components are started in
 // dispatcher-to-front order so downstream is ready before upstream.
 func (p *Pipeline) Start(ctx context.Context, host component.Host) error {
-	if err := p.Dispatcher.Start(ctx, host); err != nil {
-		return err
+	err := p.Dispatcher.Start(ctx, host)
+	if err != nil {
+		return fmt.Errorf("pipeline %q: start dispatcher: %w", p.Name, err)
 	}
+
 	for i := len(p.Processors) - 1; i >= 0; i-- {
-		if err := p.Processors[i].Start(ctx, host); err != nil {
-			return err
+		err := p.Processors[i].Start(ctx, host)
+		if err != nil {
+			return fmt.Errorf("pipeline %q: start processor: %w", p.Name, err)
 		}
 	}
+
 	return nil
 }
 
@@ -84,5 +94,11 @@ func (p *Pipeline) Shutdown(ctx context.Context) error {
 	for _, proc := range p.Processors {
 		_ = proc.Shutdown(ctx)
 	}
-	return p.Dispatcher.Shutdown(ctx)
+
+	err := p.Dispatcher.Shutdown(ctx)
+	if err != nil {
+		return fmt.Errorf("pipeline %q: shutdown dispatcher: %w", p.Name, err)
+	}
+
+	return nil
 }
