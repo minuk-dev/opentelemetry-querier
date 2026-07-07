@@ -1,3 +1,5 @@
+This is not an opentelemetry project component.
+
 # OpenTelemetry Querier
 
 A query proxy for observability backends, modeled on the
