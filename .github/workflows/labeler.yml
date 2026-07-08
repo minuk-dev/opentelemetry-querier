@@ -1,0 +1,20 @@
+name: Labeler
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  label:
+    name: label by changed paths
+    runs-on: ubuntu-latest
+    # Dependabot PRs run with a read-only token and label themselves via
+    # .github/dependabot.yml, so skip them here.
+    if: github.actor != 'dependabot[bot]'
+    steps:
+      - uses: actions/labeler@v5
+        with:
+          sync-labels: false

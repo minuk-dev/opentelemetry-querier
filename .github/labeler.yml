@@ -1,0 +1,72 @@
+# Path-based PR labels (actions/labeler). Each rule maps changed files to an
+# area label so a glance at a PR's labels shows which modules it touches.
+
+acceptor:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "acceptor/**"
+
+processor:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "processor/**"
+
+dispatcher:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "dispatcher/**"
+
+component:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "component/**"
+
+qdata:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "qdata/**"
+
+qerror:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "qerror/**"
+
+pipeline:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "pipeline/**"
+
+querier:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "querier/**"
+
+proto:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "proto/**"
+          - "gen/**"
+          - "buf.yaml"
+          - "buf.gen.yaml"
+
+tooling:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "cmd/**"
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/**"
+          - ".golangci.yml"
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.md"
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/go.mod"
+          - "**/go.sum"
