@@ -1,0 +1,40 @@
+version: 2
+updates:
+  # Go modules — this is a multi-module workspace, so every module directory is
+  # tracked. Updates within a module are grouped into a single PR to limit noise.
+  - package-ecosystem: "gomod"
+    directories:
+      - "/acceptor"
+      - "/acceptor/otqp"
+      - "/cmd/builder"
+      - "/cmd/querier"
+      - "/component"
+      - "/dispatcher"
+      - "/dispatcher/promdispatcher"
+      - "/gen"
+      - "/pipeline"
+      - "/processor"
+      - "/processor/authratelimit"
+      - "/processor/queryrewrite"
+      - "/processor/responsefilter"
+      - "/processor/tenant"
+      - "/qdata"
+      - "/qerror"
+      - "/querier"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      go-dependencies:
+        patterns:
+          - "*"
+
+  # GitHub Actions used by the CI workflows.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
