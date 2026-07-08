@@ -24,6 +24,9 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "go"
     groups:
       go-dependencies:
         patterns:
@@ -34,6 +37,9 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    labels:
+      - "dependencies"
+      - "github-actions"
     groups:
       github-actions:
         patterns:

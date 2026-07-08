@@ -1,0 +1,46 @@
+# Version-controlled label set, synced by .github/workflows/labels.yml.
+- name: acceptor
+  color: "1d76db"
+  description: "Acceptor components"
+- name: processor
+  color: "0e8a16"
+  description: "Processor components"
+- name: dispatcher
+  color: "b60205"
+  description: "Dispatcher components"
+- name: component
+  color: "5319e7"
+  description: "component core package"
+- name: qdata
+  color: "5319e7"
+  description: "qdata query & result model"
+- name: qerror
+  color: "5319e7"
+  description: "qerror package"
+- name: pipeline
+  color: "5319e7"
+  description: "pipeline wiring"
+- name: querier
+  color: "5319e7"
+  description: "querier assembly"
+- name: proto
+  color: "c5def5"
+  description: "Protobuf sources / generated code"
+- name: tooling
+  color: "bfd4f2"
+  description: "cmd/ tooling (builder, distribution)"
+- name: ci
+  color: "dbca04"
+  description: "CI and workflows"
+- name: documentation
+  color: "0075ca"
+  description: "Documentation"
+- name: dependencies
+  color: "0366d6"
+  description: "Dependency updates"
+- name: go
+  color: "00add8"
+  description: "Go modules"
+- name: github-actions
+  color: "2088ff"
+  description: "GitHub Actions"
