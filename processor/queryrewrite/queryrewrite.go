@@ -94,7 +94,7 @@ func (p *Processor) collectMatchers(query *qdata.Query) ([]*labels.Matcher, erro
 	for _, label := range p.cfg.EnforceLabels {
 		value := label.Value
 		if label.FromTenant {
-			value = query.GetTenantId()
+			value = qdata.TenantID(query)
 		}
 
 		if value == "" {

@@ -81,12 +81,14 @@ message Query {
   string expr = 6;    // source DSL text (PromQL for the Prometheus acceptor).
   string dialect = 7; // DSL name of expr, e.g. "promql".
 
-  string tenant_id = 8; // resolved tenant; empty means unresolved.
+  // Tenancy is request-context/transport metadata (Cortex/Mimir/Thanos/Loki
+  // X-Scope-OrgID), not a query-language field, so it lives in the metadata map
+  // under qdata.MetadataTenantID rather than as a dedicated field here.
 
   // enforced_matchers are additional label matchers to inject into expr, kept
   // separate so the query-rewrite processor can weave them into the DSL AST.
-  repeated LabelMatcher enforced_matchers = 9;
+  repeated LabelMatcher enforced_matchers = 8;
 
-  map<string, HeaderValues> header = 10; // inbound request headers.
-  map<string, string> metadata = 11;     // processor-to-processor hints.
+  map<string, HeaderValues> header = 9; // inbound request headers.
+  map<string, string> metadata = 10;    // processor-to-processor hints.
 }

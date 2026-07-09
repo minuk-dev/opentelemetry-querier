@@ -84,8 +84,8 @@ func (d *Dispatcher) Dispatch(ctx context.Context, query *qdata.Query) (*qdata.R
 
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	if query.GetTenantId() != "" {
-		req.Header.Set(d.cfg.TenantHeader, query.GetTenantId())
+	if tenantID := qdata.TenantID(query); tenantID != "" {
+		req.Header.Set(d.cfg.TenantHeader, tenantID)
 	}
 
 	resp, err := d.client.Do(req)
