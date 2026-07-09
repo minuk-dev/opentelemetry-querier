@@ -15,6 +15,17 @@ type rewriteCase struct {
 	want  string
 }
 
+// testTenant is the resolved tenant id used across the rewrite cases.
+const testTenant = "acme"
+
+// withTenant records the resolved tenant id in the query's metadata, mirroring
+// what the tenant processor does upstream.
+func withTenant(q *qdata.Query) *qdata.Query {
+	qdata.SetTenantID(q, testTenant)
+
+	return q
+}
+
 func rewriteCases() []rewriteCase {
 	tenantEnforce := queryrewrite.Config{
 		EnforceLabels: []queryrewrite.EnforceLabel{{Name: "tenant_id", Value: "", FromTenant: true}},
@@ -24,23 +35,22 @@ func rewriteCases() []rewriteCase {
 		{
 			name:  "injects tenant matcher",
 			cfg:   tenantEnforce,
-			query: &qdata.Query{Expr: "up", Dialect: "promql", TenantId: "acme"},
+			query: withTenant(&qdata.Query{Expr: "up", Dialect: "promql"}),
 			want:  `up{tenant_id="acme"}`,
 		},
 		{
 			name: "injects into every selector",
 			cfg:  tenantEnforce,
-			query: &qdata.Query{
-				Expr:     `sum(rate(http_requests_total[5m])) / sum(rate(http_errors_total[5m]))`,
-				Dialect:  "promql",
-				TenantId: "acme",
-			},
+			query: withTenant(&qdata.Query{
+				Expr:    `sum(rate(http_requests_total[5m])) / sum(rate(http_errors_total[5m]))`,
+				Dialect: "promql",
+			}),
 			want: `sum(rate(http_requests_total{tenant_id="acme"}[5m])) / sum(rate(http_errors_total{tenant_id="acme"}[5m]))`,
 		},
 		{
 			name:  "enforcement overrides user matcher",
 			cfg:   tenantEnforce,
-			query: &qdata.Query{Expr: `up{tenant_id="evil"}`, Dialect: "promql", TenantId: "acme"},
+			query: withTenant(&qdata.Query{Expr: `up{tenant_id="evil"}`, Dialect: "promql"}),
 			want:  `up{tenant_id="acme"}`,
 		},
 		{
@@ -56,7 +66,7 @@ func rewriteCases() []rewriteCase {
 		{
 			name:  "non-promql passes through",
 			cfg:   tenantEnforce,
-			query: &qdata.Query{Expr: `{job="x"}`, Dialect: "logql", TenantId: "acme"},
+			query: withTenant(&qdata.Query{Expr: `{job="x"}`, Dialect: "logql"}),
 			want:  `{job="x"}`,
 		},
 	}

@@ -49,7 +49,7 @@ func New(cfg Config) *Processor {
 // ProcessQuery resolves the tenant and, if configured, registers the isolation
 // matcher.
 func (p *Processor) ProcessQuery(_ context.Context, query *qdata.Query) error {
-	tenantID := query.GetTenantId()
+	tenantID := qdata.TenantID(query)
 	if tenantID == "" {
 		tenantID = headerValue(query, p.cfg.Header)
 	}
@@ -66,7 +66,7 @@ func (p *Processor) ProcessQuery(_ context.Context, query *qdata.Query) error {
 		return nil
 	}
 
-	query.TenantId = tenantID
+	qdata.SetTenantID(query, tenantID)
 
 	if p.cfg.EnforceLabel != "" {
 		query.EnforcedMatchers = append(query.EnforcedMatchers, &qdata.LabelMatcher{

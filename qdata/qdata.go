@@ -247,6 +247,21 @@ func SetMetadata(q *Query, key, value string) {
 	q.Metadata[key] = value
 }
 
+// Metadata reads a processor-to-processor hint from a Query, returning the empty
+// string when absent.
+func Metadata(q *Query, key string) string { return q.GetMetadata()[key] }
+
+// MetadataTenantID is the metadata key holding the resolved tenant id. Tenancy
+// is request-context/transport metadata (Cortex/Mimir/Thanos/Loki X-Scope-OrgID)
+// rather than a query-language field, so it lives here instead of on Query.
+const MetadataTenantID = "tenant.id"
+
+// TenantID returns the resolved tenant id, or the empty string when unresolved.
+func TenantID(q *Query) string { return Metadata(q, MetadataTenantID) }
+
+// SetTenantID records the resolved tenant id in the Query's metadata.
+func SetTenantID(q *Query, id string) { SetMetadata(q, MetadataTenantID, id) }
+
 // ---- Feedback side channel (spec §Side Channel Feedback) ----
 
 // Notify appends a notification to a Result's feedback channel, allocating it

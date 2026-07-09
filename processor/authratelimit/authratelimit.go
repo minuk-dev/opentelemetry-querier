@@ -71,7 +71,7 @@ func (p *Processor) ProcessQuery(_ context.Context, query *qdata.Query) error {
 	if p.limiter != nil {
 		key := "global"
 		if p.cfg.PerTenant {
-			key = query.GetTenantId()
+			key = qdata.TenantID(query)
 		}
 
 		if !p.limiter.allow(key) {
