@@ -3,7 +3,7 @@ module github.com/minuk-dev/opentelemetry-querier/querier
 go 1.25.4
 
 require (
-	github.com/go-viper/mapstructure/v2 v2.2.1
+	github.com/go-viper/mapstructure/v2 v2.5.0
 	github.com/minuk-dev/opentelemetry-querier/acceptor v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/component v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/dispatcher v0.0.0
@@ -15,7 +15,7 @@ require (
 require (
 	github.com/minuk-dev/opentelemetry-querier/gen v0.0.0 // indirect
 	github.com/minuk-dev/opentelemetry-querier/qdata v0.0.0 // indirect
-	google.golang.org/protobuf v1.34.2 // indirect
+	google.golang.org/protobuf v1.36.11 // indirect
 )
 
 replace github.com/minuk-dev/opentelemetry-querier/acceptor => ../acceptor
