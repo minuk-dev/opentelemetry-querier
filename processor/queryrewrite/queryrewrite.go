@@ -114,7 +114,16 @@ func (p *Processor) collectMatchers(query *qdata.Query) ([]*labels.Matcher, erro
 
 // enforce parses expr, injects matchers into every selector, and re-renders it.
 func enforce(expr string, matchers []*labels.Matcher) (string, error) {
-	astExpr, err := parser.ParseExpr(expr)
+	// Prometheus 3.x replaced the package-level ParseExpr with a Parser instance.
+	// A fresh parser per call keeps enforce safe for concurrent queries.
+	promQLParser := parser.NewParser(parser.Options{
+		EnableExperimentalFunctions:  false,
+		ExperimentalDurationExpr:     false,
+		EnableExtendedRangeSelectors: false,
+		EnableBinopFillModifiers:     false,
+	})
+
+	astExpr, err := promQLParser.ParseExpr(expr)
 	if err != nil {
 		return "", fmt.Errorf("queryrewrite: parse: %w", err)
 	}

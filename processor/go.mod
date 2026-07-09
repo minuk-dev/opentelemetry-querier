@@ -9,7 +9,7 @@ require (
 
 require (
 	github.com/minuk-dev/opentelemetry-querier/gen v0.0.0 // indirect
-	google.golang.org/protobuf v1.34.2 // indirect
+	google.golang.org/protobuf v1.36.11 // indirect
 )
 
 replace github.com/minuk-dev/opentelemetry-querier/component => ../component

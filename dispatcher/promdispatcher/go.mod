@@ -8,7 +8,7 @@ require (
 	github.com/minuk-dev/opentelemetry-querier/gen v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/qdata v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/qerror v0.0.0
-	google.golang.org/protobuf v1.34.2
+	google.golang.org/protobuf v1.36.11
 )
 
 replace github.com/minuk-dev/opentelemetry-querier/component => ../../component
