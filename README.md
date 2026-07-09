@@ -32,6 +32,7 @@ following the CNCF Observability TAG QLSWG draft. The default acceptor speaks
 | Category | Component | Description |
 | --- | --- | --- |
 | Acceptor | [`otqp`](./acceptor/otqp) | OTQP over gRPC + HTTP (default). |
+| Acceptor | [`prometheus`](./acceptor/prometheusacceptor) | Prometheus HTTP query API ingress. |
 | Processor | [`authratelimit`](./processor/authratelimit) | Bearer auth + per-tenant rate limiting. |
 | Processor | [`tenant`](./processor/tenant) | Tenant resolution + series isolation. |
 | Processor | [`queryrewrite`](./processor/queryrewrite) | PromQL AST label injection. |

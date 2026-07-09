@@ -80,6 +80,6 @@ jobs:
       - name: regenerate qdata / OTQP and the distribution
         run: |
           buf generate
-          go -C cmd/builder run . --config "$PWD/builder.yaml"
+          go run ./cmd/builder --config builder.yaml
       - name: verify no diff
         run: git diff --exit-code
