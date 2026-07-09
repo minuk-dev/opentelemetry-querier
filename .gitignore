@@ -1,6 +1,9 @@
 # Binaries
 /bin/
 *.exe
+# Built by `go build ./...` inside a main package
+/cmd/querier/querier
+/cmd/builder/builder
 
 # Test / build artifacts
 *.out

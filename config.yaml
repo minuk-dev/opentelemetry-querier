@@ -16,6 +16,12 @@ acceptors:
     grpc_endpoint: "0.0.0.0:4327"
     http_endpoint: "0.0.0.0:4328"
 
+  # Alternative acceptor: the Prometheus HTTP query API (/api/v1/query, ...).
+  # Add it to a pipeline's `acceptors` to let Prometheus clients query through
+  # the proxy. Each acceptor feeds exactly one pipeline.
+  # prometheus:
+  #   endpoint: "0.0.0.0:9095"
+
 processors:
   # Gateway: bearer auth + per-tenant rate limiting. Runs first.
   authratelimit:

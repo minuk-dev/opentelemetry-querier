@@ -15,6 +15,7 @@ dist:
 
 acceptors:
   - gomod: github.com/minuk-dev/opentelemetry-querier/acceptor/otqp
+  - gomod: github.com/minuk-dev/opentelemetry-querier/acceptor/prometheusacceptor
 
 processors:
   - gomod: github.com/minuk-dev/opentelemetry-querier/processor/authratelimit

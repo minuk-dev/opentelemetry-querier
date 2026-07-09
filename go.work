@@ -3,6 +3,7 @@ go 1.25.4
 use (
 	./acceptor
 	./acceptor/otqp
+	./acceptor/prometheusacceptor
 	./cmd/builder
 	./cmd/querier
 	./component
