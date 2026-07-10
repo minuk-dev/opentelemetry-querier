@@ -36,6 +36,10 @@ jobs:
           VERSION: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          # nullglob: an archive pattern that matches nothing (e.g. no windows
+          # target) expands to nothing instead of a literal, so editing the
+          # platform list below never leaves a dangling glob.
+          shopt -s nullglob
           mkdir -p dist
           platforms="linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64"
           for platform in $platforms; do
@@ -63,8 +67,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # nullglob so a missing archive kind drops out instead of passing a
+          # literal pattern to gh; gather the real artifacts into an array.
+          shopt -s nullglob
+          assets=(dist/*.tar.gz dist/*.zip dist/checksums_*.txt)
           gh release create "${{ github.ref_name }}" \
             --repo "${{ github.repository }}" \
             --title "${{ github.ref_name }}" \
             --generate-notes \
-            dist/*.tar.gz dist/*.zip dist/checksums_*.txt
+            "${assets[@]}"
