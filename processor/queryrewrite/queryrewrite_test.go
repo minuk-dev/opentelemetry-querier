@@ -63,12 +63,6 @@ func rewriteCases() []rewriteCase {
 			},
 			want: `up{namespace="prod"}`,
 		},
-		{
-			name:  "non-promql passes through",
-			cfg:   tenantEnforce,
-			query: withTenant(&qdata.Query{Expr: `{job="x"}`, Dialect: "logql"}),
-			want:  `{job="x"}`,
-		},
 	}
 }
 
@@ -113,8 +107,7 @@ func TestProcessQueryDispatchesByDialect(t *testing.T) {
 	t.Parallel()
 
 	stub := &stubRewriter{dialect: "logql", gotPreds: nil}
-	proc := queryrewrite.New(queryrewrite.Config{EnforceLabels: nil})
-	proc.Register(stub)
+	proc := queryrewrite.New(queryrewrite.Config{EnforceLabels: nil}, queryrewrite.WithRewriter(stub))
 
 	query := &qdata.Query{
 		Expr:             `{job="x"}`,
@@ -136,12 +129,29 @@ func TestProcessQueryDispatchesByDialect(t *testing.T) {
 	}
 }
 
-func TestProcessQueryUnknownDialectPassesThrough(t *testing.T) {
+func TestProcessQueryUnknownDialectWithEnforcementFailsClosed(t *testing.T) {
 	t.Parallel()
 
 	proc := queryrewrite.New(queryrewrite.Config{
 		EnforceLabels: []queryrewrite.EnforceLabel{{Name: "tenant", Value: "acme", FromTenant: false}},
 	})
+
+	query := &qdata.Query{Expr: `SELECT * FROM t`, Dialect: "sql"}
+
+	err := proc.ProcessQuery(context.Background(), query)
+	if err == nil {
+		t.Fatal("expected fail-closed error enforcing matchers on an unsupported dialect")
+	}
+
+	if got := query.GetExpr(); got != `SELECT * FROM t` {
+		t.Fatalf("expr mutated on failure: %q", got)
+	}
+}
+
+func TestProcessQueryUnknownDialectNoEnforcementPassesThrough(t *testing.T) {
+	t.Parallel()
+
+	proc := queryrewrite.New(queryrewrite.Config{EnforceLabels: nil})
 
 	query := &qdata.Query{Expr: `SELECT * FROM t`, Dialect: "sql"}
 

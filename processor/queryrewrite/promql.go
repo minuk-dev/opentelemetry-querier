@@ -15,7 +15,9 @@ import (
 const PromQLDialect = "promql"
 
 // errUnknownMatchOp is returned when a matcher uses an unrecognized operator.
-var errUnknownMatchOp = errors.New("queryrewrite: unknown match op")
+// Error strings here carry no package prefix; ProcessQuery adds the single
+// "queryrewrite: <dialect>:" prefix at the package boundary.
+var errUnknownMatchOp = errors.New("unknown match op")
 
 // promqlRewriter injects enforced matchers into a PromQL expression's AST,
 // matching the prom-label-proxy technique: every vector/matrix selector gains the
@@ -42,7 +44,7 @@ func (promqlRewriter) Enforce(expr string, preds []*qdata.LabelMatcher) (string,
 
 	astExpr, err := parser.ParseExpr(expr)
 	if err != nil {
-		return "", fmt.Errorf("queryrewrite: parse: %w", err)
+		return "", fmt.Errorf("parse: %w", err)
 	}
 
 	parser.Inspect(astExpr, func(node parser.Node, _ []parser.Node) error {
@@ -93,7 +95,7 @@ func toLabelsMatcher(matcher *qdata.LabelMatcher) (*labels.Matcher, error) {
 
 	built, err := labels.NewMatcher(matchType, matcher.GetName(), matcher.GetValue())
 	if err != nil {
-		return nil, fmt.Errorf("queryrewrite: new matcher: %w", err)
+		return nil, fmt.Errorf("new matcher: %w", err)
 	}
 
 	return built, nil
