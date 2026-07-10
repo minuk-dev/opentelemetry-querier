@@ -1,0 +1,18 @@
+# Keep the build context to source only; the image is built from the Go
+# workspace (go.work + all modules).
+.git
+.github
+
+# Build outputs / local binaries (see .gitignore).
+bin/
+dist/
+*.exe
+*.out
+*.test
+cmd/querier/querier
+cmd/builder/builder
+
+# Editor / OS cruft.
+.DS_Store
+.idea/
+.vscode/
