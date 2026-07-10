@@ -92,3 +92,65 @@ func TestProcessQuery(t *testing.T) {
 		})
 	}
 }
+
+// stubRewriter is a DialectRewriter that records the predicates it received and
+// returns a fixed expression, letting the test assert the processor dispatches by
+// dialect and hands over the collected predicates.
+type stubRewriter struct {
+	dialect  string
+	gotPreds []*qdata.LabelMatcher
+}
+
+func (s *stubRewriter) Dialect() string { return s.dialect }
+
+func (s *stubRewriter) Enforce(_ string, preds []*qdata.LabelMatcher) (string, error) {
+	s.gotPreds = preds
+
+	return "rewritten-by-stub", nil
+}
+
+func TestProcessQueryDispatchesByDialect(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRewriter{dialect: "logql", gotPreds: nil}
+	proc := queryrewrite.New(queryrewrite.Config{EnforceLabels: nil})
+	proc.Register(stub)
+
+	query := &qdata.Query{
+		Expr:             `{job="x"}`,
+		Dialect:          "logql",
+		EnforcedMatchers: []*qdata.LabelMatcher{{Name: "tenant", Op: qdata.MatchEqual, Value: "acme"}},
+	}
+
+	err := proc.ProcessQuery(context.Background(), query)
+	if err != nil {
+		t.Fatalf("ProcessQuery: %v", err)
+	}
+
+	if got := query.GetExpr(); got != "rewritten-by-stub" {
+		t.Fatalf("expr = %q, want registered rewriter output", got)
+	}
+
+	if len(stub.gotPreds) != 1 || stub.gotPreds[0].GetValue() != "acme" {
+		t.Fatalf("stub received preds = %+v, want the enforced tenant matcher", stub.gotPreds)
+	}
+}
+
+func TestProcessQueryUnknownDialectPassesThrough(t *testing.T) {
+	t.Parallel()
+
+	proc := queryrewrite.New(queryrewrite.Config{
+		EnforceLabels: []queryrewrite.EnforceLabel{{Name: "tenant", Value: "acme", FromTenant: false}},
+	})
+
+	query := &qdata.Query{Expr: `SELECT * FROM t`, Dialect: "sql"}
+
+	err := proc.ProcessQuery(context.Background(), query)
+	if err != nil {
+		t.Fatalf("ProcessQuery: %v", err)
+	}
+
+	if got := query.GetExpr(); got != `SELECT * FROM t` {
+		t.Fatalf("unknown dialect was rewritten: %q", got)
+	}
+}
