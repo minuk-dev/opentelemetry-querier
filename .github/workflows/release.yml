@@ -46,7 +46,9 @@ jobs:
             stage="querier_${VERSION}_${os}_${arch}"
             mkdir -p "dist/${stage}"
             echo "::group::build ${platform}"
-            GOOS="$os" GOARCH="$arch" go build -trimpath -o "dist/${stage}/${bin}" ./cmd/querier
+            GOOS="$os" GOARCH="$arch" go build -trimpath \
+              -ldflags "-s -w -X main.version=${VERSION}" \
+              -o "dist/${stage}/${bin}" ./cmd/querier
             cp LICENSE README.md config.yaml "dist/${stage}/"
             if [ "$os" = "windows" ]; then
               (cd dist && zip -qr "${stage}.zip" "${stage}")

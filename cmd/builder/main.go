@@ -289,7 +289,13 @@ import (
 	"{{ .Module }}/querier"
 )
 
-var buildInfo = component.BuildInfo{Command: "{{ .Command }}", Version: "{{ .Version }}"}
+// version is the distribution version. The builder manifest's dist.version
+// seeds it, but release builds override it at link time:
+//
+//	go build -ldflags "-X main.version=v1.2.3" ./cmd/{{ .Command }}
+var version = "{{ .Version }}"
+
+var buildInfo = component.BuildInfo{Command: "{{ .Command }}", Version: version}
 
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to the runtime config file")

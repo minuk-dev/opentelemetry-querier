@@ -18,7 +18,13 @@ import (
 	"github.com/minuk-dev/opentelemetry-querier/querier"
 )
 
-var buildInfo = component.BuildInfo{Command: "querier", Version: "dev"}
+// version is the distribution version. The builder manifest's dist.version
+// seeds it, but release builds override it at link time:
+//
+//	go build -ldflags "-X main.version=v1.2.3" ./cmd/querier
+var version = "dev"
+
+var buildInfo = component.BuildInfo{Command: "querier", Version: version}
 
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to the runtime config file")

@@ -9,9 +9,13 @@ generate:
 build-dist:
 	go run ./cmd/builder --config builder.yaml
 
+# Version stamped into the binary (see main.version). Overridable, e.g.
+# `make build VERSION=v1.2.3`; defaults to the current git description.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+
 # Build the distribution binary.
 build:
-	go build -o bin/querier ./cmd/querier
+	go build -ldflags "-X main.version=$(VERSION)" -o bin/querier ./cmd/querier
 
 test:
 	go test ./...
