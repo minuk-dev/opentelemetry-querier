@@ -6,6 +6,7 @@
 package qdata
 
 import (
+	"errors"
 	"sort"
 	"strings"
 	"time"
@@ -29,6 +30,12 @@ type (
 	Modifier = qdatav1.Modifier
 	// LabelMatcher is a single attribute predicate to enforce on a query.
 	LabelMatcher = qdatav1.LabelMatcher
+	// Predicate is one node of an enforcement predicate tree (leaf or bool expr).
+	Predicate = qdatav1.Predicate
+	// BoolExpr is a boolean combination of child Predicates.
+	BoolExpr = qdatav1.BoolExpr
+	// BoolOp is the operator combining a BoolExpr's operands.
+	BoolOp = qdatav1.BoolOp
 	// HeaderValues wraps the repeated values of one header.
 	HeaderValues = qdatav1.HeaderValues
 
@@ -80,6 +87,10 @@ const (
 	MatchNotEqual  = qdatav1.MatchOp_MATCH_OP_NOT_EQUAL
 	MatchRegexp    = qdatav1.MatchOp_MATCH_OP_REGEXP
 	MatchNotRegexp = qdatav1.MatchOp_MATCH_OP_NOT_REGEXP
+
+	BoolAnd = qdatav1.BoolOp_BOOL_OP_AND
+	BoolOr  = qdatav1.BoolOp_BOOL_OP_OR
+	BoolNot = qdatav1.BoolOp_BOOL_OP_NOT
 
 	MetricGauge             = qdatav1.MetricType_METRIC_TYPE_GAUGE
 	MetricCumulativeCounter = qdatav1.MetricType_METRIC_TYPE_CUMULATIVE_COUNTER
@@ -300,6 +311,121 @@ func KnownDialect(dialect string) bool {
 	default:
 		return false
 	}
+}
+
+// ---- Enforcement predicate trees (design note #10, Phase 2) ----
+
+// Predicate-tree errors. These report structural (shape) problems, not dialect
+// support: a well-formed tree may still be unenforceable by a given injector.
+var (
+	errNilPredicate   = errors.New("qdata: nil predicate")
+	errEmptyPredicate = errors.New("qdata: predicate has no leaf or bool node set")
+	errNilLeaf        = errors.New("qdata: predicate leaf is nil")
+	errNotArity       = errors.New("qdata: NOT predicate must have exactly one operand")
+	errBoolNoOperands = errors.New("qdata: AND/OR predicate needs at least one operand")
+	errUnknownBoolOp  = errors.New("qdata: unknown bool op")
+)
+
+// LeafPredicate wraps a LabelMatcher as a predicate-tree leaf.
+func LeafPredicate(matcher *LabelMatcher) *Predicate {
+	return &Predicate{Node: &qdatav1.Predicate_Leaf{Leaf: matcher}}
+}
+
+// BoolPredicate builds a boolean predicate node combining operands with op.
+func BoolPredicate(op BoolOp, operands ...*Predicate) *Predicate {
+	return &Predicate{Node: &qdatav1.Predicate_BoolExpr{BoolExpr: &BoolExpr{Op: op, Operands: operands}}}
+}
+
+// ValidatePredicate reports whether p is a structurally well-formed predicate
+// tree: every node sets a leaf or a bool expr, a leaf is non-nil, NOT has exactly
+// one operand, AND/OR have at least one, and every descendant is valid too. It
+// checks shape only, not whether a dialect can enforce it.
+func ValidatePredicate(p *Predicate) error {
+	if p == nil {
+		return errNilPredicate
+	}
+
+	switch node := p.GetNode().(type) {
+	case *qdatav1.Predicate_Leaf:
+		if node.Leaf == nil {
+			return errNilLeaf
+		}
+
+		return nil
+	case *qdatav1.Predicate_BoolExpr:
+		return validateBoolExpr(node.BoolExpr)
+	default:
+		return errEmptyPredicate
+	}
+}
+
+func validateBoolExpr(expr *BoolExpr) error {
+	if expr == nil {
+		return errEmptyPredicate
+	}
+
+	switch expr.GetOp() {
+	case BoolNot:
+		if len(expr.GetOperands()) != 1 {
+			return errNotArity
+		}
+	case BoolAnd, BoolOr:
+		if len(expr.GetOperands()) == 0 {
+			return errBoolNoOperands
+		}
+	default:
+		return errUnknownBoolOp
+	}
+
+	for _, operand := range expr.GetOperands() {
+		err := ValidatePredicate(operand)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// FlattenConjunction returns the leaf matchers of preds when the whole forest is
+// a pure conjunction of leaves — a top-level AND, no OR/NOT — so a label-oriented
+// injector (e.g. PromQL) can consume the common isolation case. ok is false when
+// any node needs real boolean composition, letting the caller fail closed rather
+// than silently drop enforcement. The preds slice (a Query.enforced_predicates
+// forest) is itself implicitly AND-ed; a nil/empty forest flattens to no matchers
+// with ok true.
+func FlattenConjunction(preds []*Predicate) ([]*LabelMatcher, bool) {
+	var out []*LabelMatcher
+
+	for _, pred := range preds {
+		if pred == nil {
+			return nil, false
+		}
+
+		switch node := pred.GetNode().(type) {
+		case *qdatav1.Predicate_Leaf:
+			if node.Leaf == nil {
+				return nil, false
+			}
+
+			out = append(out, node.Leaf)
+		case *qdatav1.Predicate_BoolExpr:
+			if node.BoolExpr.GetOp() != BoolAnd {
+				return nil, false
+			}
+
+			nested, ok := FlattenConjunction(node.BoolExpr.GetOperands())
+			if !ok {
+				return nil, false
+			}
+
+			out = append(out, nested...)
+		default:
+			return nil, false
+		}
+	}
+
+	return out, true
 }
 
 // ---- Feedback side channel (spec §Side Channel Feedback) ----

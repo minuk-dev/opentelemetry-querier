@@ -79,7 +79,7 @@ type DialectRewriter interface {
 `query.dialect` in the registry. This is the natural generalization of code that
 already exists, and unlocks per-dialect injectors without touching proto.
 
-### Phase 2 — Generalize enforcement representation
+### Phase 2 — Generalize enforcement representation ✅ representation done
 
 Keep the flat `enforced_matchers` as the 90% isolation path; add an *optional*
 recursive predicate for the rest:
@@ -88,13 +88,22 @@ recursive predicate for the rest:
 message Predicate {
   oneof node {
     LabelMatcher leaf = 1;
-    BoolExpr     bool = 2;   // AND/OR/NOT over child Predicates
+    BoolExpr     bool_expr = 2;   // AND/OR/NOT over child Predicates
   }
 }
 // Query gains: repeated Predicate enforced_predicates = 11;
 ```
 
 Only dialects whose injector supports it consume it; PromQL keeps using the flat list.
+
+Implemented (representation layer): `Predicate` / `BoolExpr` / `BoolOp` and
+`Query.enforced_predicates` are in the proto and re-exported from `qdata`, with
+constructors (`LeafPredicate`, `BoolPredicate`), a `ValidatePredicate`
+well-formedness check, and `FlattenConjunction` — which reduces a pure
+AND-of-leaves forest to a flat matcher list so a label-oriented injector can
+consume the common case and fail closed on real boolean composition (OR/NOT).
+Per-dialect *consumption* of the tree is deferred to the injector that needs it
+(PromQL still uses the flat list).
 
 ### Phase 3 — Cross-signal (heaviest, out of scope now)
 
