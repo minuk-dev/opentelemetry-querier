@@ -4,6 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/minuk-dev/opentelemetry-querier/processor/queryrewrite"
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
 )
@@ -24,6 +27,11 @@ func withTenant(q *qdata.Query) *qdata.Query {
 	qdata.SetTenantID(q, testTenant)
 
 	return q
+}
+
+// leafPred is a shortcut for an equality leaf predicate.
+func leafPred(name, value string) *qdata.Predicate {
+	return qdata.LeafPredicate(&qdata.LabelMatcher{Name: name, Op: qdata.MatchEqual, Value: value})
 }
 
 func rewriteCases() []rewriteCase {
@@ -63,6 +71,16 @@ func rewriteCases() []rewriteCase {
 			},
 			want: `up{namespace="prod"}`,
 		},
+		{
+			name: "enforced predicates conjunction injected",
+			cfg:  queryrewrite.Config{EnforceLabels: nil},
+			query: &qdata.Query{
+				Expr:               "up",
+				Dialect:            "promql",
+				EnforcedPredicates: []*qdata.Predicate{leafPred("namespace", "prod")},
+			},
+			want: `up{namespace="prod"}`,
+		},
 	}
 }
 
@@ -76,13 +94,8 @@ func TestProcessQuery(t *testing.T) {
 			proc := queryrewrite.New(testCase.cfg)
 
 			err := proc.ProcessQuery(context.Background(), testCase.query)
-			if err != nil {
-				t.Fatalf("ProcessQuery: %v", err)
-			}
-
-			if got := testCase.query.GetExpr(); got != testCase.want {
-				t.Fatalf("expr = %q, want %q", got, testCase.want)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, testCase.want, testCase.query.GetExpr())
 		})
 	}
 }
@@ -116,17 +129,51 @@ func TestProcessQueryDispatchesByDialect(t *testing.T) {
 	}
 
 	err := proc.ProcessQuery(context.Background(), query)
-	if err != nil {
-		t.Fatalf("ProcessQuery: %v", err)
+	require.NoError(t, err)
+	assert.Equal(t, "rewritten-by-stub", query.GetExpr())
+
+	require.Len(t, stub.gotPreds, 1)
+	assert.Equal(t, "acme", stub.gotPreds[0].GetValue())
+}
+
+func TestProcessQueryFoldsEnforcedPredicates(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRewriter{dialect: "promql", gotPreds: nil}
+	proc := queryrewrite.New(queryrewrite.Config{EnforceLabels: nil}, queryrewrite.WithRewriter(stub))
+
+	query := &qdata.Query{
+		Expr:             "up",
+		Dialect:          "promql",
+		EnforcedMatchers: []*qdata.LabelMatcher{{Name: "tenant", Op: qdata.MatchEqual, Value: "acme"}},
+		EnforcedPredicates: []*qdata.Predicate{
+			qdata.BoolPredicate(qdata.BoolAnd, leafPred("namespace", "prod"), leafPred("region", "eu")),
+		},
 	}
 
-	if got := query.GetExpr(); got != "rewritten-by-stub" {
-		t.Fatalf("expr = %q, want registered rewriter output", got)
+	err := proc.ProcessQuery(context.Background(), query)
+	require.NoError(t, err)
+
+	// Flat matcher (tenant) plus the two flattened conjunction leaves.
+	require.Len(t, stub.gotPreds, 3)
+}
+
+func TestProcessQueryEnforcedPredicatesBooleanFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	proc := queryrewrite.New(queryrewrite.Config{EnforceLabels: nil})
+
+	query := &qdata.Query{
+		Expr:    "up",
+		Dialect: "promql",
+		EnforcedPredicates: []*qdata.Predicate{
+			qdata.BoolPredicate(qdata.BoolOr, leafPred("env", "prod"), leafPred("env", "staging")),
+		},
 	}
 
-	if len(stub.gotPreds) != 1 || stub.gotPreds[0].GetValue() != "acme" {
-		t.Fatalf("stub received preds = %+v, want the enforced tenant matcher", stub.gotPreds)
-	}
+	err := proc.ProcessQuery(context.Background(), query)
+	require.Error(t, err, "OR predicate cannot be woven into PromQL selectors")
+	assert.Equal(t, "up", query.GetExpr(), "expr must be untouched on fail-closed")
 }
 
 func TestProcessQueryUnknownDialectWithEnforcementFailsClosed(t *testing.T) {
@@ -136,16 +183,11 @@ func TestProcessQueryUnknownDialectWithEnforcementFailsClosed(t *testing.T) {
 		EnforceLabels: []queryrewrite.EnforceLabel{{Name: "tenant", Value: "acme", FromTenant: false}},
 	})
 
-	query := &qdata.Query{Expr: `SELECT * FROM t`, Dialect: "sql"}
+	query := &qdata.Query{Expr: `SELECT 1`, Dialect: "sql"}
 
 	err := proc.ProcessQuery(context.Background(), query)
-	if err == nil {
-		t.Fatal("expected fail-closed error enforcing matchers on an unsupported dialect")
-	}
-
-	if got := query.GetExpr(); got != `SELECT * FROM t` {
-		t.Fatalf("expr mutated on failure: %q", got)
-	}
+	require.Error(t, err, "enforcing matchers on an unsupported dialect must fail closed")
+	assert.Equal(t, `SELECT 1`, query.GetExpr(), "expr must be untouched on failure")
 }
 
 func TestProcessQueryUnknownDialectNoEnforcementPassesThrough(t *testing.T) {
@@ -153,14 +195,9 @@ func TestProcessQueryUnknownDialectNoEnforcementPassesThrough(t *testing.T) {
 
 	proc := queryrewrite.New(queryrewrite.Config{EnforceLabels: nil})
 
-	query := &qdata.Query{Expr: `SELECT * FROM t`, Dialect: "sql"}
+	query := &qdata.Query{Expr: `SELECT 1`, Dialect: "sql"}
 
 	err := proc.ProcessQuery(context.Background(), query)
-	if err != nil {
-		t.Fatalf("ProcessQuery: %v", err)
-	}
-
-	if got := query.GetExpr(); got != `SELECT * FROM t` {
-		t.Fatalf("unknown dialect was rewritten: %q", got)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, `SELECT 1`, query.GetExpr(), "unknown dialect must not be rewritten")
 }
