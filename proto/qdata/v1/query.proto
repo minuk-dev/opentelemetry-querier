@@ -61,6 +61,33 @@ message LabelMatcher {
   string value = 3;
 }
 
+// BoolOp composes child Predicates into a boolean node. NOT takes exactly one
+// operand; AND and OR take one or more.
+enum BoolOp {
+  BOOL_OP_AND = 0; // deliberate default: an empty combination is a conjunction.
+  BOOL_OP_OR = 1;
+  BOOL_OP_NOT = 2;
+}
+
+// BoolExpr is a boolean combination of child Predicates — the recursive node of
+// an enforcement predicate tree (spec §4.2 richer enforcement).
+message BoolExpr {
+  BoolOp op = 1;
+  repeated Predicate operands = 2;
+}
+
+// Predicate is one node of an enforcement predicate tree: either a leaf
+// LabelMatcher or a boolean combination of child Predicates. It generalizes the
+// flat enforced_matchers conjunction to arbitrary AND/OR/NOT composition, for
+// dialects whose injector supports it (design note #10, Phase 2). The flat
+// enforced_matchers remains the default 90% isolation path.
+message Predicate {
+  oneof node {
+    LabelMatcher leaf = 1;
+    BoolExpr bool_expr = 2;
+  }
+}
+
 // HeaderValues wraps the repeated values of one HTTP header (proto3 maps cannot
 // have repeated values directly).
 message HeaderValues {
@@ -91,4 +118,10 @@ message Query {
 
   map<string, HeaderValues> header = 9; // inbound request headers.
   map<string, string> metadata = 10;    // processor-to-processor hints.
+
+  // enforced_predicates is the optional richer form of enforced_matchers: a
+  // forest of predicate trees (implicitly AND-ed) that supports boolean
+  // composition. Only dialects whose injector understands it consume it; PromQL
+  // keeps using the flat enforced_matchers. See design note #10, Phase 2.
+  repeated Predicate enforced_predicates = 11;
 }

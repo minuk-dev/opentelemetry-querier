@@ -75,6 +75,14 @@ func New(cfg Config) *Dispatcher {
 
 // Dispatch executes the query and returns a metrics result.
 func (d *Dispatcher) Dispatch(ctx context.Context, query *qdata.Query) (*qdata.Result, error) {
+	// The Prometheus HTTP API only speaks PromQL. Reject any other dialect
+	// rather than ship its text to an endpoint that would mis-parse it — the
+	// dispatcher's half of the dialect contract (design note #10, Phase 0).
+	if dialect := qdata.QueryDialect(query); dialect != qdata.DialectPromQL {
+		return nil, qerror.New(qerror.CodeInvalidArgument,
+			"promdispatcher: cannot execute %q dialect against the Prometheus API", dialect)
+	}
+
 	endpoint, form := d.buildRequest(query)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))

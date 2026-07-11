@@ -48,7 +48,7 @@ This changes the scope of Gap C.
 
 ## Design — four phases, increasing cost
 
-### Phase 0 — Pin the `dialect` contract (docs only, actionable now)
+### Phase 0 — Pin the `dialect` contract ✅ done
 
 Register the canonical dialect tags (`promql`, `logql`, `lucene`, `sql`) and state the
 invariant:
@@ -57,7 +57,11 @@ invariant:
 - a **processor** must no-op on dialects it can't parse (queryrewrite already does this,
   see `processor/queryrewrite/queryrewrite.go` dialect guard).
 
-Zero code risk; removes ambiguity about who may touch `expr`.
+Implemented: the canonical tags and the contract live in `qdata`
+(`Dialect{PromQL,LogQL,Lucene,SQL}`, `QueryDialect`, `KnownDialect`; see the doc
+comment there). `promdispatcher` now enforces the dispatcher half — it rejects any
+non-PromQL dialect with `CodeInvalidArgument` instead of shipping the text to the
+Prometheus API. Removes ambiguity about who may touch `expr`.
 
 ### Phase 1 — Make comprehension pluggable (high-value step)
 
@@ -75,7 +79,7 @@ type DialectRewriter interface {
 `query.dialect` in the registry. This is the natural generalization of code that
 already exists, and unlocks per-dialect injectors without touching proto.
 
-### Phase 2 — Generalize enforcement representation
+### Phase 2 — Generalize enforcement representation ✅ representation done
 
 Keep the flat `enforced_matchers` as the 90% isolation path; add an *optional*
 recursive predicate for the rest:
@@ -84,13 +88,22 @@ recursive predicate for the rest:
 message Predicate {
   oneof node {
     LabelMatcher leaf = 1;
-    BoolExpr     bool = 2;   // AND/OR/NOT over child Predicates
+    BoolExpr     bool_expr = 2;   // AND/OR/NOT over child Predicates
   }
 }
 // Query gains: repeated Predicate enforced_predicates = 11;
 ```
 
 Only dialects whose injector supports it consume it; PromQL keeps using the flat list.
+
+Implemented (representation layer): `Predicate` / `BoolExpr` / `BoolOp` and
+`Query.enforced_predicates` are in the proto and re-exported from `qdata`, with
+constructors (`LeafPredicate`, `BoolPredicate`), a `ValidatePredicate`
+well-formedness check, and `FlattenConjunction` — which reduces a pure
+AND-of-leaves forest to a flat matcher list so a label-oriented injector can
+consume the common case and fail closed on real boolean composition (OR/NOT).
+Per-dialect *consumption* of the tree is deferred to the injector that needs it
+(PromQL still uses the flat list).
 
 ### Phase 3 — Cross-signal (heaviest, out of scope now)
 

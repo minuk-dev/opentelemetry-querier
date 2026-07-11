@@ -6,6 +6,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/minuk-dev/opentelemetry-querier/dispatcher/promdispatcher"
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
 )
@@ -35,27 +38,16 @@ func TestDispatchVector(t *testing.T) {
 	server := newServer(t, http.StatusOK, body)
 
 	result, err := newDispatcher(server.URL).Dispatch(context.Background(), &qdata.Query{Expr: "up"})
-	if err != nil {
-		t.Fatalf("Dispatch: %v", err)
-	}
+	require.NoError(t, err)
 
 	series := result.GetMetrics().GetSeries()
-	if len(series) != 1 {
-		t.Fatalf("series = %d, want 1", len(series))
-	}
-
-	if series[0].GetName() != "up" {
-		t.Fatalf("name = %q, want up", series[0].GetName())
-	}
-
-	if series[0].GetType() != qdata.MetricUnknown {
-		t.Fatalf("type = %v, want UNKNOWN (Prometheus is type-less)", series[0].GetType())
-	}
+	require.Len(t, series, 1)
+	assert.Equal(t, "up", series[0].GetName())
+	assert.Equal(t, qdata.MetricUnknown, series[0].GetType(), "Prometheus is type-less")
 
 	value, ok := qdata.AttrGet(series[0].GetAttributes(), "job")
-	if !ok || value.GetStringValue() != "api" {
-		t.Fatalf("job attribute missing or wrong")
-	}
+	require.True(t, ok, "job attribute missing")
+	assert.Equal(t, "api", value.GetStringValue())
 }
 
 func TestDispatchMatrix(t *testing.T) {
@@ -66,14 +58,11 @@ func TestDispatchMatrix(t *testing.T) {
 	server := newServer(t, http.StatusOK, body)
 
 	result, err := newDispatcher(server.URL).Dispatch(context.Background(), &qdata.Query{Expr: "rps"})
-	if err != nil {
-		t.Fatalf("Dispatch: %v", err)
-	}
+	require.NoError(t, err)
 
 	series := result.GetMetrics().GetSeries()
-	if len(series) != 1 || len(series[0].GetPoints()) != 2 {
-		t.Fatalf("want 1 series with 2 points")
-	}
+	require.Len(t, series, 1)
+	assert.Len(t, series[0].GetPoints(), 2)
 }
 
 func TestDispatchSurfacesWarnings(t *testing.T) {
@@ -83,13 +72,10 @@ func TestDispatchSurfacesWarnings(t *testing.T) {
 	server := newServer(t, http.StatusOK, body)
 
 	result, err := newDispatcher(server.URL).Dispatch(context.Background(), &qdata.Query{Expr: "up"})
-	if err != nil {
-		t.Fatalf("Dispatch: %v", err)
-	}
+	require.NoError(t, err)
 
-	if got := len(result.GetFeedback().GetNotifications()); got != 1 {
-		t.Fatalf("notifications = %d, want 1 (upstream warning surfaced via feedback channel)", got)
-	}
+	assert.Len(t, result.GetFeedback().GetNotifications(), 1,
+		"upstream warning should surface via the feedback channel")
 }
 
 func TestDispatchUpstreamError(t *testing.T) {
@@ -98,7 +84,22 @@ func TestDispatchUpstreamError(t *testing.T) {
 	server := newServer(t, http.StatusInternalServerError, "boom")
 
 	_, err := newDispatcher(server.URL).Dispatch(context.Background(), &qdata.Query{Expr: "up"})
-	if err == nil {
-		t.Fatal("expected error for upstream 500")
-	}
+	require.Error(t, err, "upstream 500 should be an error")
+}
+
+func TestDispatchRejectsNonPromQLDialect(t *testing.T) {
+	t.Parallel()
+
+	// The upstream must never be contacted: the dialect guard has to fail closed
+	// before any request is built or sent.
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("upstream must not be called for an unsupported dialect")
+	}))
+	t.Cleanup(server.Close)
+
+	_, err := newDispatcher(server.URL).Dispatch(
+		context.Background(),
+		&qdata.Query{Expr: `{job="x"}`, Dialect: qdata.DialectLogQL},
+	)
+	require.Error(t, err, "non-PromQL dialect must be rejected")
 }
