@@ -1,25 +1,20 @@
 // Package queryrewrite implements the query-transformation processor. It weaves
 // enforced label matchers (from the tenant processor and from static config)
-// into the PromQL expression's AST, matching the prom-label-proxy technique:
-// every vector/matrix selector gains the enforced matchers, so a query cannot
-// escape its tenant or scope. This is the spec §4.1 "best-effort query proxy"
-// transpilation step for the PromQL dialect.
+// into the query expression, so a query cannot escape its tenant or scope. The
+// processor itself is dialect-neutral: it collects the enforced predicates and
+// delegates the parse-and-inject to the DialectRewriter registered for the
+// query's dialect (only PromQL today). This is the spec §4.1 "best-effort query
+// proxy" step; see docs/design/qdata-cross-language-query.md for the design.
 package queryrewrite
 
 import (
 	"context"
-	"errors"
 	"fmt"
-
-	"github.com/prometheus/prometheus/model/labels"
-	"github.com/prometheus/prometheus/promql/parser"
 
 	"github.com/minuk-dev/opentelemetry-querier/processor"
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
+	"github.com/minuk-dev/opentelemetry-querier/qerror"
 )
-
-// errUnknownMatchOp is returned when a matcher uses an unrecognized operator.
-var errUnknownMatchOp = errors.New("queryrewrite: unknown match op")
 
 // EnforceLabel is a statically-configured matcher to inject into every query.
 type EnforceLabel struct {
@@ -35,40 +30,67 @@ type Config struct {
 	EnforceLabels []EnforceLabel `mapstructure:"enforce_labels"`
 }
 
-// Processor rewrites PromQL queries.
+// Option customizes a Processor at construction.
+type Option func(*Processor)
+
+// WithRewriter registers a dialect rewriter, letting a deployment teach the
+// processor a new query language without changing this package. It applies at
+// construction only, so the rewriter set is immutable once New returns and is
+// therefore safe to read from concurrent ProcessQuery calls.
+func WithRewriter(rewriter DialectRewriter) Option {
+	return func(p *Processor) { p.rewriters[rewriter.Dialect()] = rewriter }
+}
+
+// Processor rewrites queries by injecting enforced predicates via a per-dialect
+// rewriter. The rewriter set is fixed at construction (see WithRewriter).
 type Processor struct {
 	processor.Base
 
-	cfg Config
+	cfg       Config
+	rewriters map[string]DialectRewriter
 }
 
-// New builds the query-rewrite processor.
-func New(cfg Config) *Processor { return &Processor{Base: processor.Base{}, cfg: cfg} }
+// New builds the query-rewrite processor seeded with the built-in dialect
+// rewriters (PromQL), plus any supplied via WithRewriter.
+func New(cfg Config, opts ...Option) *Processor {
+	proc := &Processor{Base: processor.Base{}, cfg: cfg, rewriters: defaultRewriters()}
 
-// ProcessQuery injects enforced matchers into the query expression. It only
-// touches the PromQL dialect; other dialects pass through untouched (a real
-// deployment would register a rewriter per dialect).
+	for _, opt := range opts {
+		opt(proc)
+	}
+
+	return proc
+}
+
+// ProcessQuery injects the enforced matchers into the query expression. When
+// there is nothing to enforce the query is left untouched. When there is, but no
+// registered rewriter understands the query's dialect (empty means PromQL), it
+// fails closed rather than forward an unenforced query that could escape its
+// tenant or scope.
 func (p *Processor) ProcessQuery(_ context.Context, query *qdata.Query) error {
 	if query.GetExpr() == "" {
 		return nil
 	}
 
-	if dialect := query.GetDialect(); dialect != "" && dialect != "promql" {
+	preds := p.collectPredicates(query)
+	if len(preds) == 0 {
 		return nil
 	}
 
-	matchers, err := p.collectMatchers(query)
-	if err != nil {
-		return err
+	dialect := query.GetDialect()
+	if dialect == "" {
+		dialect = PromQLDialect
 	}
 
-	if len(matchers) == 0 {
-		return nil
+	rewriter, ok := p.rewriters[dialect]
+	if !ok {
+		return qerror.New(qerror.CodeInternal,
+			"queryrewrite: cannot enforce matchers on unsupported dialect %q", dialect)
 	}
 
-	rewritten, err := enforce(query.GetExpr(), matchers)
+	rewritten, err := rewriter.Enforce(query.GetExpr(), preds)
 	if err != nil {
-		return err
+		return fmt.Errorf("queryrewrite: %s: %w", dialect, err)
 	}
 
 	query.Expr = rewritten
@@ -77,19 +99,17 @@ func (p *Processor) ProcessQuery(_ context.Context, query *qdata.Query) error {
 	return nil
 }
 
-// collectMatchers merges the query's already-registered enforced matchers (e.g.
-// from the tenant processor) with this processor's static config.
-func (p *Processor) collectMatchers(query *qdata.Query) ([]*labels.Matcher, error) {
-	var out []*labels.Matcher
-
-	for _, enforced := range query.GetEnforcedMatchers() {
-		matcher, err := toLabelsMatcher(enforced)
-		if err != nil {
-			return nil, err
-		}
-
-		out = append(out, matcher)
+// collectPredicates merges the query's already-registered enforced matchers (e.g.
+// from the tenant processor) with this processor's static config. When there is
+// no static config it returns the query's slice directly, since the rewriter only
+// reads the predicates; the defensive copy is taken only when config is appended.
+func (p *Processor) collectPredicates(query *qdata.Query) []*qdata.LabelMatcher {
+	enforced := query.GetEnforcedMatchers()
+	if len(p.cfg.EnforceLabels) == 0 {
+		return enforced
 	}
+
+	preds := append([]*qdata.LabelMatcher(nil), enforced...)
 
 	for _, label := range p.cfg.EnforceLabels {
 		value := label.Value
@@ -101,83 +121,12 @@ func (p *Processor) collectMatchers(query *qdata.Query) ([]*labels.Matcher, erro
 			continue
 		}
 
-		matcher, err := labels.NewMatcher(labels.MatchEqual, label.Name, value)
-		if err != nil {
-			return nil, fmt.Errorf("queryrewrite: new matcher: %w", err)
-		}
-
-		out = append(out, matcher)
+		preds = append(preds, &qdata.LabelMatcher{
+			Name:  label.Name,
+			Op:    qdata.MatchEqual,
+			Value: value,
+		})
 	}
 
-	return out, nil
-}
-
-// enforce parses expr, injects matchers into every selector, and re-renders it.
-func enforce(expr string, matchers []*labels.Matcher) (string, error) {
-	// Prometheus 3.x replaced the package-level ParseExpr with a Parser instance.
-	// A fresh parser per call keeps enforce safe for concurrent queries.
-	promQLParser := parser.NewParser(parser.Options{
-		EnableExperimentalFunctions:  false,
-		ExperimentalDurationExpr:     false,
-		EnableExtendedRangeSelectors: false,
-		EnableBinopFillModifiers:     false,
-	})
-
-	astExpr, err := promQLParser.ParseExpr(expr)
-	if err != nil {
-		return "", fmt.Errorf("queryrewrite: parse: %w", err)
-	}
-
-	parser.Inspect(astExpr, func(node parser.Node, _ []parser.Node) error {
-		if selector, ok := node.(*parser.VectorSelector); ok {
-			selector.LabelMatchers = mergeMatchers(selector.LabelMatchers, matchers)
-		}
-
-		return nil
-	})
-
-	return astExpr.String(), nil
-}
-
-// mergeMatchers appends the enforced matchers, dropping any existing matcher on
-// the same label so enforcement always wins.
-func mergeMatchers(existing, enforced []*labels.Matcher) []*labels.Matcher {
-	enforcedNames := make(map[string]struct{}, len(enforced))
-	for _, matcher := range enforced {
-		enforcedNames[matcher.Name] = struct{}{}
-	}
-
-	out := existing[:0:0]
-
-	for _, matcher := range existing {
-		if _, clash := enforcedNames[matcher.Name]; !clash {
-			out = append(out, matcher)
-		}
-	}
-
-	return append(out, enforced...)
-}
-
-func toLabelsMatcher(matcher *qdata.LabelMatcher) (*labels.Matcher, error) {
-	var matchType labels.MatchType
-
-	switch matcher.GetOp() {
-	case qdata.MatchEqual:
-		matchType = labels.MatchEqual
-	case qdata.MatchNotEqual:
-		matchType = labels.MatchNotEqual
-	case qdata.MatchRegexp:
-		matchType = labels.MatchRegexp
-	case qdata.MatchNotRegexp:
-		matchType = labels.MatchNotRegexp
-	default:
-		return nil, fmt.Errorf("%w %v", errUnknownMatchOp, matcher.GetOp())
-	}
-
-	built, err := labels.NewMatcher(matchType, matcher.GetName(), matcher.GetValue())
-	if err != nil {
-		return nil, fmt.Errorf("queryrewrite: new matcher: %w", err)
-	}
-
-	return built, nil
+	return preds
 }
