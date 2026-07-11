@@ -3,6 +3,8 @@ package qdata_test
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
 )
 
@@ -35,9 +37,7 @@ func TestQueryDialect(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := qdata.QueryDialect(testCase.query); got != testCase.want {
-				t.Fatalf("QueryDialect = %q, want %q", got, testCase.want)
-			}
+			assert.Equal(t, testCase.want, qdata.QueryDialect(testCase.query))
 		})
 	}
 }
@@ -45,16 +45,11 @@ func TestQueryDialect(t *testing.T) {
 func TestKnownDialect(t *testing.T) {
 	t.Parallel()
 
-	known := []string{qdata.DialectPromQL, qdata.DialectLogQL, qdata.DialectLucene, qdata.DialectSQL}
-	for _, dialect := range known {
-		if !qdata.KnownDialect(dialect) {
-			t.Errorf("KnownDialect(%q) = false, want true", dialect)
-		}
+	for _, dialect := range []string{qdata.DialectPromQL, qdata.DialectLogQL, qdata.DialectLucene, qdata.DialectSQL} {
+		assert.Truef(t, qdata.KnownDialect(dialect), "KnownDialect(%q)", dialect)
 	}
 
 	for _, dialect := range []string{"", "cypher", "PromQL"} {
-		if qdata.KnownDialect(dialect) {
-			t.Errorf("KnownDialect(%q) = true, want false", dialect)
-		}
+		assert.Falsef(t, qdata.KnownDialect(dialect), "KnownDialect(%q)", dialect)
 	}
 }
