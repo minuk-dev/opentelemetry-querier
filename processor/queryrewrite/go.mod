@@ -6,6 +6,7 @@ require (
 	github.com/minuk-dev/opentelemetry-querier/component v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/processor v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/qdata v0.0.0
+	github.com/minuk-dev/opentelemetry-querier/qerror v0.0.0
 	github.com/prometheus/prometheus v0.313.0
 )
 
@@ -33,3 +34,5 @@ replace github.com/minuk-dev/opentelemetry-querier/gen => ../../gen
 replace github.com/minuk-dev/opentelemetry-querier/processor => ..
 
 replace github.com/minuk-dev/opentelemetry-querier/qdata => ../../qdata
+
+replace github.com/minuk-dev/opentelemetry-querier/qerror => ../../qerror
