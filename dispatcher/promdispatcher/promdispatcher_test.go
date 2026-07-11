@@ -102,3 +102,22 @@ func TestDispatchUpstreamError(t *testing.T) {
 		t.Fatal("expected error for upstream 500")
 	}
 }
+
+func TestDispatchRejectsNonPromQLDialect(t *testing.T) {
+	t.Parallel()
+
+	// The upstream must never be contacted: the dialect guard has to fail closed
+	// before any request is built or sent.
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("upstream must not be called for an unsupported dialect")
+	}))
+	t.Cleanup(server.Close)
+
+	_, err := newDispatcher(server.URL).Dispatch(
+		context.Background(),
+		&qdata.Query{Expr: `{job="x"}`, Dialect: qdata.DialectLogQL},
+	)
+	if err == nil {
+		t.Fatal("expected error dispatching a non-PromQL dialect to the Prometheus API")
+	}
+}

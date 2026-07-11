@@ -48,7 +48,7 @@ This changes the scope of Gap C.
 
 ## Design — four phases, increasing cost
 
-### Phase 0 — Pin the `dialect` contract (docs only, actionable now)
+### Phase 0 — Pin the `dialect` contract ✅ done
 
 Register the canonical dialect tags (`promql`, `logql`, `lucene`, `sql`) and state the
 invariant:
@@ -57,7 +57,11 @@ invariant:
 - a **processor** must no-op on dialects it can't parse (queryrewrite already does this,
   see `processor/queryrewrite/queryrewrite.go` dialect guard).
 
-Zero code risk; removes ambiguity about who may touch `expr`.
+Implemented: the canonical tags and the contract live in `qdata`
+(`Dialect{PromQL,LogQL,Lucene,SQL}`, `QueryDialect`, `KnownDialect`; see the doc
+comment there). `promdispatcher` now enforces the dispatcher half — it rejects any
+non-PromQL dialect with `CodeInvalidArgument` instead of shipping the text to the
+Prometheus API. Removes ambiguity about who may touch `expr`.
 
 ### Phase 1 — Make comprehension pluggable (high-value step)
 

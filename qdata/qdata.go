@@ -262,6 +262,46 @@ func TenantID(q *Query) string { return Metadata(q, MetadataTenantID) }
 // SetTenantID records the resolved tenant id in the Query's metadata.
 func SetTenantID(q *Query, id string) { SetMetadata(q, MetadataTenantID, id) }
 
+// Canonical dialect tags name the query language carried in Query.expr — the
+// "DSL text transport" layer of the QLSWG spec (§4.1, best-effort proxy). These
+// are the registered values for Query.dialect; an empty dialect means the
+// default, DialectPromQL.
+//
+// The dialect contract (design note #10, Phase 0): components agree on who may
+// touch expr for a given dialect.
+//   - A dispatcher must reject (or pass through unchanged) a dialect it can't
+//     execute against its backend — never mis-send another language's text.
+//   - A processor must no-op, or fail closed, on a dialect it can't parse rather
+//     than silently forward an unenforced query.
+const (
+	DialectPromQL = "promql"
+	DialectLogQL  = "logql"
+	DialectLucene = "lucene"
+	DialectSQL    = "sql"
+)
+
+// QueryDialect returns q's dialect, resolving the empty default to DialectPromQL
+// so callers don't each special-case the empty string.
+func QueryDialect(q *Query) string {
+	if d := q.GetDialect(); d != "" {
+		return d
+	}
+
+	return DialectPromQL
+}
+
+// KnownDialect reports whether dialect is one of the canonical registered tags.
+// It does not imply any given component can execute it — only that the tag is
+// part of the recognized vocabulary.
+func KnownDialect(dialect string) bool {
+	switch dialect {
+	case DialectPromQL, DialectLogQL, DialectLucene, DialectSQL:
+		return true
+	default:
+		return false
+	}
+}
+
 // ---- Feedback side channel (spec §Side Channel Feedback) ----
 
 // Notify appends a notification to a Result's feedback channel, allocating it
