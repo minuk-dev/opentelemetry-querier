@@ -73,6 +73,22 @@ func (p *Processor) ProcessQuery(_ context.Context, query *qdata.Query) error {
 	}
 
 	preds := p.collectPredicates(query)
+
+	// Fold the richer enforced_predicates tree into the flat predicate list. A
+	// pure AND-of-leaves forest flattens into more matchers; a tree that needs
+	// real boolean composition (OR/NOT) can't be woven into label selectors, so
+	// fail closed rather than forward an under-enforced query.
+	if trees := query.GetEnforcedPredicates(); len(trees) > 0 {
+		flat, ok := qdata.FlattenConjunction(trees)
+		if !ok {
+			return qerror.New(qerror.CodeInternal,
+				"queryrewrite: enforced_predicates need boolean composition the injector cannot apply")
+		}
+
+		// Copy defensively: collectPredicates may return the query's own slice.
+		preds = append(append([]*qdata.LabelMatcher(nil), preds...), flat...)
+	}
+
 	if len(preds) == 0 {
 		return nil
 	}

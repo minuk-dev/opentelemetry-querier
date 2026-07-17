@@ -79,7 +79,7 @@ type DialectRewriter interface {
 `query.dialect` in the registry. This is the natural generalization of code that
 already exists, and unlocks per-dialect injectors without touching proto.
 
-### Phase 2 — Generalize enforcement representation ✅ representation done
+### Phase 2 — Generalize enforcement representation ✅ done
 
 Keep the flat `enforced_matchers` as the 90% isolation path; add an *optional*
 recursive predicate for the rest:
@@ -102,8 +102,12 @@ constructors (`LeafPredicate`, `BoolPredicate`), a `ValidatePredicate`
 well-formedness check, and `FlattenConjunction` — which reduces a pure
 AND-of-leaves forest to a flat matcher list so a label-oriented injector can
 consume the common case and fail closed on real boolean composition (OR/NOT).
-Per-dialect *consumption* of the tree is deferred to the injector that needs it
-(PromQL still uses the flat list).
+Consumption is wired in `processor/queryrewrite`: `ProcessQuery` folds
+`enforced_predicates` into the flat matcher list via `FlattenConjunction` before
+delegating to the dialect rewriter, and fails closed when the tree needs OR/NOT
+that a label-selector injector can't apply. A dialect whose injector natively
+understands boolean composition (SQL `WHERE`, Lucene) can later consume the tree
+directly instead of flattening.
 
 ### Phase 3 — Cross-signal (heaviest, out of scope now)
 
