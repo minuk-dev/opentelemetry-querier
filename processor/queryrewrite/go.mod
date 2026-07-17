@@ -7,7 +7,7 @@ require (
 	github.com/minuk-dev/opentelemetry-querier/processor v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/qdata v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/qerror v0.0.0
-	github.com/prometheus/prometheus v0.313.0
+	github.com/prometheus/prometheus v0.313.1
 	github.com/stretchr/testify v1.11.1
 )
 
