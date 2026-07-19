@@ -1,0 +1,45 @@
+name: coverage
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# octocov needs pull-requests:write to post/update the coverage comment and
+# actions:read to measure test execution time from the workflow run.
+permissions:
+  contents: read
+  pull-requests: write
+  actions: read
+
+env:
+  GO_VERSION: "1.25.4"
+
+jobs:
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: "**/go.sum"
+      # Multi-module workspace: profile every module, then fold each profile into
+      # a single merged coverage.out (coverage lines use full import paths, so
+      # they never collide across modules). covermode must match to merge, so
+      # pin atomic everywhere.
+      - name: test with coverage
+        run: |
+          set -euo pipefail
+          echo "mode: atomic" > coverage.out
+          for gomod in $(find . -name go.mod -not -path './.git/*' | sort); do
+            dir=$(dirname "$gomod")
+            echo "::group::$dir"
+            (cd "$dir" && go test -covermode=atomic -coverprofile=coverage.tmp ./...)
+            # Drop the per-module "mode:" header line and append the rest.
+            tail -n +2 "$dir/coverage.tmp" >> coverage.out
+            rm -f "$dir/coverage.tmp"
+            echo "::endgroup::"
+          done
+      - uses: k1LoW/octocov-action@v1
