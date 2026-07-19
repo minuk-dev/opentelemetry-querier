@@ -12,6 +12,7 @@ import (
 	authratelimit "github.com/minuk-dev/opentelemetry-querier/processor/authratelimit"
 	queryrewrite "github.com/minuk-dev/opentelemetry-querier/processor/queryrewrite"
 	responsefilter "github.com/minuk-dev/opentelemetry-querier/processor/responsefilter"
+	simpleauthz "github.com/minuk-dev/opentelemetry-querier/processor/simpleauthz"
 	tenant "github.com/minuk-dev/opentelemetry-querier/processor/tenant"
 	"github.com/minuk-dev/opentelemetry-querier/querier"
 )
@@ -33,6 +34,7 @@ func components() (querier.Factories, error) {
 		tenant.NewFactory(),
 		queryrewrite.NewFactory(),
 		responsefilter.NewFactory(),
+		simpleauthz.NewFactory(),
 	); err != nil {
 		return factories, err
 	}

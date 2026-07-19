@@ -39,6 +39,30 @@ processors:
     required: false
     enforce_label: "tenant_id"
 
+  # Per-subject authorization: reject a user's query or scope it down. Resolves
+  # the subject from X-Scope-User (or the tenant, with from_tenant) and applies
+  # the first matching rule; an unmatched subject hits default_effect. Runs
+  # after tenant (so from_tenant works) and before queryrewrite (so the injected
+  # matchers are enforced). Fails closed — default_effect defaults to deny.
+  simpleauthz:
+    subject_header: "X-Scope-User"
+    default_effect: "deny"
+    rules:
+      # admins may query anything, unscoped.
+      - subjects: ["admin"]
+        effect: "allow"
+      # alice is allowed, but only within her namespace.
+      - subjects: ["alice"]
+        effect: "allow"
+        enforce_labels:
+          - name: "namespace"
+            value: "team-a"
+      # everyone else with a resolved subject: scope to their own tenant.
+      - effect: "allow"
+        enforce_labels:
+          - name: "tenant_id"
+            from_tenant: true
+
   # Query transformation: inject enforced label matchers into the PromQL AST.
   queryrewrite:
     enforce_labels:
@@ -66,5 +90,5 @@ service:
   pipelines:
     query/default:
       acceptors: [otqp]
-      processors: [authratelimit, tenant, queryrewrite, responsefilter]
+      processors: [authratelimit, tenant, simpleauthz, queryrewrite, responsefilter]
       dispatchers: [prometheus]

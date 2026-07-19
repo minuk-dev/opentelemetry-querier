@@ -13,6 +13,7 @@ require (
 	github.com/minuk-dev/opentelemetry-querier/processor/authratelimit v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/processor/queryrewrite v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/processor/responsefilter v0.0.0
+	github.com/minuk-dev/opentelemetry-querier/processor/simpleauthz v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/processor/tenant v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/querier v0.0.0
 )
@@ -66,6 +67,8 @@ replace github.com/minuk-dev/opentelemetry-querier/processor/authratelimit => ..
 replace github.com/minuk-dev/opentelemetry-querier/processor/queryrewrite => ../../processor/queryrewrite
 
 replace github.com/minuk-dev/opentelemetry-querier/processor/responsefilter => ../../processor/responsefilter
+
+replace github.com/minuk-dev/opentelemetry-querier/processor/simpleauthz => ../../processor/simpleauthz
 
 replace github.com/minuk-dev/opentelemetry-querier/processor/tenant => ../../processor/tenant
 

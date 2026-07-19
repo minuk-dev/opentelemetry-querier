@@ -15,6 +15,7 @@ use (
 	./processor/authratelimit
 	./processor/queryrewrite
 	./processor/responsefilter
+	./processor/simpleauthz
 	./processor/tenant
 	./qdata
 	./qerror
