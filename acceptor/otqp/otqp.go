@@ -17,6 +17,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -131,6 +132,8 @@ type grpcService struct {
 }
 
 func (s *grpcService) Query(ctx context.Context, req *otqpv1.QueryRequest) (*otqpv1.QueryResponse, error) {
+	injectMetadata(ctx, req.GetQuery())
+
 	result, err := s.handler.Handle(ctx, req.GetQuery())
 	if err != nil {
 		return nil, status.Error(grpcCode(err), err.Error())
@@ -145,6 +148,8 @@ func (s *grpcService) QueryStream(
 	req *otqpv1.QueryRequest,
 	stream grpc.ServerStreamingServer[otqpv1.QueryResponse],
 ) error {
+	injectMetadata(stream.Context(), req.GetQuery())
+
 	result, err := s.handler.Handle(stream.Context(), req.GetQuery())
 	if err != nil {
 		return status.Error(grpcCode(err), err.Error())
@@ -213,7 +218,7 @@ func (a *Acceptor) handleHTTPQuery(writer http.ResponseWriter, request *http.Req
 	}
 
 	// Carry inbound HTTP headers onto the query so downstream processors (auth,
-	// tenant) can read them.
+	// tenant) can read them. injectMetadata is the gRPC analogue.
 	injectHeaders(req.GetQuery(), request.Header)
 
 	result, err := a.handler.Handle(request.Context(), req.GetQuery())
@@ -268,6 +273,22 @@ func isJSON(contentType string) bool {
 	mediaType, _, _ := strings.Cut(contentType, ";")
 
 	return mediaType != "application/x-protobuf" && mediaType != "application/protobuf"
+}
+
+// injectMetadata carries inbound gRPC metadata onto the query as headers, the
+// gRPC analogue of injectHeaders on the HTTP path. Without this, header-based
+// processors (auth, tenant) would see nothing over gRPC, since a gRPC client
+// sends credentials as metadata rather than in the request body.
+// metadata.MD and http.Header share the map[string][]string underlying type, so
+// the same injector applies; downstream lookups are case-insensitive, so gRPC's
+// lower-cased keys still match canonical header names.
+func injectMetadata(ctx context.Context, query *qdata.Query) {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return
+	}
+
+	injectHeaders(query, http.Header(md))
 }
 
 func injectHeaders(query *qdata.Query, header http.Header) {
