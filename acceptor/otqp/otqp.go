@@ -74,12 +74,14 @@ func New(cfg Config, handler pipeline.Handler) *Acceptor {
 
 // GRPCListenAddr returns the address the gRPC transport is bound to after Start,
 // resolving a ":0" config to the concrete host:port. It is empty before Start or
-// when gRPC is disabled.
+// when gRPC is disabled. Read it only after Start returns: the field is written
+// during Start without synchronization, so a concurrent read would race.
 func (a *Acceptor) GRPCListenAddr() string { return a.grpcAddr }
 
 // HTTPListenAddr returns the address the HTTP transport is bound to after Start,
 // resolving a ":0" config to the concrete host:port. It is empty before Start or
-// when HTTP is disabled.
+// when HTTP is disabled. Read it only after Start returns: the field is written
+// during Start without synchronization, so a concurrent read would race.
 func (a *Acceptor) HTTPListenAddr() string { return a.httpAddr }
 
 // Start binds the configured listeners and serves in the background.
@@ -326,10 +328,12 @@ func injectMetadata(ctx context.Context, query *qdata.Query) {
 // these onto the query would pollute it with transport internals.
 func isReservedMetadata(key string) bool {
 	switch key {
-	case "content-type", "user-agent", "te", "grpc-accept-encoding", "grpc-encoding":
+	case "content-type", "user-agent", "te":
 		return true
 	}
 
+	// grpc- covers the reserved grpc-* family (grpc-timeout, grpc-encoding, …);
+	// : covers HTTP/2 pseudo-headers.
 	return strings.HasPrefix(key, "grpc-") || strings.HasPrefix(key, ":")
 }
 
