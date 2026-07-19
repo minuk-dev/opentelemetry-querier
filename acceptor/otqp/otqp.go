@@ -55,6 +55,11 @@ type Acceptor struct {
 
 	grpcServer *grpc.Server
 	httpServer *http.Server
+
+	// grpcAddr and httpAddr record the actually-bound listen addresses, resolved
+	// after Start so a ":0" (ephemeral-port) config is discoverable by callers.
+	grpcAddr string
+	httpAddr string
 }
 
 // New builds an OTQP acceptor bound to the given pipeline Handler.
@@ -64,8 +69,18 @@ func New(cfg Config, handler pipeline.Handler) *Acceptor {
 		cfg.HTTPEndpoint = DefaultHTTPEndpoint
 	}
 
-	return &Acceptor{cfg: cfg, handler: handler, grpcServer: nil, httpServer: nil}
+	return &Acceptor{cfg: cfg, handler: handler, grpcServer: nil, httpServer: nil, grpcAddr: "", httpAddr: ""}
 }
+
+// GRPCListenAddr returns the address the gRPC transport is bound to after Start,
+// resolving a ":0" config to the concrete host:port. It is empty before Start or
+// when gRPC is disabled.
+func (a *Acceptor) GRPCListenAddr() string { return a.grpcAddr }
+
+// HTTPListenAddr returns the address the HTTP transport is bound to after Start,
+// resolving a ":0" config to the concrete host:port. It is empty before Start or
+// when HTTP is disabled.
+func (a *Acceptor) HTTPListenAddr() string { return a.httpAddr }
 
 // Start binds the configured listeners and serves in the background.
 func (a *Acceptor) Start(ctx context.Context, _ component.Host) error {
@@ -77,6 +92,7 @@ func (a *Acceptor) Start(ctx context.Context, _ component.Host) error {
 			return fmt.Errorf("otqp: listen grpc %s: %w", a.cfg.GRPCEndpoint, err)
 		}
 
+		a.grpcAddr = listener.Addr().String()
 		a.grpcServer = grpc.NewServer()
 		otqpv1.RegisterQueryServiceServer(a.grpcServer, &grpcService{
 			UnimplementedQueryServiceServer: otqpv1.UnimplementedQueryServiceServer{},
@@ -103,6 +119,8 @@ func (a *Acceptor) Start(ctx context.Context, _ component.Host) error {
 		if err != nil {
 			return fmt.Errorf("otqp: listen http %s: %w", a.cfg.HTTPEndpoint, err)
 		}
+
+		a.httpAddr = listener.Addr().String()
 
 		go func() { _ = a.httpServer.Serve(listener) }()
 	}
@@ -281,16 +299,46 @@ func isJSON(contentType string) bool {
 // sends credentials as metadata rather than in the request body.
 // metadata.MD and http.Header share the map[string][]string underlying type, so
 // the same injector applies; downstream lookups are case-insensitive, so gRPC's
-// lower-cased keys still match canonical header names.
+// lower-cased keys still match canonical header names. Reserved gRPC/HTTP2
+// metadata (content-type, user-agent, grpc-*, te, :pseudo) is dropped so only
+// application metadata reaches the query.
 func injectMetadata(ctx context.Context, query *qdata.Query) {
-	md, ok := metadata.FromIncomingContext(ctx)
+	incoming, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return
 	}
 
-	injectHeaders(query, http.Header(md))
+	app := make(http.Header, len(incoming))
+
+	for key, values := range incoming {
+		if isReservedMetadata(key) {
+			continue
+		}
+
+		app[key] = values
+	}
+
+	injectHeaders(query, app)
 }
 
+// isReservedMetadata reports whether a gRPC metadata key is transport-reserved
+// rather than an application header, per the gRPC HTTP/2 wire protocol. Copying
+// these onto the query would pollute it with transport internals.
+func isReservedMetadata(key string) bool {
+	switch key {
+	case "content-type", "user-agent", "te", "grpc-accept-encoding", "grpc-encoding":
+		return true
+	}
+
+	return strings.HasPrefix(key, "grpc-") || strings.HasPrefix(key, ":")
+}
+
+// injectHeaders copies header onto the query, with each source header taking
+// precedence over any value already on the query. It removes case-insensitive
+// duplicates so a header the client also set in the request body cannot shadow
+// (or be shadowed by) the injected transport value: downstream lookups match
+// case-insensitively, so two entries differing only in case would make the
+// winner depend on map iteration order.
 func injectHeaders(query *qdata.Query, header http.Header) {
 	if query == nil || len(header) == 0 {
 		return
@@ -301,6 +349,12 @@ func injectHeaders(query *qdata.Query, header http.Header) {
 	}
 
 	for key, values := range header {
+		for existing := range query.Header {
+			if existing != key && strings.EqualFold(existing, key) {
+				delete(query.Header, existing)
+			}
+		}
+
 		query.Header[key] = &qdata.HeaderValues{Values: values}
 	}
 }
