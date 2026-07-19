@@ -34,31 +34,44 @@ jobs:
             echo "::endgroup::"
           done
 
+  # Enumerate every module directory so the lint job below can fan out over them.
+  # golangci-lint-action runs one working-directory at a time, so a matrix is the
+  # idiomatic way to lint a Go workspace with the official action.
+  discover-modules:
+    name: discover modules
+    runs-on: ubuntu-latest
+    outputs:
+      dirs: ${{ steps.list.outputs.dirs }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: list module directories
+        id: list
+        run: |
+          set -euo pipefail
+          dirs=$(find . -name go.mod -not -path './.git/*' -printf '%h\n' \
+            | sort | jq -R . | jq -sc .)
+          echo "dirs=$dirs" >> "$GITHUB_OUTPUT"
+
   lint:
     name: golangci-lint
+    needs: discover-modules
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: ${{ fromJSON(needs.discover-modules.outputs.dirs) }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: "**/go.sum"
-      - name: install golangci-lint
-        run: |
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
-            | sh -s -- -b "$(go env GOPATH)/bin" "${GOLANGCI_LINT_VERSION}"
-      # golangci-lint runs per module; it discovers the shared .golangci.yml at
-      # the repository root.
-      - name: lint all modules
-        run: |
-          set -euo pipefail
-          export PATH="$(go env GOPATH)/bin:$PATH"
-          for gomod in $(find . -name go.mod -not -path './.git/*' | sort); do
-            dir=$(dirname "$gomod")
-            echo "::group::$dir"
-            (cd "$dir" && golangci-lint run ./...)
-            echo "::endgroup::"
-          done
+      # golangci-lint walks up from the module directory and discovers the shared
+      # .golangci.yml at the repository root.
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          working-directory: ${{ matrix.dir }}
 
   generate:
     name: generated code is up to date
