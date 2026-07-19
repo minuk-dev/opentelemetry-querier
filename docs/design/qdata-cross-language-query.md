@@ -1,7 +1,9 @@
 # `qdata.Query` as a cross-language query format: support & limitations
 
-Design note for [#10](https://github.com/minuk-dev/opentelemetry-querier/issues/10).
-Status: **analysis / tracking**. Phases 0–1 are actionable; Phases 2–3 are tracked
+Design note for [#10](https://github.com/minuk-dev/opentelemetry-querier/issues/10)
+(scoped down and closed once Phases 0–2 shipped).
+Status: **Phases 0–2 implemented; Phase 3 tracked** in
+[#24](https://github.com/minuk-dev/opentelemetry-querier/issues/24) as speculative
 design, not committed work.
 
 ## Question
@@ -123,8 +125,12 @@ is speculative weight.
 
 ## Recommendation
 
-The issue's "not actionable yet" verdict holds for the **IR** (Phase 3). But
-**Phases 0–1 are actionable and low-risk**, and they are the honest generalization of
-code that already exists — they turn "queryrewrite happens to parse PromQL" into
-"dialects register comprehension." Scope the issue down to that; leave Phases 2–3 as
-this tracked design note.
+The issue's "not actionable yet" verdict held only for the **IR** (Phase 3).
+**Phases 0–2 were actionable and low-risk** — the honest generalization of code that
+already existed, turning "queryrewrite happens to parse PromQL" into "dialects
+register comprehension" (Phase 1) and "enforcement can express boolean composition"
+(Phase 2). They have shipped, and #10 was scoped down to them and closed.
+
+Phase 3 (cross-signal IR) remains **speculative until a concrete cross-signal backend
+exists** and is tracked on its own in
+[#24](https://github.com/minuk-dev/opentelemetry-querier/issues/24).
