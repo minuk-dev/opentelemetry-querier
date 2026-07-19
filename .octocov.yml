@@ -1,0 +1,15 @@
+# octocov reports test coverage to a PR comment and the GitHub Actions job
+# summary. The coverage workflow merges every module's Go coverage profile into
+# a single ./coverage.out at the repository root (this is a multi-module Go
+# workspace, so there is no single root module to profile directly).
+coverage:
+  paths:
+    - coverage.out
+
+# Post/update a coverage comment on pull requests.
+comment:
+  if: is_pull_request
+
+# Always render the coverage report in the job summary.
+summary:
+  if: true
