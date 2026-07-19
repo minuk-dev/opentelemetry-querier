@@ -1,4 +1,5 @@
 This is not an opentelemetry project component.
+This project is an independent community project and is not affiliated with or endorsed by the OpenTelemetry project.
 
 # OpenTelemetry Querier
 
