@@ -17,6 +17,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -54,6 +55,11 @@ type Acceptor struct {
 
 	grpcServer *grpc.Server
 	httpServer *http.Server
+
+	// grpcAddr and httpAddr record the actually-bound listen addresses, resolved
+	// after Start so a ":0" (ephemeral-port) config is discoverable by callers.
+	grpcAddr string
+	httpAddr string
 }
 
 // New builds an OTQP acceptor bound to the given pipeline Handler.
@@ -63,8 +69,20 @@ func New(cfg Config, handler pipeline.Handler) *Acceptor {
 		cfg.HTTPEndpoint = DefaultHTTPEndpoint
 	}
 
-	return &Acceptor{cfg: cfg, handler: handler, grpcServer: nil, httpServer: nil}
+	return &Acceptor{cfg: cfg, handler: handler, grpcServer: nil, httpServer: nil, grpcAddr: "", httpAddr: ""}
 }
+
+// GRPCListenAddr returns the address the gRPC transport is bound to after Start,
+// resolving a ":0" config to the concrete host:port. It is empty before Start or
+// when gRPC is disabled. Read it only after Start returns: the field is written
+// during Start without synchronization, so a concurrent read would race.
+func (a *Acceptor) GRPCListenAddr() string { return a.grpcAddr }
+
+// HTTPListenAddr returns the address the HTTP transport is bound to after Start,
+// resolving a ":0" config to the concrete host:port. It is empty before Start or
+// when HTTP is disabled. Read it only after Start returns: the field is written
+// during Start without synchronization, so a concurrent read would race.
+func (a *Acceptor) HTTPListenAddr() string { return a.httpAddr }
 
 // Start binds the configured listeners and serves in the background.
 func (a *Acceptor) Start(ctx context.Context, _ component.Host) error {
@@ -76,6 +94,7 @@ func (a *Acceptor) Start(ctx context.Context, _ component.Host) error {
 			return fmt.Errorf("otqp: listen grpc %s: %w", a.cfg.GRPCEndpoint, err)
 		}
 
+		a.grpcAddr = listener.Addr().String()
 		a.grpcServer = grpc.NewServer()
 		otqpv1.RegisterQueryServiceServer(a.grpcServer, &grpcService{
 			UnimplementedQueryServiceServer: otqpv1.UnimplementedQueryServiceServer{},
@@ -102,6 +121,8 @@ func (a *Acceptor) Start(ctx context.Context, _ component.Host) error {
 		if err != nil {
 			return fmt.Errorf("otqp: listen http %s: %w", a.cfg.HTTPEndpoint, err)
 		}
+
+		a.httpAddr = listener.Addr().String()
 
 		go func() { _ = a.httpServer.Serve(listener) }()
 	}
@@ -131,6 +152,8 @@ type grpcService struct {
 }
 
 func (s *grpcService) Query(ctx context.Context, req *otqpv1.QueryRequest) (*otqpv1.QueryResponse, error) {
+	injectMetadata(ctx, req.GetQuery())
+
 	result, err := s.handler.Handle(ctx, req.GetQuery())
 	if err != nil {
 		return nil, status.Error(grpcCode(err), err.Error())
@@ -145,6 +168,8 @@ func (s *grpcService) QueryStream(
 	req *otqpv1.QueryRequest,
 	stream grpc.ServerStreamingServer[otqpv1.QueryResponse],
 ) error {
+	injectMetadata(stream.Context(), req.GetQuery())
+
 	result, err := s.handler.Handle(stream.Context(), req.GetQuery())
 	if err != nil {
 		return status.Error(grpcCode(err), err.Error())
@@ -213,7 +238,7 @@ func (a *Acceptor) handleHTTPQuery(writer http.ResponseWriter, request *http.Req
 	}
 
 	// Carry inbound HTTP headers onto the query so downstream processors (auth,
-	// tenant) can read them.
+	// tenant) can read them. injectMetadata is the gRPC analogue.
 	injectHeaders(req.GetQuery(), request.Header)
 
 	result, err := a.handler.Handle(request.Context(), req.GetQuery())
@@ -270,6 +295,54 @@ func isJSON(contentType string) bool {
 	return mediaType != "application/x-protobuf" && mediaType != "application/protobuf"
 }
 
+// injectMetadata carries inbound gRPC metadata onto the query as headers, the
+// gRPC analogue of injectHeaders on the HTTP path. Without this, header-based
+// processors (auth, tenant) would see nothing over gRPC, since a gRPC client
+// sends credentials as metadata rather than in the request body.
+// metadata.MD and http.Header share the map[string][]string underlying type, so
+// the same injector applies; downstream lookups are case-insensitive, so gRPC's
+// lower-cased keys still match canonical header names. Reserved gRPC/HTTP2
+// metadata (content-type, user-agent, grpc-*, te, :pseudo) is dropped so only
+// application metadata reaches the query.
+func injectMetadata(ctx context.Context, query *qdata.Query) {
+	incoming, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return
+	}
+
+	app := make(http.Header, len(incoming))
+
+	for key, values := range incoming {
+		if isReservedMetadata(key) {
+			continue
+		}
+
+		app[key] = values
+	}
+
+	injectHeaders(query, app)
+}
+
+// isReservedMetadata reports whether a gRPC metadata key is transport-reserved
+// rather than an application header, per the gRPC HTTP/2 wire protocol. Copying
+// these onto the query would pollute it with transport internals.
+func isReservedMetadata(key string) bool {
+	switch key {
+	case "content-type", "user-agent", "te":
+		return true
+	}
+
+	// grpc- covers the reserved grpc-* family (grpc-timeout, grpc-encoding, …);
+	// : covers HTTP/2 pseudo-headers.
+	return strings.HasPrefix(key, "grpc-") || strings.HasPrefix(key, ":")
+}
+
+// injectHeaders copies header onto the query, with each source header taking
+// precedence over any value already on the query. It removes case-insensitive
+// duplicates so a header the client also set in the request body cannot shadow
+// (or be shadowed by) the injected transport value: downstream lookups match
+// case-insensitively, so two entries differing only in case would make the
+// winner depend on map iteration order.
 func injectHeaders(query *qdata.Query, header http.Header) {
 	if query == nil || len(header) == 0 {
 		return
@@ -280,6 +353,12 @@ func injectHeaders(query *qdata.Query, header http.Header) {
 	}
 
 	for key, values := range header {
+		for existing := range query.Header {
+			if existing != key && strings.EqualFold(existing, key) {
+				delete(query.Header, existing)
+			}
+		}
+
 		query.Header[key] = &qdata.HeaderValues{Values: values}
 	}
 }

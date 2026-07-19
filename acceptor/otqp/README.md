@@ -11,8 +11,11 @@ feedback side channel).
 - **HTTP** — `POST /v1/query` with a protobuf (`application/x-protobuf`) or JSON
   (`application/json`) body (default `:4328`), plus `GET /healthz`.
 
-Inbound HTTP headers are copied onto the query so downstream processors (auth,
-tenant) can read them.
+Inbound request credentials are copied onto the query so downstream processors
+(auth, tenant) can read them: HTTP headers on the HTTP path, and gRPC metadata on
+the gRPC path (metadata keys are lower-cased by gRPC, but the processors look
+them up case-insensitively). A gRPC client therefore sends `X-Scope-OrgID` etc.
+as request metadata, not in the query body.
 
 ## Config
 
