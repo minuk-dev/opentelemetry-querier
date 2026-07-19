@@ -159,3 +159,33 @@ func TestGRPCMetadataOverridesBodyHeader(t *testing.T) {
 
 	assert.Equal(t, 1, matches, "expected a single x-scope-user entry, got header map %v", query.GetHeader())
 }
+
+// TestGRPCMetadataIsPerRPC guards the semantics the whole fix relies on: gRPC
+// metadata is delivered per RPC (per HTTP/2 stream), not once per connection.
+// Three calls reuse the SAME connection; the second still receives its own fresh
+// value (not the first's cached one), and a call the client sends without
+// metadata carries none. HPACK compresses repeated headers on the wire but the
+// server always reconstructs the full per-stream set.
+func TestGRPCMetadataIsPerRPC(t *testing.T) {
+	t.Parallel()
+
+	seen := make(chan *qdata.Query, 1)
+	client := otqpv1.NewQueryServiceClient(startGRPC(t, seen))
+
+	callUser := func(user string) []string {
+		ctx := context.Background()
+		if user != "" {
+			ctx = metadata.NewOutgoingContext(ctx, metadata.Pairs("x-scope-user", user))
+		}
+
+		_, err := client.Query(ctx, &otqpv1.QueryRequest{Query: &qdata.Query{Expr: "up"}})
+		require.NoError(t, err)
+
+		return waitForQuery(t, seen).GetHeader()["x-scope-user"].GetValues()
+	}
+
+	// All three RPCs share the one connection opened by startGRPC.
+	assert.Equal(t, []string{"alice"}, callUser("alice"), "first RPC")
+	assert.Equal(t, []string{"bob"}, callUser("bob"), "second RPC on the same connection is not the first's cached value")
+	assert.Empty(t, callUser(""), "an RPC the client sends without metadata carries none")
+}
