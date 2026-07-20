@@ -22,6 +22,7 @@ processors:
   - gomod: github.com/minuk-dev/opentelemetry-querier/processor/tenant
   - gomod: github.com/minuk-dev/opentelemetry-querier/processor/queryrewrite
   - gomod: github.com/minuk-dev/opentelemetry-querier/processor/responsefilter
+  - gomod: github.com/minuk-dev/opentelemetry-querier/processor/simpleauthz
 
 dispatchers:
   - gomod: github.com/minuk-dev/opentelemetry-querier/dispatcher/promdispatcher
