@@ -10,7 +10,7 @@ require (
 	github.com/minuk-dev/opentelemetry-querier/qdata v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/qerror v0.0.0
 	github.com/stretchr/testify v1.11.1
-	google.golang.org/grpc v1.82.0
+	google.golang.org/grpc v1.82.1
 	google.golang.org/protobuf v1.36.11
 )
 
