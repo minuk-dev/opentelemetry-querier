@@ -14,15 +14,15 @@ dist:
   output_path: ./cmd/querier
 
 acceptors:
-  - gomod: github.com/minuk-dev/opentelemetry-querier/acceptor/otqp
+  - gomod: github.com/minuk-dev/opentelemetry-querier/acceptor/otqpacceptor
   - gomod: github.com/minuk-dev/opentelemetry-querier/acceptor/prometheusacceptor
 
 processors:
-  - gomod: github.com/minuk-dev/opentelemetry-querier/processor/authratelimit
-  - gomod: github.com/minuk-dev/opentelemetry-querier/processor/tenant
-  - gomod: github.com/minuk-dev/opentelemetry-querier/processor/queryrewrite
-  - gomod: github.com/minuk-dev/opentelemetry-querier/processor/responsefilter
-  - gomod: github.com/minuk-dev/opentelemetry-querier/processor/simpleauthz
+  - gomod: github.com/minuk-dev/opentelemetry-querier/processor/authratelimitprocessor
+  - gomod: github.com/minuk-dev/opentelemetry-querier/processor/tenantprocessor
+  - gomod: github.com/minuk-dev/opentelemetry-querier/processor/queryrewriteprocessor
+  - gomod: github.com/minuk-dev/opentelemetry-querier/processor/responsefilterprocessor
+  - gomod: github.com/minuk-dev/opentelemetry-querier/processor/simpleauthzprocessor
 
 dispatchers:
-  - gomod: github.com/minuk-dev/opentelemetry-querier/dispatcher/promdispatcher
+  - gomod: github.com/minuk-dev/opentelemetry-querier/dispatcher/prometheusdispatcher

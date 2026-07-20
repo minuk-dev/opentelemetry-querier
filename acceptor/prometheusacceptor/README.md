@@ -1,7 +1,7 @@
 # prometheus acceptor
 
 An acceptor that speaks the **Prometheus HTTP query API** — the ingress
-counterpart of the [prometheus dispatcher](../../dispatcher/promdispatcher).
+counterpart of the [prometheus dispatcher](../../dispatcher/prometheusdispatcher).
 Clients that already speak Prometheus can query through the proxy unchanged.
 
 - `GET`/`POST /api/v1/query` — instant query (returns a `vector`).

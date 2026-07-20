@@ -1,5 +1,5 @@
 // Package prometheusacceptor implements an acceptor that speaks the Prometheus HTTP
-// query API. It is the ingress counterpart of the promdispatcher: clients that
+// query API. It is the ingress counterpart of the prometheusdispatcher: clients that
 // already speak Prometheus (`/api/v1/query`, `/api/v1/query_range`) can query
 // through the proxy. Requests are parsed into a qdata Query (PromQL dialect),
 // run through the pipeline, and the qdata Result is serialized back into the

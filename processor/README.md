@@ -17,7 +17,8 @@ dispatcher is reached; return a `*qerror.Error` to control the transport status.
 
 | Module | Type | Description |
 | --- | --- | --- |
-| [authratelimit](./authratelimit) | `authratelimit` | Bearer-token auth + per-tenant rate limiting. |
-| [tenant](./tenant) | `tenant` | Resolve the tenant and register an isolation label matcher. |
-| [queryrewrite](./queryrewrite) | `queryrewrite` | Inject enforced label matchers into the PromQL AST. |
-| [responsefilter](./responsefilter) | `responsefilter` | Drop/mask result attributes; emit feedback warnings. |
+| [authratelimitprocessor](./authratelimitprocessor) | `authratelimit` | Bearer-token auth + per-tenant rate limiting. |
+| [tenantprocessor](./tenantprocessor) | `tenant` | Resolve the tenant and register an isolation label matcher. |
+| [simpleauthzprocessor](./simpleauthzprocessor) | `simpleauthz` | Per-subject authorization: reject or scope a user's query. |
+| [queryrewriteprocessor](./queryrewriteprocessor) | `queryrewrite` | Inject enforced label matchers into the PromQL AST. |
+| [responsefilterprocessor](./responsefilterprocessor) | `responsefilter` | Drop/mask result attributes; emit feedback warnings. |
