@@ -10,6 +10,7 @@ updates:
       - "/cmd/querier"
       - "/component"
       - "/dispatcher"
+      - "/dispatcher/lokidispatcher"
       - "/dispatcher/prometheusdispatcher"
       - "/gen"
       - "/pipeline"
