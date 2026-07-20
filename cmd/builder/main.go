@@ -56,7 +56,7 @@ type Component struct {
 
 // tmplComponent is the view passed to templates.
 type tmplComponent struct {
-	Alias  string // import alias, e.g. "otqp"
+	Alias  string // import alias, e.g. "otqpacceptor"
 	Import string // import path (version stripped)
 }
 

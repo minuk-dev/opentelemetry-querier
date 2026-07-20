@@ -4,17 +4,17 @@ go 1.25.4
 
 require (
 	github.com/minuk-dev/opentelemetry-querier/acceptor v0.0.0
-	github.com/minuk-dev/opentelemetry-querier/acceptor/otqp v0.0.0
+	github.com/minuk-dev/opentelemetry-querier/acceptor/otqpacceptor v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/acceptor/prometheusacceptor v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/component v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/dispatcher v0.0.0
-	github.com/minuk-dev/opentelemetry-querier/dispatcher/promdispatcher v0.0.0
+	github.com/minuk-dev/opentelemetry-querier/dispatcher/prometheusdispatcher v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/processor v0.0.0
-	github.com/minuk-dev/opentelemetry-querier/processor/authratelimit v0.0.0
-	github.com/minuk-dev/opentelemetry-querier/processor/queryrewrite v0.0.0
-	github.com/minuk-dev/opentelemetry-querier/processor/responsefilter v0.0.0
-	github.com/minuk-dev/opentelemetry-querier/processor/simpleauthz v0.0.0
-	github.com/minuk-dev/opentelemetry-querier/processor/tenant v0.0.0
+	github.com/minuk-dev/opentelemetry-querier/processor/authratelimitprocessor v0.0.0
+	github.com/minuk-dev/opentelemetry-querier/processor/queryrewriteprocessor v0.0.0
+	github.com/minuk-dev/opentelemetry-querier/processor/responsefilterprocessor v0.0.0
+	github.com/minuk-dev/opentelemetry-querier/processor/simpleauthzprocessor v0.0.0
+	github.com/minuk-dev/opentelemetry-querier/processor/tenantprocessor v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/querier v0.0.0
 )
 
@@ -46,7 +46,7 @@ require (
 
 replace github.com/minuk-dev/opentelemetry-querier/acceptor => ../../acceptor
 
-replace github.com/minuk-dev/opentelemetry-querier/acceptor/otqp => ../../acceptor/otqp
+replace github.com/minuk-dev/opentelemetry-querier/acceptor/otqpacceptor => ../../acceptor/otqpacceptor
 
 replace github.com/minuk-dev/opentelemetry-querier/acceptor/prometheusacceptor => ../../acceptor/prometheusacceptor
 
@@ -54,7 +54,7 @@ replace github.com/minuk-dev/opentelemetry-querier/component => ../../component
 
 replace github.com/minuk-dev/opentelemetry-querier/dispatcher => ../../dispatcher
 
-replace github.com/minuk-dev/opentelemetry-querier/dispatcher/promdispatcher => ../../dispatcher/promdispatcher
+replace github.com/minuk-dev/opentelemetry-querier/dispatcher/prometheusdispatcher => ../../dispatcher/prometheusdispatcher
 
 replace github.com/minuk-dev/opentelemetry-querier/gen => ../../gen
 
@@ -62,15 +62,15 @@ replace github.com/minuk-dev/opentelemetry-querier/pipeline => ../../pipeline
 
 replace github.com/minuk-dev/opentelemetry-querier/processor => ../../processor
 
-replace github.com/minuk-dev/opentelemetry-querier/processor/authratelimit => ../../processor/authratelimit
+replace github.com/minuk-dev/opentelemetry-querier/processor/authratelimitprocessor => ../../processor/authratelimitprocessor
 
-replace github.com/minuk-dev/opentelemetry-querier/processor/queryrewrite => ../../processor/queryrewrite
+replace github.com/minuk-dev/opentelemetry-querier/processor/queryrewriteprocessor => ../../processor/queryrewriteprocessor
 
-replace github.com/minuk-dev/opentelemetry-querier/processor/responsefilter => ../../processor/responsefilter
+replace github.com/minuk-dev/opentelemetry-querier/processor/responsefilterprocessor => ../../processor/responsefilterprocessor
 
-replace github.com/minuk-dev/opentelemetry-querier/processor/simpleauthz => ../../processor/simpleauthz
+replace github.com/minuk-dev/opentelemetry-querier/processor/simpleauthzprocessor => ../../processor/simpleauthzprocessor
 
-replace github.com/minuk-dev/opentelemetry-querier/processor/tenant => ../../processor/tenant
+replace github.com/minuk-dev/opentelemetry-querier/processor/tenantprocessor => ../../processor/tenantprocessor
 
 replace github.com/minuk-dev/opentelemetry-querier/qdata => ../../qdata
 

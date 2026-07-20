@@ -15,4 +15,4 @@ a `qdata.Result`.
 
 | Module | Type | Description |
 | --- | --- | --- |
-| [promdispatcher](./promdispatcher) | `prometheus` | Executes against an upstream Prometheus HTTP query API. |
+| [prometheusdispatcher](./prometheusdispatcher) | `prometheus` | Executes against an upstream Prometheus HTTP query API. |

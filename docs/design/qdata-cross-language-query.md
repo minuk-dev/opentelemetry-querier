@@ -20,8 +20,8 @@ The spec splits this into two layers; the querier sits firmly on the first.
 | **Structured IR / plan** (§4.2–4.3) | — none — | ❌ no language-neutral AST |
 
 The one place a query is *understood* rather than *carried* is
-`processor/queryrewrite`: it parses PromQL with the upstream Prometheus parser and
-injects `enforced_matchers` into every `VectorSelector`. `promdispatcher` then ships
+`processor/queryrewriteprocessor`: it parses PromQL with the upstream Prometheus parser and
+injects `enforced_matchers` into every `VectorSelector`. `prometheusdispatcher` then ships
 `expr` verbatim as the Prometheus API `query` form field.
 
 So today: **transport is universal; comprehension is PromQL-only and hard-wired.**
@@ -57,11 +57,11 @@ invariant:
 
 - a **dispatcher** must reject or pass-through a `dialect` it doesn't understand;
 - a **processor** must no-op on dialects it can't parse (queryrewrite already does this,
-  see `processor/queryrewrite/queryrewrite.go` dialect guard).
+  see `processor/queryrewriteprocessor/queryrewriteprocessor.go` dialect guard).
 
 Implemented: the canonical tags and the contract live in `qdata`
 (`Dialect{PromQL,LogQL,Lucene,SQL}`, `QueryDialect`, `KnownDialect`; see the doc
-comment there). `promdispatcher` now enforces the dispatcher half — it rejects any
+comment there). `prometheusdispatcher` now enforces the dispatcher half — it rejects any
 non-PromQL dialect with `CodeInvalidArgument` instead of shipping the text to the
 Prometheus API. Removes ambiguity about who may touch `expr`.
 
@@ -104,7 +104,7 @@ constructors (`LeafPredicate`, `BoolPredicate`), a `ValidatePredicate`
 well-formedness check, and `FlattenConjunction` — which reduces a pure
 AND-of-leaves forest to a flat matcher list so a label-oriented injector can
 consume the common case and fail closed on real boolean composition (OR/NOT).
-Consumption is wired in `processor/queryrewrite`: `ProcessQuery` folds
+Consumption is wired in `processor/queryrewriteprocessor`: `ProcessQuery` folds
 `enforced_predicates` into the flat matcher list via `FlattenConjunction` before
 delegating to the dialect rewriter, and fails closed when the tree needs OR/NOT
 that a label-selector injector can't apply. A dialect whose injector natively

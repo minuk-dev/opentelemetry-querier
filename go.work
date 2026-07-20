@@ -2,21 +2,21 @@ go 1.25.4
 
 use (
 	./acceptor
-	./acceptor/otqp
+	./acceptor/otqpacceptor
 	./acceptor/prometheusacceptor
 	./cmd/builder
 	./cmd/querier
 	./component
 	./dispatcher
-	./dispatcher/promdispatcher
+	./dispatcher/prometheusdispatcher
 	./gen
 	./pipeline
 	./processor
-	./processor/authratelimit
-	./processor/queryrewrite
-	./processor/responsefilter
-	./processor/simpleauthz
-	./processor/tenant
+	./processor/authratelimitprocessor
+	./processor/queryrewriteprocessor
+	./processor/responsefilterprocessor
+	./processor/simpleauthzprocessor
+	./processor/tenantprocessor
 	./qdata
 	./qerror
 	./querier

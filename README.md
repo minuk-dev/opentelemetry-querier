@@ -32,13 +32,13 @@ following the CNCF Observability TAG QLSWG draft. The default acceptor speaks
 
 | Category | Component | Description |
 | --- | --- | --- |
-| Acceptor | [`otqp`](./acceptor/otqp) | OTQP over gRPC + HTTP (default). |
+| Acceptor | [`otqp`](./acceptor/otqpacceptor) | OTQP over gRPC + HTTP (default). |
 | Acceptor | [`prometheus`](./acceptor/prometheusacceptor) | Prometheus HTTP query API ingress. |
-| Processor | [`authratelimit`](./processor/authratelimit) | Bearer auth + per-tenant rate limiting. |
-| Processor | [`tenant`](./processor/tenant) | Tenant resolution + series isolation. |
-| Processor | [`queryrewrite`](./processor/queryrewrite) | PromQL AST label injection. |
-| Processor | [`responsefilter`](./processor/responsefilter) | Drop/mask result attributes; feedback warnings. |
-| Dispatcher | [`prometheus`](./dispatcher/promdispatcher) | Upstream Prometheus HTTP query API. |
+| Processor | [`authratelimit`](./processor/authratelimitprocessor) | Bearer auth + per-tenant rate limiting. |
+| Processor | [`tenant`](./processor/tenantprocessor) | Tenant resolution + series isolation. |
+| Processor | [`queryrewrite`](./processor/queryrewriteprocessor) | PromQL AST label injection. |
+| Processor | [`responsefilter`](./processor/responsefilterprocessor) | Drop/mask result attributes; feedback warnings. |
+| Dispatcher | [`prometheus`](./dispatcher/prometheusdispatcher) | Upstream Prometheus HTTP query API. |
 
 Each component is its own Go module exposing a `NewFactory()`, so new components
 can be authored independently and selected via `builder.yaml`. See each

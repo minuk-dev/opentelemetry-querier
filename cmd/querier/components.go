@@ -4,16 +4,16 @@ package main
 
 import (
 	"github.com/minuk-dev/opentelemetry-querier/acceptor"
-	otqp "github.com/minuk-dev/opentelemetry-querier/acceptor/otqp"
+	otqpacceptor "github.com/minuk-dev/opentelemetry-querier/acceptor/otqpacceptor"
 	prometheusacceptor "github.com/minuk-dev/opentelemetry-querier/acceptor/prometheusacceptor"
 	"github.com/minuk-dev/opentelemetry-querier/dispatcher"
-	promdispatcher "github.com/minuk-dev/opentelemetry-querier/dispatcher/promdispatcher"
+	prometheusdispatcher "github.com/minuk-dev/opentelemetry-querier/dispatcher/prometheusdispatcher"
 	"github.com/minuk-dev/opentelemetry-querier/processor"
-	authratelimit "github.com/minuk-dev/opentelemetry-querier/processor/authratelimit"
-	queryrewrite "github.com/minuk-dev/opentelemetry-querier/processor/queryrewrite"
-	responsefilter "github.com/minuk-dev/opentelemetry-querier/processor/responsefilter"
-	simpleauthz "github.com/minuk-dev/opentelemetry-querier/processor/simpleauthz"
-	tenant "github.com/minuk-dev/opentelemetry-querier/processor/tenant"
+	authratelimitprocessor "github.com/minuk-dev/opentelemetry-querier/processor/authratelimitprocessor"
+	queryrewriteprocessor "github.com/minuk-dev/opentelemetry-querier/processor/queryrewriteprocessor"
+	responsefilterprocessor "github.com/minuk-dev/opentelemetry-querier/processor/responsefilterprocessor"
+	simpleauthzprocessor "github.com/minuk-dev/opentelemetry-querier/processor/simpleauthzprocessor"
+	tenantprocessor "github.com/minuk-dev/opentelemetry-querier/processor/tenantprocessor"
 	"github.com/minuk-dev/opentelemetry-querier/querier"
 )
 
@@ -23,24 +23,24 @@ func components() (querier.Factories, error) {
 	var err error
 
 	if factories.Acceptors, err = acceptor.MakeFactoryMap(
-		otqp.NewFactory(),
+		otqpacceptor.NewFactory(),
 		prometheusacceptor.NewFactory(),
 	); err != nil {
 		return factories, err
 	}
 
 	if factories.Processors, err = processor.MakeFactoryMap(
-		authratelimit.NewFactory(),
-		tenant.NewFactory(),
-		queryrewrite.NewFactory(),
-		responsefilter.NewFactory(),
-		simpleauthz.NewFactory(),
+		authratelimitprocessor.NewFactory(),
+		tenantprocessor.NewFactory(),
+		queryrewriteprocessor.NewFactory(),
+		responsefilterprocessor.NewFactory(),
+		simpleauthzprocessor.NewFactory(),
 	); err != nil {
 		return factories, err
 	}
 
 	if factories.Dispatchers, err = dispatcher.MakeFactoryMap(
-		promdispatcher.NewFactory(),
+		prometheusdispatcher.NewFactory(),
 	); err != nil {
 		return factories, err
 	}
