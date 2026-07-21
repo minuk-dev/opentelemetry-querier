@@ -17,6 +17,7 @@ acceptors:
   - gomod: github.com/minuk-dev/opentelemetry-querier/acceptor/otqpacceptor
   - gomod: github.com/minuk-dev/opentelemetry-querier/acceptor/prometheusacceptor
   - gomod: github.com/minuk-dev/opentelemetry-querier/acceptor/lokiacceptor
+  - gomod: github.com/minuk-dev/opentelemetry-querier/acceptor/elasticsearchacceptor
 
 processors:
   - gomod: github.com/minuk-dev/opentelemetry-querier/processor/authratelimitprocessor

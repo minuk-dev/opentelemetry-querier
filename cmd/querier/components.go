@@ -4,6 +4,7 @@ package main
 
 import (
 	"github.com/minuk-dev/opentelemetry-querier/acceptor"
+	elasticsearchacceptor "github.com/minuk-dev/opentelemetry-querier/acceptor/elasticsearchacceptor"
 	lokiacceptor "github.com/minuk-dev/opentelemetry-querier/acceptor/lokiacceptor"
 	otqpacceptor "github.com/minuk-dev/opentelemetry-querier/acceptor/otqpacceptor"
 	prometheusacceptor "github.com/minuk-dev/opentelemetry-querier/acceptor/prometheusacceptor"
@@ -29,6 +30,7 @@ func components() (querier.Factories, error) {
 		otqpacceptor.NewFactory(),
 		prometheusacceptor.NewFactory(),
 		lokiacceptor.NewFactory(),
+		elasticsearchacceptor.NewFactory(),
 	); err != nil {
 		return factories, err
 	}
