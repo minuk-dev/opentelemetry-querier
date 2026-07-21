@@ -33,9 +33,18 @@ const matchAll = "*"
 
 const (
 	readHeaderTimeout = 10 * time.Second
+	// maxRequestBytes bounds the _search request body so a huge POST cannot
+	// exhaust memory. A query DSL body is small; 1 MiB is generous.
+	maxRequestBytes = 1 << 20
 )
 
-var errBadBody = errors.New("elasticsearchacceptor: invalid request body")
+var (
+	errBadBody = errors.New("elasticsearchacceptor: invalid request body")
+	// errUnsupportedQuery is returned for a query DSL this proxy cannot translate
+	// to the Lucene dialect; failing is safer than silently returning everything.
+	errUnsupportedQuery = errors.New(
+		"elasticsearchacceptor: unsupported query; only query_string and match_all are supported")
+)
 
 // Config configures the Elasticsearch acceptor.
 type Config struct {
@@ -123,6 +132,10 @@ func (a *Acceptor) route(writer http.ResponseWriter, request *http.Request) {
 }
 
 func (a *Acceptor) handleSearch(writer http.ResponseWriter, request *http.Request) {
+	// Bound the body before anything reads it, so an oversized POST is rejected
+	// rather than buffered into memory.
+	request.Body = http.MaxBytesReader(writer, request.Body, maxRequestBytes)
+
 	query, err := parseSearch(request)
 	if err != nil {
 		writeError(writer, http.StatusBadRequest, err)
@@ -180,7 +193,12 @@ func parseSearch(request *http.Request) (*qdata.Query, error) {
 // queryStringFromBody extracts query.query_string.query from a JSON _search
 // body. Elasticsearch's field names use snake_case that no struct tag can
 // express in camelCase, so the body is walked as a generic map. An empty body
-// (io.EOF) yields the empty string, i.e. match-all.
+// (io.EOF), no "query", or an explicit match_all yields "" (match-all); any
+// other query DSL (match/term/bool/range/...) is rejected rather than silently
+// returning every document — dropping the client's filter would over-return.
+//
+// (Earlier this returned "" for every non-query_string body, which silently
+// degraded such queries to match-all; that behavior is intentionally removed.)
 func queryStringFromBody(reader io.Reader) (string, error) {
 	var body map[string]any
 
@@ -193,19 +211,29 @@ func queryStringFromBody(reader io.Reader) (string, error) {
 		return "", fmt.Errorf("%w: %w", errBadBody, err)
 	}
 
-	query, ok := body["query"].(map[string]any)
+	rawQuery, present := body["query"]
+	if !present {
+		return "", nil
+	}
+
+	query, ok := rawQuery.(map[string]any)
 	if !ok {
+		return "", fmt.Errorf("%w: \"query\" must be an object", errBadBody)
+	}
+
+	// match_all explicitly selects everything.
+	if _, matchAllPresent := query["match_all"]; matchAllPresent {
 		return "", nil
 	}
 
 	queryString, ok := query["query_string"].(map[string]any)
 	if !ok {
-		return "", nil
+		return "", errUnsupportedQuery
 	}
 
 	text, ok := queryString["query"].(string)
 	if !ok {
-		return "", nil
+		return "", fmt.Errorf("%w: query_string.query must be a string", errBadBody)
 	}
 
 	return text, nil
@@ -250,6 +278,12 @@ func resultToResponse(result *qdata.Result) map[string]any {
 	}
 }
 
+// recordToHit renders one log record as an Elasticsearch hit.
+//
+// Fidelity limitation: qdata attributes are string-typed, so every _source field
+// is emitted as a string here (a numeric field like {"code":500} round-trips as
+// {"code":"500"}). Faithful numeric/boolean types would require typed attributes
+// in qdata; until then this is a known lossy edge of the proxy.
 func recordToHit(record *qdata.LogRecord) map[string]any {
 	source := map[string]any{}
 

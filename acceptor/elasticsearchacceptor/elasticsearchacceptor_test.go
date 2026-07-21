@@ -184,3 +184,59 @@ func TestHandlerErrorMapsStatus(t *testing.T) {
 		t.Fatalf("status = %d, want 401", status)
 	}
 }
+
+func TestUnsupportedQueryDSLIsRejected(t *testing.T) {
+	t.Parallel()
+
+	// A match/term/bool query cannot be translated to Lucene; the proxy must 400
+	// rather than silently drop the filter and return everything.
+	handler := &captureHandler{result: logsResult(), err: nil, seen: nil}
+	server := serve(t, handler)
+
+	body := `{"query":{"match":{"message":"error"}}}`
+
+	status, _ := do(t, http.MethodPost, server.URL+"/logs-*/_search", body)
+	if status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for an unsupported query DSL", status)
+	}
+
+	if handler.seen != nil {
+		t.Fatal("pipeline must not be invoked for a rejected query")
+	}
+}
+
+func TestMatchAllBodyIsAccepted(t *testing.T) {
+	t.Parallel()
+
+	// An explicit match_all is supported and maps to the match-all expr.
+	handler := &captureHandler{result: logsResult(), err: nil, seen: nil}
+	server := serve(t, handler)
+
+	status, _ := do(t, http.MethodPost, server.URL+"/logs-*/_search", `{"query":{"match_all":{}}}`)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+
+	if handler.seen.GetExpr() != "*" {
+		t.Fatalf("expr = %q, want * (match-all)", handler.seen.GetExpr())
+	}
+}
+
+func TestOversizedBodyIsRejected(t *testing.T) {
+	t.Parallel()
+
+	handler := &captureHandler{result: logsResult(), err: nil, seen: nil}
+	server := serve(t, handler)
+
+	// A body beyond the 1 MiB cap must be rejected, not buffered.
+	huge := `{"query":{"query_string":{"query":"` + strings.Repeat("a", 2<<20) + `"}}}`
+
+	status, _ := do(t, http.MethodPost, server.URL+"/logs-*/_search", huge)
+	if status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for an oversized body", status)
+	}
+
+	if handler.seen != nil {
+		t.Fatal("pipeline must not be invoked for an oversized body")
+	}
+}
