@@ -136,3 +136,67 @@ func TestDispatchForwardsTenantAndUsesRange(t *testing.T) {
 	assert.Equal(t, "acme", gotTenant, "resolved tenant must be forwarded upstream")
 	assert.Equal(t, "/loki/api/v1/query_range", gotPath, "range context must hit the range endpoint")
 }
+
+func TestDispatchStreamsWithStructuredMetadata(t *testing.T) {
+	t.Parallel()
+
+	// Loki 3.x entries can carry a third element: an object of structured
+	// metadata. It must decode (not error) and merge as per-record attributes.
+	body := `{"status":"success","data":{"resultType":"streams","result":[` +
+		`{"stream":{"job":"api"},"values":[` +
+		`["1700000000000000000","hello",{"trace_id":"abc"}]]}]}}`
+	server := newServer(t, http.StatusOK, body)
+
+	result, err := newDispatcher(server.URL).Dispatch(context.Background(), logQLQuery(`{job="api"}`))
+	require.NoError(t, err)
+
+	records := result.GetLogs().GetRecords()
+	require.Len(t, records, 1)
+	assert.Equal(t, "hello", records[0].GetBody().GetStringValue())
+
+	traceID, ok := qdata.AttrGet(records[0].GetAttributes(), "trace_id")
+	require.True(t, ok, "structured metadata should become a per-record attribute")
+	assert.Equal(t, "abc", traceID.GetStringValue())
+}
+
+func TestDispatchStreamRecordsHaveIndependentAttributes(t *testing.T) {
+	t.Parallel()
+
+	// Two entries in one stream share labels but must not share the same
+	// attribute list: mutating one record's attributes must not affect the other.
+	body := `{"status":"success","data":{"resultType":"streams","result":[` +
+		`{"stream":{"job":"api"},"values":[` +
+		`["1700000000000000000","a"],["1700000000000000001","b"]]}]}}`
+	server := newServer(t, http.StatusOK, body)
+
+	result, err := newDispatcher(server.URL).Dispatch(context.Background(), logQLQuery(`{job="api"}`))
+	require.NoError(t, err)
+
+	records := result.GetLogs().GetRecords()
+	require.Len(t, records, 2)
+
+	// Delete the shared label from the first record only.
+	qdata.AttrDelete(records[0].GetAttributes(), "job")
+
+	_, gone := qdata.AttrGet(records[0].GetAttributes(), "job")
+	assert.False(t, gone, "label removed from record[0]")
+
+	_, kept := qdata.AttrGet(records[1].GetAttributes(), "job")
+	assert.True(t, kept, "record[1] attributes must be independent of record[0]")
+}
+
+func TestValidateRejectsBadConfig(t *testing.T) {
+	t.Parallel()
+
+	require.Error(t, lokidispatcher.Validate(lokidispatcher.Config{
+		Endpoint: "", TenantHeader: "", Timeout: 0, Limit: 0, Direction: "sideways",
+	}), "unknown direction must be rejected")
+
+	require.Error(t, lokidispatcher.Validate(lokidispatcher.Config{
+		Endpoint: "", TenantHeader: "", Timeout: 0, Limit: -1, Direction: "",
+	}), "negative limit must be rejected")
+
+	require.NoError(t, lokidispatcher.Validate(lokidispatcher.Config{
+		Endpoint: "", TenantHeader: "", Timeout: 0, Limit: 100, Direction: "backward",
+	}), "well-formed config must pass")
+}

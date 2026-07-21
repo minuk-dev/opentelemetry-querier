@@ -34,10 +34,14 @@ const DefaultLimit = 100
 
 // DefaultDirection is the scan direction Loki uses when unset; "backward"
 // returns the most recent lines first, matching Loki's own default.
-const DefaultDirection = "backward"
+const DefaultDirection = directionBackward
 
 // defaultTimeout bounds each upstream request when the config leaves it unset.
 const defaultTimeout = 30 * time.Second
+
+// defaultRangeLookback is the start-to-end window used when a range query
+// arrives with no start bound set.
+const defaultRangeLookback = time.Hour
 
 const (
 	// nanosPerSecond converts between float seconds and Go nanos.
@@ -158,8 +162,9 @@ func (d *Dispatcher) buildRequest(query *qdata.Query) (string, url.Values) {
 	form.Set("direction", d.cfg.Direction)
 
 	if query.GetContext() == qdata.ContextRange {
-		form.Set("start", formatNano(query.GetRange().GetStart().AsTime()))
-		form.Set("end", formatNano(query.GetRange().GetEnd().AsTime()))
+		start, end := rangeBounds(query)
+		form.Set("start", formatNano(start))
+		form.Set("end", formatNano(end))
 
 		if step := query.GetStep().AsDuration(); step > 0 {
 			form.Set("step", formatStep(step))
@@ -177,6 +182,24 @@ func (d *Dispatcher) buildRequest(query *qdata.Query) (string, url.Values) {
 	form.Set("time", formatNano(evalAt))
 
 	return base + "/loki/api/v1/query", form
+}
+
+// rangeBounds resolves the [start, end] window for a range query, defaulting
+// unset bounds rather than sending Loki the year-1 zero time (whose UnixNano is
+// a large negative integer): end falls back to now, start to end minus the
+// default lookback.
+func rangeBounds(query *qdata.Query) (time.Time, time.Time) {
+	end := query.GetRange().GetEnd().AsTime()
+	if end.IsZero() || end.Unix() <= 0 {
+		end = time.Now()
+	}
+
+	start := query.GetRange().GetStart().AsTime()
+	if start.IsZero() || start.Unix() <= 0 {
+		start = end.Add(-defaultRangeLookback)
+	}
+
+	return start, end
 }
 
 // formatNano renders an instant as Loki's Unix-nanosecond integer string.
@@ -202,7 +225,10 @@ type lokiData struct {
 
 type lokiStream struct {
 	Stream map[string]string `json:"stream"`
-	Values [][]string        `json:"values"`
+	// Values entries are [unixNano, line] and, on Loki 3.x, may carry a third
+	// element: an object of structured metadata. Decoding each element as a raw
+	// message tolerates that extra element instead of failing the whole response.
+	Values [][]json.RawMessage `json:"values"`
 }
 
 type lokiMetric struct {
@@ -247,13 +273,13 @@ func streamsResult(raw json.RawMessage) (*qdata.Result, error) {
 	logs := &qdata.Logs{}
 
 	for _, stream := range streams {
-		attrs := &qdata.KeyValueList{}
+		labels := &qdata.KeyValueList{}
 		for key, value := range stream.Stream {
-			qdata.AttrPutString(attrs, key, value)
+			qdata.AttrPutString(labels, key, value)
 		}
 
 		for _, entry := range stream.Values {
-			if record := entryToRecord(entry, attrs); record != nil {
+			if record := entryToRecord(entry, labels); record != nil {
 				logs.Records = append(logs.Records, record)
 			}
 		}
@@ -262,15 +288,42 @@ func streamsResult(raw json.RawMessage) (*qdata.Result, error) {
 	return &qdata.Result{Signal: qdata.SignalLogs, Data: &qdatav1.Result_Logs{Logs: logs}}, nil
 }
 
-// entryToRecord converts a Loki [unixNanoString, line] pair into a LogRecord.
-func entryToRecord(entry []string, attrs *qdata.KeyValueList) *qdata.LogRecord {
-	if len(entry) != entryFields {
+// entryToRecord converts a Loki [unixNano, line, {structured_metadata}?] entry
+// into a LogRecord. Each record gets its own attribute list (a clone of the
+// stream labels plus any per-entry structured metadata) so downstream mutation
+// of one record never aliases the others in the stream.
+func entryToRecord(entry []json.RawMessage, labels *qdata.KeyValueList) *qdata.LogRecord {
+	if len(entry) < entryFields {
 		return nil
 	}
 
-	nanos, err := strconv.ParseInt(entry[0], 10, 64)
+	var nanoStr string
+
+	err := json.Unmarshal(entry[0], &nanoStr)
 	if err != nil {
 		return nil
+	}
+
+	nanos, err := strconv.ParseInt(nanoStr, 10, 64)
+	if err != nil {
+		return nil
+	}
+
+	var line string
+
+	_ = json.Unmarshal(entry[1], &line)
+
+	attrs := cloneAttrs(labels)
+
+	// A third element, when present, is structured metadata (Loki 3.x): merge it
+	// as per-record attributes.
+	if len(entry) > entryFields {
+		var metadata map[string]string
+		if json.Unmarshal(entry[len(entry)-1], &metadata) == nil {
+			for key, value := range metadata {
+				qdata.AttrPutString(attrs, key, value)
+			}
+		}
 	}
 
 	stamp := timestamppb.New(time.Unix(0, nanos))
@@ -279,13 +332,26 @@ func entryToRecord(entry []string, attrs *qdata.KeyValueList) *qdata.LogRecord {
 		Start:       stamp,
 		End:         stamp,
 		Severity:    qdatav1.Severity_SEVERITY_UNSPECIFIED,
-		Body:        qdata.Str(entry[1]),
+		Body:        qdata.Str(line),
 		TraceId:     "",
 		SpanId:      "",
 		Fingerprint: "",
 		Sampling:    0,
 		Attributes:  attrs,
 	}
+}
+
+// cloneAttrs copies a KeyValueList into a fresh list with its own KeyValue
+// entries, so appending/replacing/deleting on the copy never mutates the
+// original (or any sibling clone). Value pointers are shared because qdata
+// treats a Value as immutable — mutation replaces the pointer, never its fields.
+func cloneAttrs(base *qdata.KeyValueList) *qdata.KeyValueList {
+	out := &qdata.KeyValueList{}
+	for _, kv := range base.GetValues() {
+		qdata.AttrPut(out, kv.GetKey(), kv.GetValue())
+	}
+
+	return out
 }
 
 func metricsResult(raw json.RawMessage, resultType string) (*qdata.Result, error) {
