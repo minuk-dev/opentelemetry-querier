@@ -144,3 +144,59 @@ func TestDispatchBodyFallsBackToRawSource(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "500", code.GetStringValue(), "numeric source field should stringify")
 }
+
+func TestNumericEpochMillisTimestamp(t *testing.T) {
+	t.Parallel()
+
+	// @timestamp indexed as an epoch-millis number (ES's default numeric date
+	// format) must be honored, not silently replaced with time.Now().
+	body := `{"hits":{"hits":[{"_index":"i","_id":"1","_source":{"@timestamp":1767322845000,"message":"hi"}}]}}`
+	server := newServer(t, http.StatusOK, body)
+
+	result, err := newDispatcher(server.URL).Dispatch(context.Background(), luceneQuery("*"))
+	require.NoError(t, err)
+
+	records := result.GetLogs().GetRecords()
+	require.Len(t, records, 1)
+	assert.Equal(t, int64(1767322845000), records[0].GetStart().AsTime().UnixMilli(),
+		"numeric epoch-millis @timestamp should map to the record time")
+}
+
+func TestLargeIntegerFieldKeepsPrecision(t *testing.T) {
+	t.Parallel()
+
+	// A long field beyond float64's exact-integer range must not be rounded.
+	body := `{"hits":{"hits":[{"_index":"i","_id":"1","_source":` +
+		`{"@timestamp":"2026-01-02T03:04:05Z","message":"hi","event_id":9223372036854775807}}]}}`
+	server := newServer(t, http.StatusOK, body)
+
+	result, err := newDispatcher(server.URL).Dispatch(context.Background(), luceneQuery("*"))
+	require.NoError(t, err)
+
+	records := result.GetLogs().GetRecords()
+	require.Len(t, records, 1)
+
+	eventID, ok := qdata.AttrGet(records[0].GetAttributes(), "event_id")
+	require.True(t, ok)
+	assert.Equal(t, "9223372036854775807", eventID.GetStringValue(),
+		"large integer must keep full precision, not round through float64")
+}
+
+func TestNestedTraceAndSpanID(t *testing.T) {
+	t.Parallel()
+
+	// ECS nests trace.id / span.id as objects; both the nested and flat forms
+	// should populate the record.
+	body := `{"hits":{"hits":[{"_index":"i","_id":"1","_source":` +
+		`{"@timestamp":"2026-01-02T03:04:05Z","message":"hi",` +
+		`"trace":{"id":"abc123"},"span.id":"def456"}}]}}`
+	server := newServer(t, http.StatusOK, body)
+
+	result, err := newDispatcher(server.URL).Dispatch(context.Background(), luceneQuery("*"))
+	require.NoError(t, err)
+
+	records := result.GetLogs().GetRecords()
+	require.Len(t, records, 1)
+	assert.Equal(t, "abc123", records[0].GetTraceId(), "nested trace.id should be resolved")
+	assert.Equal(t, "def456", records[0].GetSpanId(), "flat span.id should be resolved")
+}

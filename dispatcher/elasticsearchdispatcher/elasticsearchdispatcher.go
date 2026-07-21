@@ -224,10 +224,7 @@ func (d *Dispatcher) parseResponse(body []byte) (*qdata.Result, error) {
 // raw source), and every source field becomes an attribute.
 func (d *Dispatcher) hitToRecord(hit map[string]json.RawMessage) *qdata.LogRecord {
 	rawSource := hit["_source"]
-
-	var source map[string]any
-
-	_ = json.Unmarshal(rawSource, &source)
+	source := decodeSource(rawSource)
 
 	attrs := &qdata.KeyValueList{}
 	for key, value := range source {
@@ -244,12 +241,44 @@ func (d *Dispatcher) hitToRecord(hit map[string]json.RawMessage) *qdata.LogRecor
 		End:         stamp,
 		Severity:    qdatav1.Severity_SEVERITY_UNSPECIFIED,
 		Body:        qdata.Str(recordBody(source, rawSource)),
-		TraceId:     stringify(source["trace.id"]),
-		SpanId:      stringify(source["span.id"]),
+		TraceId:     nestedString(source, "trace", "id"),
+		SpanId:      nestedString(source, "span", "id"),
 		Fingerprint: "",
 		Sampling:    0,
 		Attributes:  attrs,
 	}
+}
+
+// decodeSource unmarshals a hit's _source, preserving numeric precision:
+// UseNumber keeps JSON numbers as json.Number rather than float64, so a large
+// `long` field is not silently rounded through a float.
+func decodeSource(raw json.RawMessage) map[string]any {
+	if len(raw) == 0 {
+		return nil
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+
+	var source map[string]any
+
+	err := decoder.Decode(&source)
+	if err != nil {
+		return nil
+	}
+
+	return source
+}
+
+// nestedString resolves parent.child from the source, accepting both the ECS
+// nested-object form ({"trace":{"id":...}}) and a flat dotted key
+// ("trace.id"), returning "" when neither is present.
+func nestedString(source map[string]any, parent, child string) string {
+	if nested, ok := source[parent].(map[string]any); ok {
+		return stringify(nested[child])
+	}
+
+	return stringify(source[parent+"."+child])
 }
 
 // rawString decodes a raw JSON string field, returning "" when absent or not a
@@ -262,20 +291,39 @@ func rawString(raw json.RawMessage) string {
 	return out
 }
 
-// recordTime reads the configured time field as an RFC3339(Nano) instant,
-// falling back to the current time when absent or unparseable.
+// recordTime reads the configured time field, falling back to the current time
+// when absent or unparseable.
 func recordTime(source map[string]any, timeField string) *timestamppb.Timestamp {
-	raw, ok := source[timeField].(string)
+	parsed, ok := parseTimeValue(source[timeField])
 	if !ok {
 		return timestamppb.New(time.Now())
 	}
 
-	parsed, err := time.Parse(time.RFC3339Nano, raw)
-	if err != nil {
-		return timestamppb.New(time.Now())
-	}
-
 	return timestamppb.New(parsed)
+}
+
+// parseTimeValue reads a time field as either an RFC3339(Nano) string or a
+// numeric epoch value. A bare number is interpreted as epoch milliseconds, which
+// is Elasticsearch's default numeric date format (epoch_millis).
+func parseTimeValue(value any) (time.Time, bool) {
+	switch typed := value.(type) {
+	case string:
+		parsed, err := time.Parse(time.RFC3339Nano, typed)
+		if err != nil {
+			return time.Time{}, false
+		}
+
+		return parsed, true
+	case json.Number:
+		millis, err := typed.Float64()
+		if err != nil {
+			return time.Time{}, false
+		}
+
+		return time.UnixMilli(int64(millis)), true
+	default:
+		return time.Time{}, false
+	}
 }
 
 // recordBody prefers a "message" field for the log line, falling back to the raw
@@ -299,6 +347,8 @@ func stringify(value any) string {
 		return typed
 	case bool:
 		return strconv.FormatBool(typed)
+	case json.Number:
+		return typed.String()
 	case float64:
 		return strconv.FormatFloat(typed, 'f', -1, 64)
 	default:
