@@ -8,6 +8,7 @@ require (
 	github.com/minuk-dev/opentelemetry-querier/acceptor/prometheusacceptor v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/component v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/dispatcher v0.0.0
+	github.com/minuk-dev/opentelemetry-querier/dispatcher/lokidispatcher v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/dispatcher/prometheusdispatcher v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/processor v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/processor/authratelimitprocessor v0.0.0
@@ -53,6 +54,8 @@ replace github.com/minuk-dev/opentelemetry-querier/acceptor/prometheusacceptor =
 replace github.com/minuk-dev/opentelemetry-querier/component => ../../component
 
 replace github.com/minuk-dev/opentelemetry-querier/dispatcher => ../../dispatcher
+
+replace github.com/minuk-dev/opentelemetry-querier/dispatcher/lokidispatcher => ../../dispatcher/lokidispatcher
 
 replace github.com/minuk-dev/opentelemetry-querier/dispatcher/prometheusdispatcher => ../../dispatcher/prometheusdispatcher
 
