@@ -33,6 +33,7 @@ type apiResponse struct {
 		Result     []struct {
 			Stream map[string]string `json:"stream"`
 			Metric map[string]string `json:"metric"`
+			Value  []any             `json:"value"`
 			Values [][]any           `json:"values"`
 		} `json:"result"`
 	} `json:"data"`
@@ -177,5 +178,68 @@ func TestHandlerErrorMapsStatus(t *testing.T) {
 	status, _ := get(t, server.URL+`/loki/api/v1/query?query={job="api"}`)
 	if status != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", status)
+	}
+}
+
+func TestInstantMetricQueryReturnsVector(t *testing.T) {
+	t.Parallel()
+
+	// An instant metric query must be answered as a "vector" with a single
+	// "value" per series, not a "matrix" with "values".
+	server := serve(t, stubHandler{result: metricsResult(), err: nil})
+
+	status, body := get(t, server.URL+`/loki/api/v1/query?query=sum(rate({job="api"}[5m]))`)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d", status)
+	}
+
+	if body.Data.ResultType != "vector" {
+		t.Fatalf("resultType = %q, want vector", body.Data.ResultType)
+	}
+
+	if len(body.Data.Result) != 1 || len(body.Data.Result[0].Value) != 2 {
+		t.Fatalf("want one series with a single [ts,val] value, got %+v", body.Data.Result)
+	}
+
+	if len(body.Data.Result[0].Values) != 0 {
+		t.Fatalf("vector series must not carry a matrix 'values' array: %+v", body.Data.Result[0].Values)
+	}
+}
+
+// capturingHandler records the query it receives so a test can assert how the
+// request was parsed.
+type capturingHandler struct {
+	result *qdata.Result
+	seen   *qdata.Query
+}
+
+func (h *capturingHandler) Handle(_ context.Context, query *qdata.Query) (*qdata.Result, error) {
+	h.seen = query
+
+	return h.result, nil
+}
+
+func TestSecondPrecisionTimestampsParsedAsSeconds(t *testing.T) {
+	t.Parallel()
+
+	// A 10-digit integer is Unix seconds (Loki's rule); it must not be read as
+	// nanoseconds (which would land in 1970).
+	handler := &capturingHandler{result: logsResult(), seen: nil}
+	server := serve(t, handler)
+
+	url := server.URL + `/loki/api/v1/query_range?query={job="api"}&start=1700000000&end=1700000100`
+
+	status, _ := get(t, url)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d", status)
+	}
+
+	if handler.seen == nil {
+		t.Fatal("handler never called")
+	}
+
+	gotStart := handler.seen.GetRange().GetStart().AsTime().UTC()
+	if gotStart.Year() != 2023 {
+		t.Fatalf("start = %s, want a 2023 instant (1700000000 is Unix seconds)", gotStart)
 	}
 }

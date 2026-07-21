@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
 	"sort"
@@ -37,6 +38,9 @@ const (
 	fullPrecision     = -1
 	intBase           = 10
 	intBitSize        = 64
+	// secondsDigits is the integer-timestamp width at or below which Loki reads a
+	// bare number as Unix seconds rather than nanoseconds.
+	secondsDigits = 10
 )
 
 var (
@@ -144,7 +148,7 @@ func (a *Acceptor) serve(writer http.ResponseWriter, request *http.Request, quer
 		return
 	}
 
-	writeJSON(writer, http.StatusOK, resultToResponse(result))
+	writeJSON(writer, http.StatusOK, resultToResponse(result, query.GetContext() == qdata.ContextInstant))
 }
 
 // ---- request parsing ----
@@ -220,23 +224,34 @@ func parseRange(request *http.Request) (*qdata.Query, error) {
 	return query, nil
 }
 
-// parseTime accepts a Unix-nanosecond integer, a Unix-seconds float, or an
-// RFC3339 timestamp — the forms the Loki query API accepts.
+// parseTime accepts the forms the Loki query API accepts, matching Loki's own
+// disambiguation (loghttp.parseTimestamp): a fractional value is Unix seconds; a
+// bare integer of at most secondsDigits digits is Unix seconds, otherwise Unix
+// nanoseconds; anything else is an RFC3339 timestamp.
 func parseTime(raw string) (time.Time, error) {
 	if raw == "" {
 		return time.Time{}, fmt.Errorf("%w: empty", errBadTime)
 	}
 
-	// A bare integer is nanoseconds since epoch (Loki's convention).
-	nanos, err := strconv.ParseInt(raw, intBase, intBitSize)
-	if err == nil {
-		return time.Unix(0, nanos), nil
+	// A fractional value is seconds since epoch (with fractional nanoseconds).
+	if strings.Contains(raw, ".") {
+		seconds, err := strconv.ParseFloat(raw, floatBitSize)
+		if err == nil {
+			whole, frac := math.Modf(seconds)
+
+			return time.Unix(int64(whole), int64(frac*nanosPerSecond)), nil
+		}
 	}
 
-	// A fractional value is seconds since epoch.
-	seconds, err := strconv.ParseFloat(raw, floatBitSize)
+	// A bare integer: Loki reads <=10 digits as Unix seconds, longer as nanos, so
+	// a second-precision timestamp like 1700000000 is not misread as nanoseconds.
+	digits, err := strconv.ParseInt(raw, intBase, intBitSize)
 	if err == nil {
-		return time.Unix(0, int64(seconds*nanosPerSecond)), nil
+		if len(strings.TrimPrefix(raw, "-")) <= secondsDigits {
+			return time.Unix(digits, 0), nil
+		}
+
+		return time.Unix(0, digits), nil
 	}
 
 	parsed, err := time.Parse(time.RFC3339, raw)
@@ -287,18 +302,25 @@ type lokiData struct {
 	Result     []lokiEntry `json:"result"`
 }
 
-// lokiEntry is one stream (Values set) or one metric series (Values as sample
-// pairs). Only one shape is used per response.
+// lokiEntry is one stream (Values holds [ts, line] pairs), one matrix series
+// (Values holds [ts, value] sample pairs), or one vector series (Value holds a
+// single [ts, value] sample). Only one shape is used per response.
 type lokiEntry struct {
 	Stream map[string]string `json:"stream,omitempty"`
 	Metric map[string]string `json:"metric,omitempty"`
-	Values [][]any           `json:"values"`
+	Value  []any             `json:"value,omitempty"`
+	Values [][]any           `json:"values,omitempty"`
 }
 
 // resultToResponse renders a qdata Result as a Loki response: logs become
-// streams; metrics become a matrix.
-func resultToResponse(result *qdata.Result) lokiResponse {
+// streams; range metrics become a matrix; instant metrics become a vector (a
+// single value per series), matching Loki's own instant-vs-range result types.
+func resultToResponse(result *qdata.Result, instant bool) lokiResponse {
 	if metrics := result.GetMetrics(); metrics != nil && len(metrics.GetSeries()) > 0 {
+		if instant {
+			return lokiResponse{Status: "success", Data: lokiData{ResultType: "vector", Result: metricsToVector(metrics)}}
+		}
+
 		return lokiResponse{Status: "success", Data: lokiData{ResultType: "matrix", Result: metricsToMatrix(metrics)}}
 	}
 
@@ -316,7 +338,7 @@ func logsToStreams(logs *qdata.Logs) []lokiEntry {
 
 		stream, ok := streams[key]
 		if !ok {
-			stream = &lokiEntry{Stream: labels, Metric: nil, Values: nil}
+			stream = &lokiEntry{Stream: labels, Metric: nil, Value: nil, Values: nil}
 			streams[key] = stream
 			order = append(order, key)
 		}
@@ -364,11 +386,33 @@ func labelKey(labels map[string]string) string {
 	return builder.String()
 }
 
+// metricsToVector renders each series as a single [ts, value] sample (its last
+// point), the shape Loki uses for an instant metric query.
+func metricsToVector(metrics *qdata.Metrics) []lokiEntry {
+	out := make([]lokiEntry, 0, len(metrics.GetSeries()))
+
+	for _, series := range metrics.GetSeries() {
+		entry := lokiEntry{Stream: nil, Metric: seriesLabels(series), Value: nil, Values: nil}
+
+		points := series.GetPoints()
+		if len(points) > 0 {
+			last := points[len(points)-1]
+			seconds := float64(last.GetEnd().AsTime().UnixNano()) / nanosPerSecond
+			value := strconv.FormatFloat(last.GetValue().GetDoubleValue(), 'f', fullPrecision, floatBitSize)
+			entry.Value = []any{seconds, value}
+		}
+
+		out = append(out, entry)
+	}
+
+	return out
+}
+
 func metricsToMatrix(metrics *qdata.Metrics) []lokiEntry {
 	out := make([]lokiEntry, 0, len(metrics.GetSeries()))
 
 	for _, series := range metrics.GetSeries() {
-		entry := lokiEntry{Stream: nil, Metric: seriesLabels(series), Values: nil}
+		entry := lokiEntry{Stream: nil, Metric: seriesLabels(series), Value: nil, Values: nil}
 		for _, point := range series.GetPoints() {
 			seconds := float64(point.GetEnd().AsTime().UnixNano()) / nanosPerSecond
 			value := strconv.FormatFloat(point.GetValue().GetDoubleValue(), 'f', fullPrecision, floatBitSize)
