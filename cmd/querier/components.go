@@ -4,6 +4,7 @@ package main
 
 import (
 	"github.com/minuk-dev/opentelemetry-querier/acceptor"
+	lokiacceptor "github.com/minuk-dev/opentelemetry-querier/acceptor/lokiacceptor"
 	otqpacceptor "github.com/minuk-dev/opentelemetry-querier/acceptor/otqpacceptor"
 	prometheusacceptor "github.com/minuk-dev/opentelemetry-querier/acceptor/prometheusacceptor"
 	"github.com/minuk-dev/opentelemetry-querier/dispatcher"
@@ -25,6 +26,7 @@ func components() (querier.Factories, error) {
 	if factories.Acceptors, err = acceptor.MakeFactoryMap(
 		otqpacceptor.NewFactory(),
 		prometheusacceptor.NewFactory(),
+		lokiacceptor.NewFactory(),
 	); err != nil {
 		return factories, err
 	}
