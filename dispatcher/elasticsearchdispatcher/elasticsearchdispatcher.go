@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -154,10 +155,15 @@ func (d *Dispatcher) buildBody(query *qdata.Query) ([]byte, error) {
 		must = append(must, rng)
 	}
 
+	// unmapped_type keeps the sort from erroring when the time field is missing
+	// from an index in the pattern (ES treats an unmapped field as empty instead
+	// of failing the whole search).
+	sortField := map[string]any{"order": "desc", "unmapped_type": "date"}
+
 	body := map[string]any{
 		"size":  d.cfg.Size,
 		"query": map[string]any{"bool": map[string]any{"must": must}},
-		"sort":  []any{map[string]any{d.cfg.TimeField: map[string]any{"order": "desc"}}},
+		"sort":  []any{map[string]any{d.cfg.TimeField: sortField}},
 	}
 
 	encoded, err := json.Marshal(body)
@@ -194,29 +200,74 @@ func timeRange(query *qdata.Query, timeField string) map[string]any {
 // _source) that no struct tag can express in camelCase, so each hit is decoded
 // as a raw map and its fields pulled out by key.
 
-type esResponse struct {
-	Hits esHits `json:"hits"`
-}
-
+// esHits mirrors the "hits" object of an _search response.
 type esHits struct {
 	Hits []map[string]json.RawMessage `json:"hits"`
 }
 
 // parseResponse converts an Elasticsearch _search body into a qdata logs Result.
+// A 200 response can still be partial (some shards failed, or the search timed
+// out); those are surfaced as feedback warnings so the truncated result is not
+// mistaken for a complete one.
+//
+// The response is decoded via a generic envelope rather than a tagged struct
+// because the partial-result fields use snake_case / underscore names that no
+// camelCase struct tag can express. For reference, the relevant _search shape is:
+//
+//	{
+//	  "timed_out": false,
+//	  "_shards": { "total": 5, "successful": 5, "failed": 0 },
+//	  "hits": { "hits": [ { "_index": ..., "_id": ..., "_source": {...} } ] }
+//	}
 func (d *Dispatcher) parseResponse(body []byte) (*qdata.Result, error) {
-	var resp esResponse
+	var envelope map[string]json.RawMessage
 
-	err := json.Unmarshal(body, &resp)
+	err := json.Unmarshal(body, &envelope)
 	if err != nil {
 		return nil, qerror.New(qerror.CodeUnavailable, "elasticsearchdispatcher: decode response: %v", err)
 	}
 
+	var hits esHits
+
+	_ = json.Unmarshal(envelope["hits"], &hits)
+
 	logs := &qdata.Logs{}
-	for _, hit := range resp.Hits.Hits {
+	for _, hit := range hits.Hits {
 		logs.Records = append(logs.Records, d.hitToRecord(hit))
 	}
 
-	return &qdata.Result{Signal: qdata.SignalLogs, Data: &qdatav1.Result_Logs{Logs: logs}}, nil
+	result := &qdata.Result{Signal: qdata.SignalLogs, Data: &qdatav1.Result_Logs{Logs: logs}}
+	surfacePartialResults(result, envelope)
+
+	return result, nil
+}
+
+// surfacePartialResults emits feedback warnings for the _search partial-result
+// signals (timed_out, _shards.failed), which a 200 response can still carry.
+func surfacePartialResults(result *qdata.Result, envelope map[string]json.RawMessage) {
+	var timedOut bool
+
+	_ = json.Unmarshal(envelope["timed_out"], &timedOut)
+
+	if timedOut {
+		qdata.Warn(result, "upstream_timeout",
+			"elasticsearch reported the search timed out; results may be partial", "elasticsearch")
+	}
+
+	// _shards inner fields are camelCase-safe, so a small tagged struct is fine.
+	var shards struct {
+		Total  int `json:"total"`
+		Failed int `json:"failed"`
+	}
+
+	_ = json.Unmarshal(envelope["_shards"], &shards)
+
+	if shards.Failed > 0 {
+		qdata.Warn(result, "shard_failure",
+			fmt.Sprintf("elasticsearch reported %d of %d shards failed; results may be partial",
+				shards.Failed, shards.Total),
+			"elasticsearch")
+	}
 }
 
 // hitToRecord maps one search hit to a LogRecord: the timestamp comes from the

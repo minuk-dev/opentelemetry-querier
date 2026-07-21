@@ -99,6 +99,15 @@ func TestDispatchSendsQueryStringAndRange(t *testing.T) {
 	queryString, ok := first["query_string"].(map[string]any)
 	require.True(t, ok, "first must clause should be a query_string")
 	assert.Equal(t, "level:error", queryString["query"], "expr must be sent as the query_string")
+
+	// The sort must carry unmapped_type so an index missing the time field does
+	// not fail the whole search.
+	sort, ok := got["sort"].([]any)
+	require.True(t, ok, "request must carry a sort")
+	require.NotEmpty(t, sort)
+	sortField, ok := sort[0].(map[string]any)["@timestamp"].(map[string]any)
+	require.True(t, ok, "sort must be keyed on the time field")
+	assert.Equal(t, "date", sortField["unmapped_type"], "sort must set unmapped_type to tolerate missing fields")
 }
 
 func TestDispatchRejectsNonLuceneDialect(t *testing.T) {
@@ -199,4 +208,39 @@ func TestNestedTraceAndSpanID(t *testing.T) {
 	require.Len(t, records, 1)
 	assert.Equal(t, "abc123", records[0].GetTraceId(), "nested trace.id should be resolved")
 	assert.Equal(t, "def456", records[0].GetSpanId(), "flat span.id should be resolved")
+}
+
+func TestPartialResultsSurfaceAsWarnings(t *testing.T) {
+	t.Parallel()
+
+	// A 200 response that timed out with failed shards must still parse, and the
+	// partial-result signals must surface as feedback warnings.
+	body := `{"timed_out":true,"_shards":{"total":5,"successful":3,"failed":2},` +
+		`"hits":{"hits":[{"_index":"i","_id":"1","_source":{"@timestamp":"2026-01-02T03:04:05Z","message":"hi"}}]}}`
+	server := newServer(t, http.StatusOK, body)
+
+	result, err := newDispatcher(server.URL).Dispatch(context.Background(), luceneQuery("*"))
+	require.NoError(t, err)
+
+	require.Len(t, result.GetLogs().GetRecords(), 1, "hits should still be returned")
+
+	notifications := result.GetFeedback().GetNotifications()
+	require.Len(t, notifications, 2, "timed_out and shard failure should both warn")
+
+	codes := []string{notifications[0].GetCode(), notifications[1].GetCode()}
+	assert.Contains(t, codes, "upstream_timeout")
+	assert.Contains(t, codes, "shard_failure")
+}
+
+func TestFullResultsHaveNoWarnings(t *testing.T) {
+	t.Parallel()
+
+	body := `{"timed_out":false,"_shards":{"total":5,"successful":5,"failed":0},` +
+		`"hits":{"hits":[{"_index":"i","_id":"1","_source":{"@timestamp":"2026-01-02T03:04:05Z","message":"hi"}}]}}`
+	server := newServer(t, http.StatusOK, body)
+
+	result, err := newDispatcher(server.URL).Dispatch(context.Background(), luceneQuery("*"))
+	require.NoError(t, err)
+
+	assert.Empty(t, result.GetFeedback().GetNotifications(), "a complete response must not warn")
 }
