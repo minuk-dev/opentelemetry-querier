@@ -110,19 +110,102 @@ func TestDispatchSendsQueryStringAndRange(t *testing.T) {
 	assert.Equal(t, "date", sortField["unmapped_type"], "sort must set unmapped_type to tolerate missing fields")
 }
 
-func TestDispatchRejectsNonLuceneDialect(t *testing.T) {
-	t.Parallel()
+func eq(name, value string) *qdata.LabelMatcher {
+	return &qdata.LabelMatcher{Name: name, Op: qdata.MatchEqual, Value: value}
+}
 
-	// The upstream must never be contacted: the dialect guard has to fail closed
-	// before any request is built or sent.
-	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		t.Error("upstream must not be called for an unsupported dialect")
+// captureBody records the JSON request body sent upstream and returns it decoded.
+func captureBody(t *testing.T, query *qdata.Query) map[string]any {
+	t.Helper()
+
+	var got map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		request.Body = http.MaxBytesReader(writer, request.Body, 1<<20)
+		payload, _ := io.ReadAll(request.Body)
+		_ = json.Unmarshal(payload, &got)
+
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"hits":{"hits":[]}}`))
 	}))
 	t.Cleanup(server.Close)
 
-	// The empty dialect defaults to PromQL, which Elasticsearch cannot execute.
-	_, err := newDispatcher(server.URL).Dispatch(context.Background(), &qdata.Query{Expr: "up"})
-	require.Error(t, err, "non-Lucene dialect must be rejected")
+	_, err := newDispatcher(server.URL).Dispatch(context.Background(), query)
+	require.NoError(t, err)
+
+	return got
+}
+
+// firstMust digs out query.bool.must[0] from a decoded _search body.
+func firstMust(t *testing.T, body map[string]any) map[string]any {
+	t.Helper()
+
+	query, ok := body["query"].(map[string]any)
+	require.True(t, ok, "body must carry a query: %+v", body)
+	boolQuery, ok := query["bool"].(map[string]any)
+	require.True(t, ok, "query must be a bool query")
+	must, ok := boolQuery["must"].([]any)
+	require.True(t, ok)
+	require.NotEmpty(t, must)
+	first, ok := must[0].(map[string]any)
+	require.True(t, ok)
+
+	return first
+}
+
+func TestDispatchRendersPlanLeaf(t *testing.T) {
+	t.Parallel()
+
+	// A single equality matcher renders to a term query.
+	plan := qdata.Plan(qdata.SelectNode(qdata.SignalLogs, qdata.LeafPredicate(eq("job", "api"))))
+
+	term, ok := firstMust(t, captureBody(t, &qdata.Query{Plan: plan}))["term"].(map[string]any)
+	require.True(t, ok, "leaf matcher should render to a term query")
+	assert.Equal(t, "api", term["job"])
+}
+
+func TestDispatchRendersOrAsShould(t *testing.T) {
+	t.Parallel()
+
+	// ES expresses OR natively — no flattening — as should + minimum_should_match.
+	orPred := qdata.BoolPredicate(qdata.BoolOr,
+		qdata.LeafPredicate(eq("level", "error")), qdata.LeafPredicate(eq("level", "warn")))
+	plan := qdata.Plan(qdata.SelectNode(qdata.SignalLogs, orPred))
+
+	boolQuery, ok := firstMust(t, captureBody(t, &qdata.Query{Plan: plan}))["bool"].(map[string]any)
+	require.True(t, ok, "OR should render to a bool/should query")
+
+	should, ok := boolQuery["should"].([]any)
+	require.True(t, ok)
+	assert.Len(t, should, 2)
+	assert.EqualValues(t, 1, boolQuery["minimum_should_match"])
+}
+
+func TestDispatchRejectsUnrenderablePlan(t *testing.T) {
+	t.Parallel()
+
+	metricsSelect := qdata.Plan(qdata.SelectNode(qdata.SignalMetrics, qdata.LeafPredicate(eq("__name__", "up"))))
+	aggregate := qdata.Plan(qdata.AggregateNode(qdata.AggSum, nil, nil, 0,
+		qdata.SelectNode(qdata.SignalLogs, qdata.LeafPredicate(eq("job", "api")))))
+
+	cases := map[string]*qdata.QueryPlan{
+		"metrics signal": metricsSelect,
+		"aggregate root": aggregate,
+	}
+
+	for name, plan := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				t.Error("upstream must not be called for an unrenderable plan")
+			}))
+			t.Cleanup(server.Close)
+
+			_, err := newDispatcher(server.URL).Dispatch(context.Background(), &qdata.Query{Plan: plan})
+			require.Error(t, err)
+		})
+	}
 }
 
 func TestDispatchUpstreamError(t *testing.T) {

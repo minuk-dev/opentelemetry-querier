@@ -96,14 +96,6 @@ func New(cfg Config) *Dispatcher {
 
 // Dispatch executes the query and returns a logs result.
 func (d *Dispatcher) Dispatch(ctx context.Context, query *qdata.Query) (*qdata.Result, error) {
-	// Elasticsearch's query-string search speaks Lucene. Reject any other
-	// dialect rather than mis-parse it upstream — the dispatcher's half of the
-	// dialect contract (design note #10, Phase 0).
-	if dialect := qdata.QueryDialect(query); dialect != qdata.DialectLucene {
-		return nil, qerror.New(qerror.CodeInvalidArgument,
-			"elasticsearchdispatcher: cannot execute %q dialect against the Elasticsearch API", dialect)
-	}
-
 	body, err := d.buildBody(query)
 	if err != nil {
 		return nil, err
@@ -147,9 +139,24 @@ func (d *Dispatcher) Dispatch(ctx context.Context, query *qdata.Query) (*qdata.R
 // buildBody encodes the _search request body: a query_string over the expr,
 // bounded by the query's time range on the configured time field, sorted newest
 // first and capped at the configured size.
+// queryClause resolves the Elasticsearch query object: rendered from the
+// structured plan when present, otherwise a query_string over the legacy expr
+// (the deprecated fallback, design note #10, Phase 3).
+func queryClause(query *qdata.Query) (map[string]any, error) {
+	if plan := query.GetPlan(); plan != nil {
+		return planToESQuery(plan)
+	}
+
+	return map[string]any{"query_string": map[string]any{"query": query.GetExpr()}}, nil
+}
+
 func (d *Dispatcher) buildBody(query *qdata.Query) ([]byte, error) {
-	queryString := map[string]any{"query": query.GetExpr()}
-	must := []any{map[string]any{"query_string": queryString}}
+	filter, err := queryClause(query)
+	if err != nil {
+		return nil, err
+	}
+
+	must := []any{filter}
 
 	if rng := timeRange(query, d.cfg.TimeField); rng != nil {
 		must = append(must, rng)
