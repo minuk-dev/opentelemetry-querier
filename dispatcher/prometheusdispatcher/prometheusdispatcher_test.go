@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -87,19 +88,109 @@ func TestDispatchUpstreamError(t *testing.T) {
 	require.Error(t, err, "upstream 500 should be an error")
 }
 
-func TestDispatchRejectsNonPromQLDialect(t *testing.T) {
-	t.Parallel()
+// captureQuery runs a request against a server that records the `query` form
+// value and returns an empty success body.
+func captureQuery(t *testing.T, query *qdata.Query) string {
+	t.Helper()
 
-	// The upstream must never be contacted: the dialect guard has to fail closed
-	// before any request is built or sent.
-	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		t.Error("upstream must not be called for an unsupported dialect")
+	var got string
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		request.Body = http.MaxBytesReader(writer, request.Body, 1<<20)
+		_ = request.ParseForm()
+		got = request.Form.Get("query")
+
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
 	}))
 	t.Cleanup(server.Close)
 
-	_, err := newDispatcher(server.URL).Dispatch(
-		context.Background(),
-		&qdata.Query{Expr: `{job="x"}`, Dialect: qdata.DialectLogQL},
-	)
-	require.Error(t, err, "non-PromQL dialect must be rejected")
+	_, err := newDispatcher(server.URL).Dispatch(context.Background(), query)
+	require.NoError(t, err)
+
+	return got
+}
+
+// eq is an equality label matcher.
+func eq(name, value string) *qdata.LabelMatcher {
+	return &qdata.LabelMatcher{Name: name, Op: qdata.MatchEqual, Value: value}
+}
+
+// metricSelect builds a metrics Select over an AND of the given matchers.
+func metricSelect(matchers ...*qdata.LabelMatcher) *qdata.Node {
+	preds := make([]*qdata.Predicate, 0, len(matchers))
+	for _, matcher := range matchers {
+		preds = append(preds, qdata.LeafPredicate(matcher))
+	}
+
+	return qdata.SelectNode(qdata.SignalMetrics, qdata.BoolPredicate(qdata.BoolAnd, preds...))
+}
+
+func TestDispatchRendersPlan(t *testing.T) {
+	t.Parallel()
+
+	httpTotal := metricSelect(eq("__name__", "http_requests_total"))
+	rate := qdata.TimeAggNode(qdata.TimeAggRate, 5*time.Minute, httpTotal)
+	selector := qdata.Plan(metricSelect(eq("__name__", "up"), eq("job", "api")))
+	sumByRate := qdata.Plan(qdata.AggregateNode(qdata.AggSum, []string{"job"}, nil, 0, rate))
+	quantile := qdata.Plan(qdata.AggregateNode(qdata.AggQuantile, nil, nil, 0.9, httpTotal))
+	binary := qdata.Plan(qdata.BinaryNode(qdata.BinDiv,
+		metricSelect(eq("__name__", "a")), metricSelect(eq("__name__", "b")), nil))
+
+	cases := []struct {
+		name string
+		plan *qdata.QueryPlan
+		want string
+	}{
+		{"selector sorts matchers", selector, `{__name__="up",job="api"}`},
+		{"rate over selector", qdata.Plan(rate), `rate({__name__="http_requests_total"}[300s])`},
+		{"sum by rate", sumByRate, `sum by(job)(rate({__name__="http_requests_total"}[300s]))`},
+		{"quantile leading param", quantile, `quantile(0.9, {__name__="http_requests_total"})`},
+		{"binary parenthesizes", binary, `({__name__="a"}) / ({__name__="b"})`},
+		{"literal", qdata.Plan(qdata.LiteralNode(1.5)), `1.5`},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, testCase.want, captureQuery(t, &qdata.Query{Plan: testCase.plan}))
+		})
+	}
+}
+
+func TestDispatchFallsBackToExpr(t *testing.T) {
+	t.Parallel()
+
+	// With no plan, the legacy expr is shipped verbatim (deprecated fallback).
+	got := captureQuery(t, &qdata.Query{Expr: `up{job="api"}`})
+	assert.Equal(t, `up{job="api"}`, got)
+}
+
+func TestDispatchRejectsUnrenderablePlan(t *testing.T) {
+	t.Parallel()
+
+	orSelector := qdata.SelectNode(qdata.SignalMetrics,
+		qdata.BoolPredicate(qdata.BoolOr, qdata.LeafPredicate(eq("a", "1")), qdata.LeafPredicate(eq("b", "2"))))
+
+	cases := map[string]*qdata.QueryPlan{
+		"logs signal":  qdata.Plan(qdata.SelectNode(qdata.SignalLogs, qdata.LeafPredicate(eq("job", "api")))),
+		"or selector":  qdata.Plan(orSelector),
+		"empty select": qdata.Plan(qdata.SelectNode(qdata.SignalMetrics, nil)),
+	}
+
+	for name, plan := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			// The upstream must not be hit for a plan PromQL cannot render.
+			server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				t.Error("upstream must not be called for an unrenderable plan")
+			}))
+			t.Cleanup(server.Close)
+
+			_, err := newDispatcher(server.URL).Dispatch(context.Background(), &qdata.Query{Plan: plan})
+			require.Error(t, err)
+		})
+	}
 }
