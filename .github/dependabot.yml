@@ -11,6 +11,7 @@ updates:
       - "/cmd/querier"
       - "/component"
       - "/dispatcher"
+      - "/dispatcher/elasticsearchdispatcher"
       - "/dispatcher/lokidispatcher"
       - "/dispatcher/prometheusdispatcher"
       - "/gen"

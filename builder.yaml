@@ -28,3 +28,4 @@ processors:
 dispatchers:
   - gomod: github.com/minuk-dev/opentelemetry-querier/dispatcher/prometheusdispatcher
   - gomod: github.com/minuk-dev/opentelemetry-querier/dispatcher/lokidispatcher
+  - gomod: github.com/minuk-dev/opentelemetry-querier/dispatcher/elasticsearchdispatcher

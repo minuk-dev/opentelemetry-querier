@@ -17,3 +17,4 @@ a `qdata.Result`.
 | --- | --- | --- |
 | [prometheusdispatcher](./prometheusdispatcher) | `prometheus` | Executes against an upstream Prometheus HTTP query API. |
 | [lokidispatcher](./lokidispatcher) | `loki` | Executes LogQL against an upstream Grafana Loki HTTP query API. |
+| [elasticsearchdispatcher](./elasticsearchdispatcher) | `elasticsearch` | Executes Lucene queries against an upstream Elasticsearch `_search` API. |
