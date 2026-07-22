@@ -179,11 +179,15 @@ func parseSearch(request *http.Request) (*qdata.Query, error) {
 		expr = matchAll
 	}
 
+	plan, err := parseLucene(expr)
+	if err != nil {
+		return nil, err
+	}
+
 	query := &qdata.Query{
 		Signal:  qdata.SignalLogs,
 		Context: qdata.ContextInstant,
-		Expr:    expr,
-		Dialect: qdata.DialectLucene,
+		Plan:    plan,
 	}
 	injectHeaders(query, request.Header)
 

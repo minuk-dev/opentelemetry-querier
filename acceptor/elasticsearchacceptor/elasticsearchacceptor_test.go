@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/minuk-dev/opentelemetry-querier/acceptor/elasticsearchacceptor"
@@ -60,26 +62,19 @@ func do(t *testing.T, method, url, body string) (int, map[string]any) {
 	t.Helper()
 
 	req, err := http.NewRequestWithContext(context.Background(), method, url, strings.NewReader(body))
-	if err != nil {
-		t.Fatalf("new request: %v", err)
-	}
+	require.NoError(t, err)
 
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("do: %v", err)
-	}
+	require.NoError(t, err)
 
 	defer func() { _ = resp.Body.Close() }()
 
 	decoded := map[string]any{}
 
 	if resp.StatusCode == http.StatusOK {
-		err = json.NewDecoder(resp.Body).Decode(&decoded)
-		if err != nil {
-			t.Fatalf("decode: %v", err)
-		}
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&decoded))
 	}
 
 	return resp.StatusCode, decoded
@@ -89,17 +84,44 @@ func do(t *testing.T, method, url, body string) (int, map[string]any) {
 func firstHitSource(t *testing.T, body map[string]any) map[string]any {
 	t.Helper()
 
-	hits, ok := body["hits"].(map[string]any)["hits"].([]any)
-	if !ok || len(hits) == 0 {
-		t.Fatalf("no hits in %+v", body)
-	}
+	hitsBlock, ok := body["hits"].(map[string]any)
+	require.True(t, ok, "response has a hits block: %+v", body)
+	hits, ok := hitsBlock["hits"].([]any)
+	require.True(t, ok)
+	require.NotEmpty(t, hits)
 
 	source, ok := hits[0].(map[string]any)["_source"].(map[string]any)
-	if !ok {
-		t.Fatalf("hit has no _source: %+v", hits[0])
-	}
+	require.True(t, ok, "hit has a _source: %+v", hits[0])
 
 	return source
+}
+
+// planMatchers flattens the plan's Select filter into a name->value map.
+func planMatchers(t *testing.T, query *qdata.Query) map[string]string {
+	t.Helper()
+
+	sel := query.GetPlan().GetRoot().GetSelect()
+	require.NotNil(t, sel, "plan root should be a Select")
+
+	matchers, ok := qdata.FlattenConjunction([]*qdata.Predicate{sel.GetFilter()})
+	require.True(t, ok, "filter should flatten to a conjunction")
+
+	out := map[string]string{}
+	for _, matcher := range matchers {
+		out[matcher.GetName()] = matcher.GetValue()
+	}
+
+	return out
+}
+
+// planFilter returns the plan's Select filter predicate.
+func planFilter(t *testing.T, query *qdata.Query) *qdata.Predicate {
+	t.Helper()
+
+	sel := query.GetPlan().GetRoot().GetSelect()
+	require.NotNil(t, sel, "plan root should be a Select")
+
+	return sel.GetFilter()
 }
 
 func TestSearchRendersHits(t *testing.T) {
@@ -108,17 +130,14 @@ func TestSearchRendersHits(t *testing.T) {
 	server := serve(t, &captureHandler{result: logsResult(), err: nil, seen: nil})
 
 	status, body := do(t, http.MethodGet, server.URL+"/logs-*/_search?q=level:info", "")
-	if status != http.StatusOK {
-		t.Fatalf("status = %d", status)
-	}
+	require.Equal(t, http.StatusOK, status)
 
 	source := firstHitSource(t, body)
-	if source["message"] != "hello" || source["level"] != "info" {
-		t.Fatalf("_source = %+v", source)
-	}
+	assert.Equal(t, "hello", source["message"])
+	assert.Equal(t, "info", source["level"])
 }
 
-func TestQueryParamBecomesLuceneExpr(t *testing.T) {
+func TestQueryParamBecomesLucenePlan(t *testing.T) {
 	t.Parallel()
 
 	handler := &captureHandler{result: logsResult(), err: nil, seen: nil}
@@ -126,17 +145,8 @@ func TestQueryParamBecomesLuceneExpr(t *testing.T) {
 
 	_, _ = do(t, http.MethodGet, server.URL+"/logs-*/_search?q=status:500", "")
 
-	if handler.seen == nil {
-		t.Fatal("handler never called")
-	}
-
-	if got := qdata.QueryDialect(handler.seen); got != qdata.DialectLucene {
-		t.Fatalf("dialect = %q, want lucene", got)
-	}
-
-	if handler.seen.GetExpr() != "status:500" {
-		t.Fatalf("expr = %q, want status:500", handler.seen.GetExpr())
-	}
+	require.NotNil(t, handler.seen, "handler was called")
+	assert.Equal(t, "500", planMatchers(t, handler.seen)["status"])
 }
 
 func TestPostBodyQueryString(t *testing.T) {
@@ -148,13 +158,29 @@ func TestPostBodyQueryString(t *testing.T) {
 	body := `{"query":{"query_string":{"query":"level:error"}}}`
 
 	status, _ := do(t, http.MethodPost, server.URL+"/logs-*/_search", body)
-	if status != http.StatusOK {
-		t.Fatalf("status = %d", status)
-	}
+	require.Equal(t, http.StatusOK, status)
+	assert.Equal(t, "error", planMatchers(t, handler.seen)["level"])
+}
 
-	if handler.seen.GetExpr() != "level:error" {
-		t.Fatalf("expr = %q, want level:error", handler.seen.GetExpr())
-	}
+func TestLuceneBooleanComposition(t *testing.T) {
+	t.Parallel()
+
+	handler := &captureHandler{result: logsResult(), err: nil, seen: nil}
+	server := serve(t, handler)
+
+	// level:error AND (job:api OR job:web) NOT env:dev
+	query := `level:error AND (job:api OR job:web) AND NOT env:dev`
+	_, _ = do(t, http.MethodGet, server.URL+"/logs-*/_search?q="+urlEscape(query), "")
+
+	require.NotNil(t, handler.seen)
+
+	// The top level is an AND; it must not flatten because it contains an OR and
+	// a NOT, so ValidatePredicate confirms shape and FlattenConjunction fails.
+	filter := planFilter(t, handler.seen)
+	require.NoError(t, qdata.ValidatePredicate(filter), "parsed filter should be well-formed")
+
+	_, flat := qdata.FlattenConjunction([]*qdata.Predicate{filter})
+	assert.False(t, flat, "a filter with OR/NOT must not flatten to a plain conjunction")
 }
 
 func TestEmptyQueryDefaultsToMatchAll(t *testing.T) {
@@ -165,13 +191,8 @@ func TestEmptyQueryDefaultsToMatchAll(t *testing.T) {
 
 	// No q param and an empty body: a valid match-all search, not an error.
 	status, _ := do(t, http.MethodPost, server.URL+"/logs-*/_search", "")
-	if status != http.StatusOK {
-		t.Fatalf("status = %d, want 200", status)
-	}
-
-	if handler.seen.GetExpr() != "*" {
-		t.Fatalf("expr = %q, want * (match-all)", handler.seen.GetExpr())
-	}
+	require.Equal(t, http.StatusOK, status)
+	assert.Nil(t, planFilter(t, handler.seen), "match-all is a Select with no filter")
 }
 
 func TestHandlerErrorMapsStatus(t *testing.T) {
@@ -180,9 +201,7 @@ func TestHandlerErrorMapsStatus(t *testing.T) {
 	server := serve(t, &captureHandler{result: nil, err: qerror.New(qerror.CodeUnauthenticated, "nope"), seen: nil})
 
 	status, _ := do(t, http.MethodGet, server.URL+"/logs-*/_search?q=level:info", "")
-	if status != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", status)
-	}
+	assert.Equal(t, http.StatusUnauthorized, status)
 }
 
 func TestUnsupportedQueryDSLIsRejected(t *testing.T) {
@@ -196,30 +215,19 @@ func TestUnsupportedQueryDSLIsRejected(t *testing.T) {
 	body := `{"query":{"match":{"message":"error"}}}`
 
 	status, _ := do(t, http.MethodPost, server.URL+"/logs-*/_search", body)
-	if status != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 for an unsupported query DSL", status)
-	}
-
-	if handler.seen != nil {
-		t.Fatal("pipeline must not be invoked for a rejected query")
-	}
+	assert.Equal(t, http.StatusBadRequest, status)
+	assert.Nil(t, handler.seen, "pipeline must not be invoked for a rejected query")
 }
 
 func TestMatchAllBodyIsAccepted(t *testing.T) {
 	t.Parallel()
 
-	// An explicit match_all is supported and maps to the match-all expr.
 	handler := &captureHandler{result: logsResult(), err: nil, seen: nil}
 	server := serve(t, handler)
 
 	status, _ := do(t, http.MethodPost, server.URL+"/logs-*/_search", `{"query":{"match_all":{}}}`)
-	if status != http.StatusOK {
-		t.Fatalf("status = %d, want 200", status)
-	}
-
-	if handler.seen.GetExpr() != "*" {
-		t.Fatalf("expr = %q, want * (match-all)", handler.seen.GetExpr())
-	}
+	require.Equal(t, http.StatusOK, status)
+	assert.Nil(t, planFilter(t, handler.seen), "match_all maps to a Select with no filter")
 }
 
 func TestOversizedBodyIsRejected(t *testing.T) {
@@ -232,11 +240,13 @@ func TestOversizedBodyIsRejected(t *testing.T) {
 	huge := `{"query":{"query_string":{"query":"` + strings.Repeat("a", 2<<20) + `"}}}`
 
 	status, _ := do(t, http.MethodPost, server.URL+"/logs-*/_search", huge)
-	if status != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 for an oversized body", status)
-	}
+	assert.Equal(t, http.StatusBadRequest, status)
+	assert.Nil(t, handler.seen, "pipeline must not be invoked for an oversized body")
+}
 
-	if handler.seen != nil {
-		t.Fatal("pipeline must not be invoked for an oversized body")
-	}
+// urlEscape percent-encodes a query string for use in a URL.
+func urlEscape(raw string) string {
+	replacer := strings.NewReplacer(" ", "%20", "(", "%28", ")", "%29")
+
+	return replacer.Replace(raw)
 }
