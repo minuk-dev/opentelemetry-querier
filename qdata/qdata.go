@@ -7,6 +7,7 @@ package qdata
 
 import (
 	"errors"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -36,8 +37,42 @@ type (
 	BoolExpr = qdatav1.BoolExpr
 	// BoolOp is the operator combining a BoolExpr's operands.
 	BoolOp = qdatav1.BoolOp
+	// Signal is the telemetry signal a query/select targets.
+	Signal = qdatav1.Signal
+	// MatchOp is a label-matcher / line-filter operator.
+	MatchOp = qdatav1.MatchOp
 	// HeaderValues wraps the repeated values of one header.
 	HeaderValues = qdatav1.HeaderValues
+
+	// QueryPlan is the structured, language-neutral query (design note #10,
+	// Phase 3) — the alternative to the (expr, dialect) DSL-text pair.
+	QueryPlan = qdatav1.QueryPlan
+	// Node is one logical operator in a QueryPlan tree.
+	Node = qdatav1.Node
+	// Select is a leaf operator: a signal plus a filter (and optional line filters).
+	Select = qdatav1.Select
+	// LineMatch is a log line-content filter.
+	LineMatch = qdatav1.LineMatch
+	// TimeAgg reduces a range vector over a sliding window.
+	TimeAgg = qdatav1.TimeAgg
+	// TimeAggOp is a TimeAgg reduction operator.
+	TimeAggOp = qdatav1.TimeAggOp
+	// Aggregate groups and reduces series.
+	Aggregate = qdatav1.Aggregate
+	// AggOp is an Aggregate reduction operator.
+	AggOp = qdatav1.AggOp
+	// Function is an instant/scalar function over child nodes.
+	Function = qdatav1.Function
+	// BinaryOp combines two nodes.
+	BinaryOp = qdatav1.BinaryOp
+	// BinOp is a BinaryOp operator.
+	BinOp = qdatav1.BinOp
+	// VectorMatch describes vector matching for a BinaryOp.
+	VectorMatch = qdatav1.VectorMatch
+	// MatchCardinality is the vector-match cardinality.
+	MatchCardinality = qdatav1.MatchCardinality
+	// Literal is a scalar constant node.
+	Literal = qdatav1.Literal
 
 	// Value is a tagged union over the QLSWG data types.
 	Value = qdatav1.Value
@@ -91,6 +126,46 @@ const (
 	BoolAnd = qdatav1.BoolOp_BOOL_OP_AND
 	BoolOr  = qdatav1.BoolOp_BOOL_OP_OR
 	BoolNot = qdatav1.BoolOp_BOOL_OP_NOT
+
+	TimeAggRate          = qdatav1.TimeAggOp_TIME_AGG_OP_RATE
+	TimeAggIncrease      = qdatav1.TimeAggOp_TIME_AGG_OP_INCREASE
+	TimeAggCountOverTime = qdatav1.TimeAggOp_TIME_AGG_OP_COUNT_OVER_TIME
+	TimeAggSumOverTime   = qdatav1.TimeAggOp_TIME_AGG_OP_SUM_OVER_TIME
+	TimeAggAvgOverTime   = qdatav1.TimeAggOp_TIME_AGG_OP_AVG_OVER_TIME
+	TimeAggMinOverTime   = qdatav1.TimeAggOp_TIME_AGG_OP_MIN_OVER_TIME
+	TimeAggMaxOverTime   = qdatav1.TimeAggOp_TIME_AGG_OP_MAX_OVER_TIME
+
+	AggSum      = qdatav1.AggOp_AGG_OP_SUM
+	AggAvg      = qdatav1.AggOp_AGG_OP_AVG
+	AggMin      = qdatav1.AggOp_AGG_OP_MIN
+	AggMax      = qdatav1.AggOp_AGG_OP_MAX
+	AggCount    = qdatav1.AggOp_AGG_OP_COUNT
+	AggQuantile = qdatav1.AggOp_AGG_OP_QUANTILE
+	AggTopK     = qdatav1.AggOp_AGG_OP_TOPK
+	AggBottomK  = qdatav1.AggOp_AGG_OP_BOTTOMK
+	AggGroup    = qdatav1.AggOp_AGG_OP_GROUP
+	AggStddev   = qdatav1.AggOp_AGG_OP_STDDEV
+	AggStdvar   = qdatav1.AggOp_AGG_OP_STDVAR
+
+	BinAdd    = qdatav1.BinOp_BIN_OP_ADD
+	BinSub    = qdatav1.BinOp_BIN_OP_SUB
+	BinMul    = qdatav1.BinOp_BIN_OP_MUL
+	BinDiv    = qdatav1.BinOp_BIN_OP_DIV
+	BinMod    = qdatav1.BinOp_BIN_OP_MOD
+	BinPow    = qdatav1.BinOp_BIN_OP_POW
+	BinEq     = qdatav1.BinOp_BIN_OP_EQ
+	BinNe     = qdatav1.BinOp_BIN_OP_NE
+	BinGt     = qdatav1.BinOp_BIN_OP_GT
+	BinLt     = qdatav1.BinOp_BIN_OP_LT
+	BinGe     = qdatav1.BinOp_BIN_OP_GE
+	BinLe     = qdatav1.BinOp_BIN_OP_LE
+	BinAnd    = qdatav1.BinOp_BIN_OP_AND
+	BinOr     = qdatav1.BinOp_BIN_OP_OR
+	BinUnless = qdatav1.BinOp_BIN_OP_UNLESS
+
+	CardinalityOneToOne  = qdatav1.MatchCardinality_MATCH_CARDINALITY_ONE_TO_ONE
+	CardinalityManyToOne = qdatav1.MatchCardinality_MATCH_CARDINALITY_MANY_TO_ONE
+	CardinalityOneToMany = qdatav1.MatchCardinality_MATCH_CARDINALITY_ONE_TO_MANY
 
 	MetricGauge             = qdatav1.MetricType_METRIC_TYPE_GAUGE
 	MetricCumulativeCounter = qdatav1.MetricType_METRIC_TYPE_CUMULATIVE_COUNTER
@@ -426,6 +501,213 @@ func FlattenConjunction(preds []*Predicate) ([]*LabelMatcher, bool) {
 	}
 
 	return out, true
+}
+
+// ---- Structured query plan (design note #10, Phase 3) ----
+
+// Query-plan structural errors (shape only, not backend renderability).
+var (
+	errNilPlan       = errors.New("qdata: nil query plan")
+	errNilNode       = errors.New("qdata: query plan has a nil node")
+	errEmptyNode     = errors.New("qdata: query plan node has no op set")
+	errNilInput      = errors.New("qdata: node is missing its input")
+	errTimeAggOp     = errors.New("qdata: time_agg op is unspecified")
+	errTimeAggWindow = errors.New("qdata: time_agg window must be positive")
+	errAggOp         = errors.New("qdata: aggregate op is unspecified")
+	errAggGrouping   = errors.New("qdata: aggregate cannot set both by and without")
+	errFuncName      = errors.New("qdata: function name is empty")
+	errBinOp         = errors.New("qdata: binary op is unspecified")
+	errBinOperand    = errors.New("qdata: binary op is missing an operand")
+)
+
+// Plan wraps a root node as a QueryPlan.
+func Plan(root *Node) *QueryPlan { return &QueryPlan{Root: root} }
+
+// SelectNode builds a Select leaf: a signal, an optional label/attribute filter
+// (nil selects everything of the signal), and optional log line filters.
+func SelectNode(signal Signal, filter *Predicate, lines ...*LineMatch) *Node {
+	return &Node{Op: &qdatav1.Node_Select{Select: &Select{Signal: signal, Filter: filter, Line: lines}}}
+}
+
+// LineFilter builds a log line-content filter.
+func LineFilter(op MatchOp, value string) *LineMatch {
+	return &LineMatch{Op: op, Value: value}
+}
+
+// TimeAggNode wraps input in a range-vector reduction over window.
+func TimeAggNode(op TimeAggOp, window time.Duration, input *Node) *Node {
+	return &Node{Op: &qdatav1.Node_TimeAgg{
+		TimeAgg: &TimeAgg{Op: op, Window: durationpb.New(window), Input: input},
+	}}
+}
+
+// AggregateNode groups input and reduces it. by and without are mutually
+// exclusive; param carries a quantile phi or topk/bottomk k when the op needs one.
+func AggregateNode(op AggOp, by, without []string, param float64, input *Node) *Node {
+	return &Node{Op: &qdatav1.Node_Aggregate{
+		Aggregate: &Aggregate{Op: op, By: by, Without: without, Param: param, Input: input},
+	}}
+}
+
+// FunctionNode builds an instant/scalar function over child nodes.
+func FunctionNode(name string, args []*Node, stringArgs ...string) *Node {
+	return &Node{Op: &qdatav1.Node_Function{
+		Function: &Function{Name: name, Args: args, StringArgs: stringArgs},
+	}}
+}
+
+// BinaryNode combines two nodes; matching may be nil for one-to-one matching.
+func BinaryNode(op BinOp, lhs, rhs *Node, matching *VectorMatch) *Node {
+	return &Node{Op: &qdatav1.Node_Binary{
+		Binary: &BinaryOp{Op: op, Lhs: lhs, Rhs: rhs, Matching: matching},
+	}}
+}
+
+// LiteralNode builds a scalar constant node.
+func LiteralNode(value float64) *Node {
+	return &Node{Op: &qdatav1.Node_Literal{Literal: &Literal{Value: value}}}
+}
+
+// ValidatePlan reports whether plan is a structurally well-formed query tree:
+// every node sets exactly one op, operators have their required operands, an
+// aggregate does not set both by and without, and any Select filter is a valid
+// predicate. It checks shape only, not whether a dispatcher can render it.
+func ValidatePlan(plan *QueryPlan) error {
+	if plan == nil {
+		return errNilPlan
+	}
+
+	return validateNode(plan.GetRoot())
+}
+
+func validateNode(node *Node) error {
+	if node == nil {
+		return errNilNode
+	}
+
+	switch variant := node.GetOp().(type) {
+	case *qdatav1.Node_Select:
+		if filter := variant.Select.GetFilter(); filter != nil {
+			return ValidatePredicate(filter)
+		}
+
+		return nil
+	case *qdatav1.Node_TimeAgg:
+		return validateTimeAgg(variant.TimeAgg)
+	case *qdatav1.Node_Aggregate:
+		return validateAggregate(variant.Aggregate)
+	case *qdatav1.Node_Function:
+		return validateFunction(variant.Function)
+	case *qdatav1.Node_Binary:
+		return validateBinary(variant.Binary)
+	case *qdatav1.Node_Literal:
+		return nil
+	default:
+		return errEmptyNode
+	}
+}
+
+func validateTimeAgg(agg *TimeAgg) error {
+	if agg.GetOp() == qdatav1.TimeAggOp_TIME_AGG_OP_UNSPECIFIED {
+		return errTimeAggOp
+	}
+
+	if agg.GetWindow().AsDuration() <= 0 {
+		return errTimeAggWindow
+	}
+
+	if agg.GetInput() == nil {
+		return errNilInput
+	}
+
+	return validateNode(agg.GetInput())
+}
+
+func validateAggregate(agg *Aggregate) error {
+	if agg.GetOp() == qdatav1.AggOp_AGG_OP_UNSPECIFIED {
+		return errAggOp
+	}
+
+	if len(agg.GetBy()) > 0 && len(agg.GetWithout()) > 0 {
+		return errAggGrouping
+	}
+
+	if agg.GetInput() == nil {
+		return errNilInput
+	}
+
+	return validateNode(agg.GetInput())
+}
+
+func validateFunction(fn *Function) error {
+	if fn.GetName() == "" {
+		return errFuncName
+	}
+
+	for _, arg := range fn.GetArgs() {
+		err := validateNode(arg)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func validateBinary(bin *BinaryOp) error {
+	if bin.GetOp() == qdatav1.BinOp_BIN_OP_UNSPECIFIED {
+		return errBinOp
+	}
+
+	if bin.GetLhs() == nil || bin.GetRhs() == nil {
+		return errBinOperand
+	}
+
+	err := validateNode(bin.GetLhs())
+	if err != nil {
+		return err
+	}
+
+	return validateNode(bin.GetRhs())
+}
+
+// PlanSignals returns the distinct signals the plan's Select leaves target, in
+// ascending order. A dispatcher uses it to reject a plan spanning a signal it
+// cannot serve; an empty plan yields no signals.
+func PlanSignals(plan *QueryPlan) []Signal {
+	seen := map[Signal]struct{}{}
+	collectSignals(plan.GetRoot(), seen)
+
+	out := make([]Signal, 0, len(seen))
+	for signal := range seen {
+		out = append(out, signal)
+	}
+
+	slices.Sort(out)
+
+	return out
+}
+
+func collectSignals(node *Node, seen map[Signal]struct{}) {
+	if node == nil {
+		return
+	}
+
+	switch variant := node.GetOp().(type) {
+	case *qdatav1.Node_Select:
+		seen[variant.Select.GetSignal()] = struct{}{}
+	case *qdatav1.Node_TimeAgg:
+		collectSignals(variant.TimeAgg.GetInput(), seen)
+	case *qdatav1.Node_Aggregate:
+		collectSignals(variant.Aggregate.GetInput(), seen)
+	case *qdatav1.Node_Function:
+		for _, arg := range variant.Function.GetArgs() {
+			collectSignals(arg, seen)
+		}
+	case *qdatav1.Node_Binary:
+		collectSignals(variant.Binary.GetLhs(), seen)
+		collectSignals(variant.Binary.GetRhs(), seen)
+	}
 }
 
 // ---- Feedback side channel (spec §Side Channel Feedback) ----

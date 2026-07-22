@@ -105,6 +105,9 @@ message Query {
   google.protobuf.Duration step = 4;
   Modifier modifier = 5;
 
+  // DEPRECATED (design note #10, Phase 3): use plan. expr/dialect are the
+  // best-effort DSL-text fallback and are removed once every acceptor produces,
+  // and every dispatcher renders, a structured plan.
   string expr = 6;    // source DSL text (PromQL for the Prometheus acceptor).
   string dialect = 7; // DSL name of expr, e.g. "promql".
 
@@ -124,4 +127,150 @@ message Query {
   // composition. Only dialects whose injector understands it consume it; PromQL
   // keeps using the flat enforced_matchers. See design note #10, Phase 2.
   repeated Predicate enforced_predicates = 11;
+
+  // plan is the structured, language-neutral query (design note #10, Phase 3 /
+  // §4.3 IR). When set it is the source of truth: acceptors build it from their
+  // native query and dispatchers render it to their backend's native query, so
+  // no dialect tag is needed. expr/dialect above are the deprecated fallback.
+  QueryPlan plan = 12;
+}
+
+// ---- Structured query IR (design note #10, Phase 3 / §4.3) ----
+//
+// QueryPlan is the language-neutral logical query — the structured alternative
+// to the (expr, dialect) DSL-text pair. Operator coverage is a growing subset;
+// a dispatcher that cannot render a node fails closed (CodeInvalidArgument).
+
+// QueryPlan wraps the root operator of the logical query tree.
+message QueryPlan {
+  Node root = 1;
+}
+
+// Node is one logical operator in the plan tree.
+message Node {
+  oneof op {
+    Select select = 1;
+    TimeAgg time_agg = 2;
+    Aggregate aggregate = 3;
+    Function function = 4;
+    BinaryOp binary = 5;
+    Literal literal = 6;
+  }
+}
+
+// Select is a leaf operator: it selects a signal and filters it. For metrics it
+// selects series; for logs it selects records via the stream filter and any
+// line filters.
+message Select {
+  Signal signal = 1;
+  Predicate filter = 2;        // label/attribute selector (reuses Predicate).
+  repeated LineMatch line = 3; // logs only: line-content filters.
+}
+
+// LineMatch is a log line filter (LogQL |= |~ != !~). op reuses MatchOp: EQUAL
+// means "contains", NOT_EQUAL "does not contain", REGEXP / NOT_REGEXP match the
+// line against value as a regular expression.
+message LineMatch {
+  MatchOp op = 1;
+  string value = 2;
+}
+
+// TimeAgg reduces a range vector over a sliding window (PromQL rate/increase,
+// LogQL rate/count_over_time).
+message TimeAgg {
+  TimeAggOp op = 1;
+  google.protobuf.Duration window = 2;
+  Node input = 3;
+}
+
+enum TimeAggOp {
+  TIME_AGG_OP_UNSPECIFIED = 0;
+  TIME_AGG_OP_RATE = 1;
+  TIME_AGG_OP_INCREASE = 2;
+  TIME_AGG_OP_COUNT_OVER_TIME = 3;
+  TIME_AGG_OP_SUM_OVER_TIME = 4;
+  TIME_AGG_OP_AVG_OVER_TIME = 5;
+  TIME_AGG_OP_MIN_OVER_TIME = 6;
+  TIME_AGG_OP_MAX_OVER_TIME = 7;
+}
+
+// Aggregate groups series by/without labels and reduces them.
+message Aggregate {
+  AggOp op = 1;
+  repeated string by = 2;
+  repeated string without = 3;
+  double param = 4; // quantile phi in [0,1], or topk/bottomk k.
+  Node input = 5;
+}
+
+enum AggOp {
+  AGG_OP_UNSPECIFIED = 0;
+  AGG_OP_SUM = 1;
+  AGG_OP_AVG = 2;
+  AGG_OP_MIN = 3;
+  AGG_OP_MAX = 4;
+  AGG_OP_COUNT = 5;
+  AGG_OP_QUANTILE = 6;
+  AGG_OP_TOPK = 7;
+  AGG_OP_BOTTOMK = 8;
+  AGG_OP_GROUP = 9;
+  AGG_OP_STDDEV = 10;
+  AGG_OP_STDVAR = 11;
+}
+
+// Function is an instant/scalar function over child nodes. name is open-ended
+// (histogram_quantile, abs, clamp, label_replace, ...); a dispatcher that does
+// not recognize name fails closed.
+message Function {
+  string name = 1;
+  repeated Node args = 2;
+  repeated string string_args = 3; // literal string arguments (e.g. label_replace).
+}
+
+// BinaryOp combines two nodes (arithmetic, comparison, set operations).
+message BinaryOp {
+  BinOp op = 1;
+  Node lhs = 2;
+  Node rhs = 3;
+  VectorMatch matching = 4; // optional vector matching (on/ignoring, group_*).
+}
+
+enum BinOp {
+  BIN_OP_UNSPECIFIED = 0;
+  BIN_OP_ADD = 1;
+  BIN_OP_SUB = 2;
+  BIN_OP_MUL = 3;
+  BIN_OP_DIV = 4;
+  BIN_OP_MOD = 5;
+  BIN_OP_POW = 6;
+  BIN_OP_EQ = 7;
+  BIN_OP_NE = 8;
+  BIN_OP_GT = 9;
+  BIN_OP_LT = 10;
+  BIN_OP_GE = 11;
+  BIN_OP_LE = 12;
+  BIN_OP_AND = 13;
+  BIN_OP_OR = 14;
+  BIN_OP_UNLESS = 15;
+}
+
+// VectorMatch describes how two vectors' series are paired in a BinaryOp
+// (PromQL on/ignoring + group_left/group_right). on and ignoring are mutually
+// exclusive.
+message VectorMatch {
+  repeated string on = 1;
+  repeated string ignoring = 2;
+  MatchCardinality cardinality = 3;
+  repeated string include = 4; // group_left/right(<include>) labels to copy.
+}
+
+enum MatchCardinality {
+  MATCH_CARDINALITY_ONE_TO_ONE = 0;
+  MATCH_CARDINALITY_MANY_TO_ONE = 1; // group_left
+  MATCH_CARDINALITY_ONE_TO_MANY = 2; // group_right
+}
+
+// Literal is a scalar constant.
+message Literal {
+  double value = 1;
 }

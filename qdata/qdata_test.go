@@ -2,6 +2,7 @@ package qdata_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -134,5 +135,94 @@ func TestFlattenConjunction(t *testing.T) {
 		preds := []*qdata.Predicate{qdata.BoolPredicate(qdata.BoolNot, leaf("a", "1"))}
 		_, ok := qdata.FlattenConjunction(preds)
 		assert.False(t, ok, "NOT must not flatten to a conjunction")
+	})
+}
+
+// selectMetrics builds a Select node over metrics filtered by __name__=metric.
+func selectMetrics(metric string) *qdata.Node {
+	return qdata.SelectNode(qdata.SignalMetrics, leaf("__name__", metric))
+}
+
+func TestValidatePlan(t *testing.T) {
+	t.Parallel()
+
+	metricX := selectMetrics("x")
+	rate := qdata.TimeAggNode(qdata.TimeAggRate, time.Minute, selectMetrics("http_requests_total"))
+	sumByRate := qdata.AggregateNode(qdata.AggSum, []string{"job"}, nil, 0, rate)
+	binaryDiv := qdata.BinaryNode(qdata.BinDiv, selectMetrics("a"), selectMetrics("b"), nil)
+	function := qdata.FunctionNode("abs", []*qdata.Node{metricX})
+
+	badTimeAggOp := qdata.TimeAggNode(0, time.Minute, metricX)
+	badTimeAggWindow := qdata.TimeAggNode(qdata.TimeAggRate, 0, metricX)
+	badTimeAggInput := qdata.TimeAggNode(qdata.TimeAggRate, time.Minute, nil)
+	badAggOp := qdata.AggregateNode(0, nil, nil, 0, metricX)
+	badAggGrouping := qdata.AggregateNode(qdata.AggSum, []string{"a"}, []string{"b"}, 0, metricX)
+	badBinary := qdata.BinaryNode(qdata.BinDiv, selectMetrics("a"), nil, nil)
+	badFilter := qdata.SelectNode(qdata.SignalMetrics, qdata.LeafPredicate(nil))
+
+	cases := []struct {
+		name    string
+		plan    *qdata.QueryPlan
+		wantErr bool
+	}{
+		{name: "select leaf", plan: qdata.Plan(selectMetrics("up")), wantErr: false},
+		{name: "select nil filter", plan: qdata.Plan(qdata.SelectNode(qdata.SignalLogs, nil)), wantErr: false},
+		{name: "rate over select", plan: qdata.Plan(rate), wantErr: false},
+		{name: "sum by rate", plan: qdata.Plan(sumByRate), wantErr: false},
+		{name: "binary div", plan: qdata.Plan(binaryDiv), wantErr: false},
+		{name: "literal", plan: qdata.Plan(qdata.LiteralNode(1.5)), wantErr: false},
+		{name: "function", plan: qdata.Plan(function), wantErr: false},
+
+		{name: "nil plan", plan: nil, wantErr: true},
+		{name: "nil root", plan: qdata.Plan(nil), wantErr: true},
+		{name: "empty node", plan: qdata.Plan(&qdata.Node{}), wantErr: true},
+		{name: "time_agg unspecified op", plan: qdata.Plan(badTimeAggOp), wantErr: true},
+		{name: "time_agg zero window", plan: qdata.Plan(badTimeAggWindow), wantErr: true},
+		{name: "time_agg nil input", plan: qdata.Plan(badTimeAggInput), wantErr: true},
+		{name: "aggregate unspecified op", plan: qdata.Plan(badAggOp), wantErr: true},
+		{name: "aggregate by and without", plan: qdata.Plan(badAggGrouping), wantErr: true},
+		{name: "function empty name", plan: qdata.Plan(qdata.FunctionNode("", nil)), wantErr: true},
+		{name: "binary missing operand", plan: qdata.Plan(badBinary), wantErr: true},
+		{name: "invalid nested filter", plan: qdata.Plan(badFilter), wantErr: true},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := qdata.ValidatePlan(testCase.plan)
+			if testCase.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestPlanSignals(t *testing.T) {
+	t.Parallel()
+
+	t.Run("single signal", func(t *testing.T) {
+		t.Parallel()
+
+		plan := qdata.Plan(qdata.TimeAggNode(qdata.TimeAggRate, time.Minute, selectMetrics("x")))
+		assert.Equal(t, []qdata.Signal{qdata.SignalMetrics}, qdata.PlanSignals(plan))
+	})
+
+	t.Run("distinct signals across a binary op, sorted", func(t *testing.T) {
+		t.Parallel()
+
+		plan := qdata.Plan(qdata.BinaryNode(qdata.BinDiv,
+			qdata.SelectNode(qdata.SignalLogs, nil),
+			selectMetrics("x"), nil))
+		// SignalMetrics(1) sorts before SignalLogs(2).
+		assert.Equal(t, []qdata.Signal{qdata.SignalMetrics, qdata.SignalLogs}, qdata.PlanSignals(plan))
+	})
+
+	t.Run("empty plan yields no signals", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Empty(t, qdata.PlanSignals(qdata.Plan(nil)))
 	})
 }
