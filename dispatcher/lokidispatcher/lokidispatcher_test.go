@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -85,19 +86,97 @@ func TestDispatchMetrics(t *testing.T) {
 	assert.Len(t, series[0].GetPoints(), 2)
 }
 
-func TestDispatchRejectsNonLogQLDialect(t *testing.T) {
-	t.Parallel()
+// captureQuery runs a request against a server that records the `query` form
+// value and returns an empty streams body.
+func captureQuery(t *testing.T, query *qdata.Query) string {
+	t.Helper()
 
-	// The upstream must never be contacted: the dialect guard has to fail closed
-	// before any request is built or sent.
-	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		t.Error("upstream must not be called for an unsupported dialect")
+	var got string
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		request.Body = http.MaxBytesReader(writer, request.Body, 1<<20)
+		_ = request.ParseForm()
+		got = request.Form.Get("query")
+
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"status":"success","data":{"resultType":"streams","result":[]}}`))
 	}))
 	t.Cleanup(server.Close)
 
-	// The empty dialect defaults to PromQL, which Loki cannot execute.
-	_, err := newDispatcher(server.URL).Dispatch(context.Background(), &qdata.Query{Expr: "up"})
-	require.Error(t, err, "non-LogQL dialect must be rejected")
+	_, err := newDispatcher(server.URL).Dispatch(context.Background(), query)
+	require.NoError(t, err)
+
+	return got
+}
+
+// logsSelect builds a logs Select over an AND of the given matchers.
+func logsSelect(matchers ...*qdata.LabelMatcher) *qdata.Node {
+	preds := make([]*qdata.Predicate, 0, len(matchers))
+	for _, matcher := range matchers {
+		preds = append(preds, qdata.LeafPredicate(matcher))
+	}
+
+	return qdata.SelectNode(qdata.SignalLogs, qdata.BoolPredicate(qdata.BoolAnd, preds...))
+}
+
+func eq(name, value string) *qdata.LabelMatcher {
+	return &qdata.LabelMatcher{Name: name, Op: qdata.MatchEqual, Value: value}
+}
+
+func TestDispatchRendersPlan(t *testing.T) {
+	t.Parallel()
+
+	stream := logsSelect(eq("job", "api"))
+	withLine := qdata.SelectNode(qdata.SignalLogs,
+		qdata.LeafPredicate(eq("job", "api")), qdata.LineFilter(qdata.MatchEqual, "error"))
+	rateNode := qdata.TimeAggNode(qdata.TimeAggRate, 5*time.Minute, stream)
+	sumByRate := qdata.Plan(qdata.AggregateNode(qdata.AggSum, []string{"job"}, nil, 0, rateNode))
+
+	cases := []struct {
+		name string
+		plan *qdata.QueryPlan
+		want string
+	}{
+		{"stream selector", qdata.Plan(stream), `{job="api"}`},
+		{"line filter", qdata.Plan(withLine), `{job="api"} |= "error"`},
+		{"rate over selector", qdata.Plan(rateNode), `rate({job="api"}[300s])`},
+		{"sum by rate", sumByRate, `sum by(job)(rate({job="api"}[300s]))`},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, testCase.want, captureQuery(t, &qdata.Query{Plan: testCase.plan}))
+		})
+	}
+}
+
+func TestDispatchRejectsUnrenderablePlan(t *testing.T) {
+	t.Parallel()
+
+	orSelector := qdata.SelectNode(qdata.SignalLogs,
+		qdata.BoolPredicate(qdata.BoolOr, qdata.LeafPredicate(eq("a", "1")), qdata.LeafPredicate(eq("b", "2"))))
+
+	cases := map[string]*qdata.QueryPlan{
+		"metrics signal": qdata.Plan(qdata.SelectNode(qdata.SignalMetrics, qdata.LeafPredicate(eq("__name__", "up")))),
+		"or selector":    qdata.Plan(orSelector),
+		"empty selector": qdata.Plan(qdata.SelectNode(qdata.SignalLogs, nil)),
+	}
+
+	for name, plan := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				t.Error("upstream must not be called for an unrenderable plan")
+			}))
+			t.Cleanup(server.Close)
+
+			_, err := newDispatcher(server.URL).Dispatch(context.Background(), &qdata.Query{Plan: plan})
+			require.Error(t, err)
+		})
+	}
 }
 
 func TestDispatchUpstreamError(t *testing.T) {
