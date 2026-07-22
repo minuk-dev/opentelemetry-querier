@@ -110,15 +110,12 @@ func New(cfg Config) *Dispatcher {
 
 // Dispatch executes the query and returns a logs (or metrics) result.
 func (d *Dispatcher) Dispatch(ctx context.Context, query *qdata.Query) (*qdata.Result, error) {
-	// The Loki HTTP API only speaks LogQL. Reject any other dialect rather than
-	// ship its text to an endpoint that would mis-parse it — the dispatcher's
-	// half of the dialect contract (design note #10, Phase 0).
-	if dialect := qdata.QueryDialect(query); dialect != qdata.DialectLogQL {
-		return nil, qerror.New(qerror.CodeInvalidArgument,
-			"lokidispatcher: cannot execute %q dialect against the Loki API", dialect)
+	logQL, err := queryText(query)
+	if err != nil {
+		return nil, err
 	}
 
-	endpoint, form := d.buildRequest(query)
+	endpoint, form := d.buildRequest(query, logQL)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
@@ -153,11 +150,24 @@ func (d *Dispatcher) Dispatch(ctx context.Context, query *qdata.Query) (*qdata.R
 	return parseResponse(body)
 }
 
+// queryText resolves the LogQL to execute: the structured plan when present
+// (rendered to LogQL), otherwise the legacy expr carried verbatim. The plan is
+// the source of truth once acceptors produce it; expr is the deprecated fallback
+// (design note #10, Phase 3), shipped as-is trusting the pipeline wired a
+// LogQL-producing acceptor.
+func queryText(query *qdata.Query) (string, error) {
+	if plan := query.GetPlan(); plan != nil {
+		return planToLogQL(plan)
+	}
+
+	return query.GetExpr(), nil
+}
+
 // buildRequest picks the instant vs range endpoint and encodes the form.
-func (d *Dispatcher) buildRequest(query *qdata.Query) (string, url.Values) {
+func (d *Dispatcher) buildRequest(query *qdata.Query, logQL string) (string, url.Values) {
 	base := strings.TrimRight(d.cfg.Endpoint, "/")
 	form := url.Values{}
-	form.Set("query", query.GetExpr())
+	form.Set("query", logQL)
 	form.Set("limit", strconv.Itoa(d.cfg.Limit))
 	form.Set("direction", d.cfg.Direction)
 
