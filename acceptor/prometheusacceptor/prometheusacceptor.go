@@ -174,7 +174,12 @@ func parseInstant(request *http.Request) (*qdata.Query, error) {
 		}
 	}
 
-	query := &qdata.Query{Signal: qdata.SignalMetrics, Context: qdata.ContextInstant, Expr: expr, Dialect: "promql"}
+	plan, err := parsePromQL(expr)
+	if err != nil {
+		return nil, err
+	}
+
+	query := &qdata.Query{Signal: qdata.SignalMetrics, Context: qdata.ContextInstant, Plan: plan}
 	query.Range = &qdata.TimeRange{Start: nil, End: timestamppb.New(evalAt), StartExclusive: false, EndExclusive: false}
 	injectHeaders(query, request.Header)
 
@@ -207,7 +212,12 @@ func parseRange(request *http.Request) (*qdata.Query, error) {
 		return nil, err
 	}
 
-	query := &qdata.Query{Signal: qdata.SignalMetrics, Context: qdata.ContextRange, Expr: expr, Dialect: "promql"}
+	plan, err := parsePromQL(expr)
+	if err != nil {
+		return nil, err
+	}
+
+	query := &qdata.Query{Signal: qdata.SignalMetrics, Context: qdata.ContextRange, Plan: plan}
 	query.Range = &qdata.TimeRange{
 		Start:          timestamppb.New(start),
 		End:            timestamppb.New(end),
