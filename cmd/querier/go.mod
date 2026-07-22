@@ -4,6 +4,7 @@ go 1.25.4
 
 require (
 	github.com/minuk-dev/opentelemetry-querier/acceptor v0.0.0
+	github.com/minuk-dev/opentelemetry-querier/acceptor/lokiacceptor v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/acceptor/otqpacceptor v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/acceptor/prometheusacceptor v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/component v0.0.0
@@ -46,6 +47,8 @@ require (
 )
 
 replace github.com/minuk-dev/opentelemetry-querier/acceptor => ../../acceptor
+
+replace github.com/minuk-dev/opentelemetry-querier/acceptor/lokiacceptor => ../../acceptor/lokiacceptor
 
 replace github.com/minuk-dev/opentelemetry-querier/acceptor/otqpacceptor => ../../acceptor/otqpacceptor
 

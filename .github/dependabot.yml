@@ -5,6 +5,7 @@ updates:
   - package-ecosystem: "gomod"
     directories:
       - "/acceptor"
+      - "/acceptor/lokiacceptor"
       - "/acceptor/otqpacceptor"
       - "/cmd/builder"
       - "/cmd/querier"
