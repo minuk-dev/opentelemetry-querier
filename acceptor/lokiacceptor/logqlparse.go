@@ -96,6 +96,13 @@ func tokenizeLogQL(input string) []logqlToken {
 			pos = next
 		default:
 			value, next := scanWhile(runes, pos, isIdentRune)
+			if next == pos {
+				// An unexpected character (scanWhile made no progress): emit it as a
+				// single-rune ident so the parser rejects it, and always advance to
+				// avoid an infinite loop.
+				value, next = string(char), pos+1
+			}
+
 			tokens = append(tokens, logqlToken{kind: logqlIdent, value: value})
 			pos = next
 		}
@@ -198,7 +205,7 @@ func scanWhile(runes []rune, start int, keep func(rune) bool) (string, int) {
 }
 
 func isIdentRune(char rune) bool {
-	return unicode.IsLetter(char) || unicode.IsDigit(char) || char == '_' || char == ':'
+	return unicode.IsLetter(char) || unicode.IsDigit(char) || char == '_'
 }
 
 // ---- parser ----
@@ -273,6 +280,13 @@ func (p *logqlParser) parseVectorAgg() (*qdata.Node, error) {
 		return nil, err
 	}
 
+	// A vector aggregation operates on a metric query (a range aggregation or a
+	// nested vector aggregation), never directly on a raw log stream — sum({...})
+	// is invalid LogQL. Reject it here rather than let the backend 400.
+	if inner.GetSelect() != nil {
+		return nil, fmt.Errorf("%w: vector aggregation requires a metric query, not a raw stream", errLogQLSyntax)
+	}
+
 	err = p.expect(logqlRParen, ")")
 	if err != nil {
 		return nil, err
@@ -296,7 +310,10 @@ func (p *logqlParser) parseAggParam(operator qdata.AggOp) (float64, error) {
 		return 0, nil
 	}
 
-	param := parseFloat(p.next().value)
+	param, err := strconv.ParseFloat(p.next().value, floatBitSize)
+	if err != nil {
+		return 0, fmt.Errorf("%w: invalid aggregation parameter", errLogQLSyntax)
+	}
 
 	return param, p.expect(logqlComma, ",")
 }
@@ -396,9 +413,14 @@ func (p *logqlParser) parseMatchers() ([]*qdata.Predicate, error) {
 		value := p.next().value
 		leaves = append(leaves, qdata.LeafPredicate(&qdata.LabelMatcher{Name: name, Op: operator, Value: value}))
 
-		if p.peek().kind == logqlComma {
-			p.next()
+		// Matchers must be comma-separated; without a comma this matcher is the
+		// last one, and parseLogSelector then requires the closing brace (a
+		// following identifier without a comma surfaces as a syntax error there).
+		if p.peek().kind != logqlComma {
+			break
 		}
+
+		p.next()
 	}
 
 	return leaves, nil
@@ -532,15 +554,6 @@ func vectorAggOp(name string) (qdata.AggOp, bool) {
 // parameter (topk/bottomk in LogQL).
 func aggTakesParam(op qdata.AggOp) bool {
 	return op == qdata.AggTopK || op == qdata.AggBottomK
-}
-
-func parseFloat(raw string) float64 {
-	value, err := strconv.ParseFloat(raw, 64)
-	if err != nil {
-		return 0
-	}
-
-	return value
 }
 
 // parseLogQLDuration parses a LogQL range duration. Go's time.ParseDuration

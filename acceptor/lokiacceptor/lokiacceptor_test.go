@@ -324,3 +324,60 @@ func TestRejectsUnsupportedLogQL(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, status)
 	assert.Nil(t, handler.seen, "pipeline must not run for an unparseable query")
 }
+
+func TestRejectsUnexpectedCharacterWithoutHanging(t *testing.T) {
+	t.Parallel()
+
+	// A stray character must be rejected with 400 and must NOT hang the tokenizer
+	// (regression: the default branch could fail to advance and spin forever).
+	handler := &capturingHandler{result: logsResult(), seen: nil}
+	server := serve(t, handler)
+
+	for _, query := range []string{`1+1`, `{job="api"}.`, `{job="api"}@`} {
+		done := make(chan int, 1)
+
+		go func() {
+			status, _ := get(t, server.URL+"/loki/api/v1/query?query="+url.QueryEscape(query))
+			done <- status
+		}()
+
+		select {
+		case status := <-done:
+			assert.Equal(t, http.StatusBadRequest, status, "query %q", query)
+		case <-time.After(3 * time.Second):
+			t.Fatalf("tokenizer hung on %q (infinite loop)", query)
+		}
+	}
+}
+
+func TestRejectsVectorAggOverRawStream(t *testing.T) {
+	t.Parallel()
+
+	// sum over a raw log stream is invalid LogQL and must be rejected up front.
+	handler := &capturingHandler{result: logsResult(), seen: nil}
+	server := serve(t, handler)
+
+	status, _ := get(t, server.URL+"/loki/api/v1/query?query="+url.QueryEscape(`sum({job="api"})`))
+	assert.Equal(t, http.StatusBadRequest, status)
+	assert.Nil(t, handler.seen)
+}
+
+func TestRejectsMalformedAggParam(t *testing.T) {
+	t.Parallel()
+
+	handler := &capturingHandler{result: logsResult(), seen: nil}
+	server := serve(t, handler)
+
+	status, _ := get(t, server.URL+"/loki/api/v1/query?query="+url.QueryEscape(`topk(5.5.5, rate({job="api"}[5m]))`))
+	assert.Equal(t, http.StatusBadRequest, status)
+}
+
+func TestRejectsMissingCommaBetweenMatchers(t *testing.T) {
+	t.Parallel()
+
+	handler := &capturingHandler{result: logsResult(), seen: nil}
+	server := serve(t, handler)
+
+	status, _ := get(t, server.URL+"/loki/api/v1/query?query="+url.QueryEscape(`{job="api" level="error"}`))
+	assert.Equal(t, http.StatusBadRequest, status)
+}
