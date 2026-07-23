@@ -11,199 +11,146 @@ import (
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
 )
 
-type rewriteCase struct {
-	name  string
-	cfg   queryrewriteprocessor.Config
-	query *qdata.Query
-	want  string
-}
-
-// testTenant is the resolved tenant id used across the rewrite cases.
 const testTenant = "acme"
 
-// withTenant records the resolved tenant id in the query's metadata, mirroring
-// what the tenant processor does upstream.
-func withTenant(q *qdata.Query) *qdata.Query {
-	qdata.SetTenantID(q, testTenant)
-
-	return q
+// tenantConfig enforces tenant_id from the resolved tenant.
+func tenantConfig() queryrewriteprocessor.Config {
+	return queryrewriteprocessor.Config{
+		EnforceLabels: []queryrewriteprocessor.EnforceLabel{{Name: "tenant_id", Value: "", FromTenant: true}},
+	}
 }
 
-// leafPred is a shortcut for an equality leaf predicate.
 func leafPred(name, value string) *qdata.Predicate {
 	return qdata.LeafPredicate(&qdata.LabelMatcher{Name: name, Op: qdata.MatchEqual, Value: value})
 }
 
-func rewriteCases() []rewriteCase {
-	tenantEnforce := queryrewriteprocessor.Config{
-		EnforceLabels: []queryrewriteprocessor.EnforceLabel{{Name: "tenant_id", Value: "", FromTenant: true}},
-	}
-
-	return []rewriteCase{
-		{
-			name:  "injects tenant matcher",
-			cfg:   tenantEnforce,
-			query: withTenant(&qdata.Query{Expr: "up", Dialect: "promql"}),
-			want:  `up{tenant_id="acme"}`,
-		},
-		{
-			name: "injects into every selector",
-			cfg:  tenantEnforce,
-			query: withTenant(&qdata.Query{
-				Expr:    `sum(rate(http_requests_total[5m])) / sum(rate(http_errors_total[5m]))`,
-				Dialect: "promql",
-			}),
-			want: `sum(rate(http_requests_total{tenant_id="acme"}[5m])) / sum(rate(http_errors_total{tenant_id="acme"}[5m]))`,
-		},
-		{
-			name:  "enforcement overrides user matcher",
-			cfg:   tenantEnforce,
-			query: withTenant(&qdata.Query{Expr: `up{tenant_id="evil"}`, Dialect: "promql"}),
-			want:  `up{tenant_id="acme"}`,
-		},
-		{
-			name: "enforced matchers from query",
-			cfg:  queryrewriteprocessor.Config{EnforceLabels: nil},
-			query: &qdata.Query{
-				Expr:             "up",
-				Dialect:          "promql",
-				EnforcedMatchers: []*qdata.LabelMatcher{{Name: "namespace", Op: qdata.MatchEqual, Value: "prod"}},
-			},
-			want: `up{namespace="prod"}`,
-		},
-		{
-			name: "enforced predicates conjunction injected",
-			cfg:  queryrewriteprocessor.Config{EnforceLabels: nil},
-			query: &qdata.Query{
-				Expr:               "up",
-				Dialect:            "promql",
-				EnforcedPredicates: []*qdata.Predicate{leafPred("namespace", "prod")},
-			},
-			want: `up{namespace="prod"}`,
-		},
-	}
+// metricSelectQuery builds a query whose plan is a single metrics Select over the
+// given filter.
+func metricSelectQuery(filter *qdata.Predicate) *qdata.Query {
+	return &qdata.Query{Plan: qdata.Plan(qdata.SelectNode(qdata.SignalMetrics, filter))}
 }
 
-func TestProcessQuery(t *testing.T) {
+// selectFilter returns the filter of the plan root's Select node.
+func selectFilter(t *testing.T, query *qdata.Query) *qdata.Predicate {
+	t.Helper()
+
+	sel := query.GetPlan().GetRoot().GetSelect()
+	require.NotNil(t, sel, "plan root should be a Select")
+
+	return sel.GetFilter()
+}
+
+// matcherMap flattens a filter into a name->value map (pure conjunctions only).
+func matcherMap(t *testing.T, filter *qdata.Predicate) map[string]string {
+	t.Helper()
+
+	matchers, ok := qdata.FlattenConjunction([]*qdata.Predicate{filter})
+	require.True(t, ok, "filter should flatten to a conjunction")
+
+	out := map[string]string{}
+	for _, matcher := range matchers {
+		out[matcher.GetName()] = matcher.GetValue()
+	}
+
+	return out
+}
+
+func TestInjectsTenantMatcher(t *testing.T) {
 	t.Parallel()
 
-	for _, testCase := range rewriteCases() {
-		t.Run(testCase.name, func(t *testing.T) {
-			t.Parallel()
+	query := metricSelectQuery(leafPred("__name__", "up"))
+	qdata.SetTenantID(query, testTenant)
 
-			proc := queryrewriteprocessor.New(testCase.cfg)
+	require.NoError(t, queryrewriteprocessor.New(tenantConfig()).ProcessQuery(context.Background(), query))
 
-			err := proc.ProcessQuery(context.Background(), testCase.query)
-			require.NoError(t, err)
-			assert.Equal(t, testCase.want, testCase.query.GetExpr())
-		})
-	}
+	labels := matcherMap(t, selectFilter(t, query))
+	assert.Equal(t, "up", labels["__name__"])
+	assert.Equal(t, testTenant, labels["tenant_id"])
 }
 
-// stubRewriter is a DialectRewriter that records the predicates it received and
-// returns a fixed expression, letting the test assert the processor dispatches by
-// dialect and hands over the collected predicates.
-type stubRewriter struct {
-	dialect  string
-	gotPreds []*qdata.LabelMatcher
-}
-
-func (s *stubRewriter) Dialect() string { return s.dialect }
-
-func (s *stubRewriter) Enforce(_ string, preds []*qdata.LabelMatcher) (string, error) {
-	s.gotPreds = preds
-
-	return "rewritten-by-stub", nil
-}
-
-func TestProcessQueryDispatchesByDialect(t *testing.T) {
+func TestInjectsIntoEverySelect(t *testing.T) {
 	t.Parallel()
 
-	stub := &stubRewriter{dialect: "logql", gotPreds: nil}
-	proc := queryrewriteprocessor.New(
-		queryrewriteprocessor.Config{EnforceLabels: nil},
-		queryrewriteprocessor.WithRewriter(stub),
-	)
+	lhs := qdata.SelectNode(qdata.SignalMetrics, leafPred("__name__", "a"))
+	rhs := qdata.SelectNode(qdata.SignalMetrics, leafPred("__name__", "b"))
+	query := &qdata.Query{Plan: qdata.Plan(qdata.BinaryNode(qdata.BinDiv, lhs, rhs, nil))}
+	qdata.SetTenantID(query, testTenant)
 
-	query := &qdata.Query{
-		Expr:             `{job="x"}`,
-		Dialect:          "logql",
-		EnforcedMatchers: []*qdata.LabelMatcher{{Name: "tenant", Op: qdata.MatchEqual, Value: "acme"}},
-	}
+	require.NoError(t, queryrewriteprocessor.New(tenantConfig()).ProcessQuery(context.Background(), query))
 
-	err := proc.ProcessQuery(context.Background(), query)
-	require.NoError(t, err)
-	assert.Equal(t, "rewritten-by-stub", query.GetExpr())
-
-	require.Len(t, stub.gotPreds, 1)
-	assert.Equal(t, "acme", stub.gotPreds[0].GetValue())
+	binary := query.GetPlan().GetRoot().GetBinary()
+	require.NotNil(t, binary)
+	assert.Equal(t, testTenant, matcherMap(t, binary.GetLhs().GetSelect().GetFilter())["tenant_id"])
+	assert.Equal(t, testTenant, matcherMap(t, binary.GetRhs().GetSelect().GetFilter())["tenant_id"])
 }
 
-func TestProcessQueryFoldsEnforcedPredicates(t *testing.T) {
+func TestEnforcedMatchersFromQuery(t *testing.T) {
 	t.Parallel()
 
-	stub := &stubRewriter{dialect: "promql", gotPreds: nil}
-	proc := queryrewriteprocessor.New(
-		queryrewriteprocessor.Config{EnforceLabels: nil},
-		queryrewriteprocessor.WithRewriter(stub),
-	)
-
-	query := &qdata.Query{
-		Expr:             "up",
-		Dialect:          "promql",
-		EnforcedMatchers: []*qdata.LabelMatcher{{Name: "tenant", Op: qdata.MatchEqual, Value: "acme"}},
-		EnforcedPredicates: []*qdata.Predicate{
-			qdata.BoolPredicate(qdata.BoolAnd, leafPred("namespace", "prod"), leafPred("region", "eu")),
-		},
-	}
-
-	err := proc.ProcessQuery(context.Background(), query)
-	require.NoError(t, err)
-
-	// Flat matcher (tenant) plus the two flattened conjunction leaves.
-	require.Len(t, stub.gotPreds, 3)
-}
-
-func TestProcessQueryEnforcedPredicatesBooleanFailsClosed(t *testing.T) {
-	t.Parallel()
+	query := metricSelectQuery(leafPred("__name__", "up"))
+	query.EnforcedMatchers = []*qdata.LabelMatcher{{Name: "namespace", Op: qdata.MatchEqual, Value: "prod"}}
 
 	proc := queryrewriteprocessor.New(queryrewriteprocessor.Config{EnforceLabels: nil})
+	require.NoError(t, proc.ProcessQuery(context.Background(), query))
 
-	query := &qdata.Query{
-		Expr:    "up",
-		Dialect: "promql",
-		EnforcedPredicates: []*qdata.Predicate{
-			qdata.BoolPredicate(qdata.BoolOr, leafPred("env", "prod"), leafPred("env", "staging")),
-		},
+	assert.Equal(t, "prod", matcherMap(t, selectFilter(t, query))["namespace"])
+}
+
+func TestEnforcedPredicatesConjunctionComposed(t *testing.T) {
+	t.Parallel()
+
+	query := metricSelectQuery(leafPred("__name__", "up"))
+	query.EnforcedPredicates = []*qdata.Predicate{
+		qdata.BoolPredicate(qdata.BoolAnd, leafPred("namespace", "prod"), leafPred("region", "eu")),
 	}
 
-	err := proc.ProcessQuery(context.Background(), query)
-	require.Error(t, err, "OR predicate cannot be woven into PromQL selectors")
-	assert.Equal(t, "up", query.GetExpr(), "expr must be untouched on fail-closed")
+	proc := queryrewriteprocessor.New(queryrewriteprocessor.Config{EnforceLabels: nil})
+	require.NoError(t, proc.ProcessQuery(context.Background(), query))
+
+	labels := matcherMap(t, selectFilter(t, query))
+	assert.Equal(t, "prod", labels["namespace"])
+	assert.Equal(t, "eu", labels["region"])
 }
 
-func TestProcessQueryUnknownDialectWithEnforcementFailsClosed(t *testing.T) {
+func TestBooleanEnforcementComposesInsteadOfFailingClosed(t *testing.T) {
 	t.Parallel()
 
-	proc := queryrewriteprocessor.New(queryrewriteprocessor.Config{
-		EnforceLabels: []queryrewriteprocessor.EnforceLabel{{Name: "tenant", Value: "acme", FromTenant: false}},
-	})
-
-	query := &qdata.Query{Expr: `SELECT 1`, Dialect: "sql"}
-
-	err := proc.ProcessQuery(context.Background(), query)
-	require.Error(t, err, "enforcing matchers on an unsupported dialect must fail closed")
-	assert.Equal(t, `SELECT 1`, query.GetExpr(), "expr must be untouched on failure")
-}
-
-func TestProcessQueryUnknownDialectNoEnforcementPassesThrough(t *testing.T) {
-	t.Parallel()
+	// An OR enforcement predicate can now be composed into the plan's predicate
+	// tree (which supports OR/NOT), instead of failing closed as the old
+	// PromQL-selector injector did.
+	query := metricSelectQuery(leafPred("__name__", "up"))
+	query.EnforcedPredicates = []*qdata.Predicate{
+		qdata.BoolPredicate(qdata.BoolOr, leafPred("env", "prod"), leafPred("env", "staging")),
+	}
 
 	proc := queryrewriteprocessor.New(queryrewriteprocessor.Config{EnforceLabels: nil})
+	require.NoError(t, proc.ProcessQuery(context.Background(), query), "OR enforcement now composes, not fails closed")
 
-	query := &qdata.Query{Expr: `SELECT 1`, Dialect: "sql"}
+	filter := selectFilter(t, query)
+	require.NoError(t, qdata.ValidatePredicate(filter), "composed filter must be well-formed")
 
-	err := proc.ProcessQuery(context.Background(), query)
-	require.NoError(t, err)
-	assert.Equal(t, `SELECT 1`, query.GetExpr(), "unknown dialect must not be rewritten")
+	_, flat := qdata.FlattenConjunction([]*qdata.Predicate{filter})
+	assert.False(t, flat, "the OR survives in the tree, so the filter is not a plain conjunction")
+}
+
+func TestNoPlanIsNoop(t *testing.T) {
+	t.Parallel()
+
+	query := &qdata.Query{}
+	qdata.SetTenantID(query, testTenant)
+
+	require.NoError(t, queryrewriteprocessor.New(tenantConfig()).ProcessQuery(context.Background(), query))
+	assert.Nil(t, query.GetPlan())
+}
+
+func TestNoEnforcementLeavesFilterUntouched(t *testing.T) {
+	t.Parallel()
+
+	query := metricSelectQuery(leafPred("__name__", "up"))
+
+	proc := queryrewriteprocessor.New(queryrewriteprocessor.Config{EnforceLabels: nil})
+	require.NoError(t, proc.ProcessQuery(context.Background(), query))
+
+	labels := matcherMap(t, selectFilter(t, query))
+	assert.Equal(t, map[string]string{"__name__": "up"}, labels)
 }
