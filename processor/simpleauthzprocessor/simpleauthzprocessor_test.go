@@ -28,7 +28,7 @@ func baseConfig() simpleauthzprocessor.Config {
 // queryWithSubject builds a query carrying the given subject in the default
 // subject header.
 func queryWithSubject(subject string) *qdata.Query {
-	query := &qdata.Query{Expr: "up"}
+	query := &qdata.Query{}
 	if subject != "" {
 		query.Header = map[string]*qdata.HeaderValues{
 			simpleauthzprocessor.DefaultSubjectHeader: {Values: []string{subject}},
@@ -130,7 +130,7 @@ func TestRequiredRejectsMissingSubject(t *testing.T) {
 	cfg.DefaultEffect = simpleauthzprocessor.EffectAllow
 	proc := simpleauthzprocessor.New(cfg)
 
-	err := proc.ProcessQuery(context.Background(), &qdata.Query{Expr: "up"})
+	err := proc.ProcessQuery(context.Background(), &qdata.Query{})
 
 	require.Error(t, err)
 	assert.Equal(t, qerror.CodePermissionDenied, qerror.CodeOf(err))
@@ -150,7 +150,7 @@ func TestFromTenantResolvesSubjectAndValue(t *testing.T) {
 	}
 	proc := simpleauthzprocessor.New(cfg)
 
-	query := &qdata.Query{Expr: "up"}
+	query := &qdata.Query{}
 	qdata.SetTenantID(query, "acme")
 
 	require.NoError(t, proc.ProcessQuery(context.Background(), query))

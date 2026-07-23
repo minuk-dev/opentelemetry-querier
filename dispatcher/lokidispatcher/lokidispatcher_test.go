@@ -37,9 +37,11 @@ func newDispatcher(endpoint string) *lokidispatcher.Dispatcher {
 	})
 }
 
-// logQLQuery builds a LogQL query; the dispatcher rejects anything else.
-func logQLQuery(expr string) *qdata.Query {
-	return &qdata.Query{Expr: expr, Dialect: qdata.DialectLogQL}
+// logQLQuery builds a logs query whose plan is a simple stream selector; the
+// dispatch tests exercise response parsing, so the selector content is
+// immaterial (the upstream body is canned).
+func logQLQuery() *qdata.Query {
+	return &qdata.Query{Plan: qdata.Plan(logsSelect(eq("job", "api")))}
 }
 
 func TestDispatchStreams(t *testing.T) {
@@ -50,7 +52,7 @@ func TestDispatchStreams(t *testing.T) {
 		`["1700000000000000000","hello"],["1700000000000000001","world"]]}]}}`
 	server := newServer(t, http.StatusOK, body)
 
-	result, err := newDispatcher(server.URL).Dispatch(context.Background(), logQLQuery(`{job="api"}`))
+	result, err := newDispatcher(server.URL).Dispatch(context.Background(), logQLQuery())
 	require.NoError(t, err)
 
 	assert.Equal(t, qdata.SignalLogs, result.GetSignal())
@@ -75,7 +77,7 @@ func TestDispatchMetrics(t *testing.T) {
 
 	result, err := newDispatcher(server.URL).Dispatch(
 		context.Background(),
-		logQLQuery(`rate({job="api"}[5m])`),
+		logQLQuery(),
 	)
 	require.NoError(t, err)
 
@@ -184,7 +186,7 @@ func TestDispatchUpstreamError(t *testing.T) {
 
 	server := newServer(t, http.StatusInternalServerError, "boom")
 
-	_, err := newDispatcher(server.URL).Dispatch(context.Background(), logQLQuery(`{job="api"}`))
+	_, err := newDispatcher(server.URL).Dispatch(context.Background(), logQLQuery())
 	require.Error(t, err, "upstream 500 should be an error")
 }
 
@@ -205,7 +207,7 @@ func TestDispatchForwardsTenantAndUsesRange(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	query := logQLQuery(`{job="api"}`)
+	query := logQLQuery()
 	query.Context = qdata.ContextRange
 	qdata.SetTenantID(query, "acme")
 
@@ -226,7 +228,7 @@ func TestDispatchStreamsWithStructuredMetadata(t *testing.T) {
 		`["1700000000000000000","hello",{"trace_id":"abc"}]]}]}}`
 	server := newServer(t, http.StatusOK, body)
 
-	result, err := newDispatcher(server.URL).Dispatch(context.Background(), logQLQuery(`{job="api"}`))
+	result, err := newDispatcher(server.URL).Dispatch(context.Background(), logQLQuery())
 	require.NoError(t, err)
 
 	records := result.GetLogs().GetRecords()
@@ -248,7 +250,7 @@ func TestDispatchStreamRecordsHaveIndependentAttributes(t *testing.T) {
 		`["1700000000000000000","a"],["1700000000000000001","b"]]}]}}`
 	server := newServer(t, http.StatusOK, body)
 
-	result, err := newDispatcher(server.URL).Dispatch(context.Background(), logQLQuery(`{job="api"}`))
+	result, err := newDispatcher(server.URL).Dispatch(context.Background(), logQLQuery())
 	require.NoError(t, err)
 
 	records := result.GetLogs().GetRecords()
