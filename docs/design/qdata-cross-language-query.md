@@ -1,8 +1,20 @@
 # `qdata.Query` as a cross-language query format: support & limitations
 
-Design note for [#10](https://github.com/minuk-dev/opentelemetry-querier/issues/10)
-(scoped down and closed once Phases 0–2 shipped).
-Status: **Phases 0–2 implemented; Phase 3 tracked** in
+Design note for [#10](https://github.com/minuk-dev/opentelemetry-querier/issues/10).
+
+> **Update — the structured IR shipped.** The `(expr, dialect)` DSL-text transport
+> described below has been **removed**. `Query` now carries a language-neutral
+> `QueryPlan` (a tree of `Select`/`TimeAgg`/`Aggregate`/`Function`/`BinaryOp`/
+> `Literal` nodes reusing the `Predicate` filter): acceptors parse their native
+> query into it (PromQL via the upstream parser; LogQL/Lucene via self-contained
+> subset parsers), and dispatchers render it back to their backend (PromQL/LogQL
+> text, Elasticsearch query DSL). Enforcement is now language-neutral — the
+> query-rewrite processor AND-s the enforced predicates into every `Select`
+> filter, so boolean (OR/NOT) enforcement composes and a backend that cannot
+> render a shape fails closed at render time. This realizes the Phase 3 §4.3 IR
+> the sections below deferred. The historical analysis is kept for context.
+
+Historical status (pre-IR): **Phases 0–2 implemented; Phase 3 tracked** in
 [#24](https://github.com/minuk-dev/opentelemetry-querier/issues/24) as speculative
 design, not committed work.
 

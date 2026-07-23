@@ -150,17 +150,15 @@ func (d *Dispatcher) Dispatch(ctx context.Context, query *qdata.Query) (*qdata.R
 	return parseResponse(body)
 }
 
-// queryText resolves the LogQL to execute: the structured plan when present
-// (rendered to LogQL), otherwise the legacy expr carried verbatim. The plan is
-// the source of truth once acceptors produce it; expr is the deprecated fallback
-// (design note #10, Phase 3), shipped as-is trusting the pipeline wired a
-// LogQL-producing acceptor.
+// queryText renders the query's structured plan to LogQL. The plan is the query
+// (design note #10, Phase 3); a query without one is rejected.
 func queryText(query *qdata.Query) (string, error) {
-	if plan := query.GetPlan(); plan != nil {
-		return planToLogQL(plan)
+	plan := query.GetPlan()
+	if plan == nil {
+		return "", qerror.New(qerror.CodeInvalidArgument, "lokidispatcher: query has no plan")
 	}
 
-	return query.GetExpr(), nil
+	return planToLogQL(plan)
 }
 
 // buildRequest picks the instant vs range endpoint and encodes the form.

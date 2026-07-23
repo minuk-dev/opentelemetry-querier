@@ -136,20 +136,21 @@ func (d *Dispatcher) Dispatch(ctx context.Context, query *qdata.Query) (*qdata.R
 	return d.parseResponse(payload)
 }
 
-// buildBody encodes the _search request body: a query_string over the expr,
-// bounded by the query's time range on the configured time field, sorted newest
-// first and capped at the configured size.
-// queryClause resolves the Elasticsearch query object: rendered from the
-// structured plan when present, otherwise a query_string over the legacy expr
-// (the deprecated fallback, design note #10, Phase 3).
+// queryClause renders the query's structured plan to an Elasticsearch query
+// object. The plan is the query (design note #10, Phase 3); a query without one
+// is rejected.
 func queryClause(query *qdata.Query) (map[string]any, error) {
-	if plan := query.GetPlan(); plan != nil {
-		return planToESQuery(plan)
+	plan := query.GetPlan()
+	if plan == nil {
+		return nil, qerror.New(qerror.CodeInvalidArgument, "elasticsearchdispatcher: query has no plan")
 	}
 
-	return map[string]any{"query_string": map[string]any{"query": query.GetExpr()}}, nil
+	return planToESQuery(plan)
 }
 
+// buildBody encodes the _search request body: the plan-derived query, bounded by
+// the query's time range on the configured time field, sorted newest-first and
+// capped at the configured size.
 func (d *Dispatcher) buildBody(query *qdata.Query) ([]byte, error) {
 	filter, err := queryClause(query)
 	if err != nil {
