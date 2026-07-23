@@ -38,7 +38,7 @@ func TestDispatchVector(t *testing.T) {
 		`{"metric":{"__name__":"up","job":"api"},"value":[1700000000,"1"]}]}}`
 	server := newServer(t, http.StatusOK, body)
 
-	result, err := newDispatcher(server.URL).Dispatch(context.Background(), &qdata.Query{Expr: "up"})
+	result, err := newDispatcher(server.URL).Dispatch(context.Background(), metricQuery("up"))
 	require.NoError(t, err)
 
 	series := result.GetMetrics().GetSeries()
@@ -58,7 +58,7 @@ func TestDispatchMatrix(t *testing.T) {
 		`{"metric":{"__name__":"rps"},"values":[[1700000000,"1"],[1700000060,"2"]]}]}}`
 	server := newServer(t, http.StatusOK, body)
 
-	result, err := newDispatcher(server.URL).Dispatch(context.Background(), &qdata.Query{Expr: "rps"})
+	result, err := newDispatcher(server.URL).Dispatch(context.Background(), metricQuery("rps"))
 	require.NoError(t, err)
 
 	series := result.GetMetrics().GetSeries()
@@ -72,7 +72,7 @@ func TestDispatchSurfacesWarnings(t *testing.T) {
 	body := `{"status":"success","warnings":["something odd"],"data":{"resultType":"vector","result":[]}}`
 	server := newServer(t, http.StatusOK, body)
 
-	result, err := newDispatcher(server.URL).Dispatch(context.Background(), &qdata.Query{Expr: "up"})
+	result, err := newDispatcher(server.URL).Dispatch(context.Background(), metricQuery("up"))
 	require.NoError(t, err)
 
 	assert.Len(t, result.GetFeedback().GetNotifications(), 1,
@@ -84,7 +84,7 @@ func TestDispatchUpstreamError(t *testing.T) {
 
 	server := newServer(t, http.StatusInternalServerError, "boom")
 
-	_, err := newDispatcher(server.URL).Dispatch(context.Background(), &qdata.Query{Expr: "up"})
+	_, err := newDispatcher(server.URL).Dispatch(context.Background(), metricQuery("up"))
 	require.Error(t, err, "upstream 500 should be an error")
 }
 
@@ -126,6 +126,12 @@ func metricSelect(matchers ...*qdata.LabelMatcher) *qdata.Node {
 	return qdata.SelectNode(qdata.SignalMetrics, qdata.BoolPredicate(qdata.BoolAnd, preds...))
 }
 
+// metricQuery builds a query whose plan selects the named metric; the dispatch
+// tests exercise response parsing, so the selector is minimal.
+func metricQuery(name string) *qdata.Query {
+	return &qdata.Query{Plan: qdata.Plan(metricSelect(eq("__name__", name)))}
+}
+
 func TestDispatchRendersPlan(t *testing.T) {
 	t.Parallel()
 
@@ -159,12 +165,18 @@ func TestDispatchRendersPlan(t *testing.T) {
 	}
 }
 
-func TestDispatchFallsBackToExpr(t *testing.T) {
+func TestDispatchRejectsQueryWithoutPlan(t *testing.T) {
 	t.Parallel()
 
-	// With no plan, the legacy expr is shipped verbatim (deprecated fallback).
-	got := captureQuery(t, &qdata.Query{Expr: `up{job="api"}`})
-	assert.Equal(t, `up{job="api"}`, got)
+	// The plan is the query; a query with no plan is rejected before the upstream
+	// is contacted.
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("upstream must not be called for a query with no plan")
+	}))
+	t.Cleanup(server.Close)
+
+	_, err := newDispatcher(server.URL).Dispatch(context.Background(), &qdata.Query{})
+	require.Error(t, err, "a query without a plan must be rejected")
 }
 
 func TestDispatchRejectsUnrenderablePlan(t *testing.T) {

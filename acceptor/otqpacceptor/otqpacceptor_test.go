@@ -106,7 +106,7 @@ func TestGRPCInjectsMetadataAsHeaders(t *testing.T) {
 				"x-scope-orgid", "acme",
 			))
 
-			invoker.call(t, ctx, client, &otqpv1.QueryRequest{Query: &qdata.Query{Expr: "up"}})
+			invoker.call(t, ctx, client, &otqpv1.QueryRequest{Query: &qdata.Query{}})
 
 			query := waitForQuery(t, seen)
 
@@ -135,7 +135,6 @@ func TestGRPCMetadataOverridesBodyHeader(t *testing.T) {
 	// Body carries a canonical-cased value; metadata carries the lower-cased
 	// transport value. Only the metadata value must survive.
 	req := &otqpv1.QueryRequest{Query: &qdata.Query{
-		Expr:   "up",
 		Header: map[string]*qdata.HeaderValues{"X-Scope-User": {Values: []string{"from-body"}}},
 	}}
 	ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("x-scope-user", "alice"))
@@ -178,7 +177,7 @@ func TestGRPCMetadataIsPerRPC(t *testing.T) {
 			ctx = metadata.NewOutgoingContext(ctx, metadata.Pairs("x-scope-user", user))
 		}
 
-		_, err := client.Query(ctx, &otqpv1.QueryRequest{Query: &qdata.Query{Expr: "up"}})
+		_, err := client.Query(ctx, &otqpv1.QueryRequest{Query: &qdata.Query{}})
 		require.NoError(t, err)
 
 		return waitForQuery(t, seen).GetHeader()["x-scope-user"].GetValues()
