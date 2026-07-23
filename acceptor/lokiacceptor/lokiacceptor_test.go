@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/minuk-dev/opentelemetry-querier/acceptor/lokiacceptor"
@@ -242,4 +245,82 @@ func TestSecondPrecisionTimestampsParsedAsSeconds(t *testing.T) {
 	if gotStart.Year() != 2023 {
 		t.Fatalf("start = %s, want a 2023 instant (1700000000 is Unix seconds)", gotStart)
 	}
+}
+
+// captureLogQL sends a LogQL instant query and returns the parsed plan's root
+// node captured from the pipeline.
+func captureLogQL(t *testing.T, logQL string) *qdata.Node {
+	t.Helper()
+
+	handler := &capturingHandler{result: logsResult(), seen: nil}
+	server := serve(t, handler)
+
+	status, _ := get(t, server.URL+"/loki/api/v1/query?query="+url.QueryEscape(logQL))
+	require.Equal(t, http.StatusOK, status)
+	require.NotNil(t, handler.seen, "handler was called")
+
+	return handler.seen.GetPlan().GetRoot()
+}
+
+func planMatchers(t *testing.T, filter *qdata.Predicate) map[string]string {
+	t.Helper()
+
+	matchers, ok := qdata.FlattenConjunction([]*qdata.Predicate{filter})
+	require.True(t, ok, "filter should flatten to a conjunction")
+
+	out := map[string]string{}
+	for _, matcher := range matchers {
+		out[matcher.GetName()] = matcher.GetValue()
+	}
+
+	return out
+}
+
+func TestParsesStreamSelectorAndLineFilter(t *testing.T) {
+	t.Parallel()
+
+	sel := captureLogQL(t, `{job="api", level=~"error|warn"} |= "boom"`).GetSelect()
+	require.NotNil(t, sel, "root should be a Select")
+	assert.Equal(t, qdata.SignalLogs, sel.GetSignal())
+
+	labels := planMatchers(t, sel.GetFilter())
+	assert.Equal(t, "api", labels["job"])
+	assert.Equal(t, "error|warn", labels["level"])
+
+	lines := sel.GetLine()
+	require.Len(t, lines, 1)
+	assert.Equal(t, qdata.MatchEqual, lines[0].GetOp())
+	assert.Equal(t, "boom", lines[0].GetValue())
+}
+
+func TestParsesRateToTimeAgg(t *testing.T) {
+	t.Parallel()
+
+	timeAgg := captureLogQL(t, `rate({job="api"}[5m])`).GetTimeAgg()
+	require.NotNil(t, timeAgg, "root should be a TimeAgg")
+	assert.Equal(t, qdata.TimeAggRate, timeAgg.GetOp())
+	assert.Equal(t, 5*time.Minute, timeAgg.GetWindow().AsDuration())
+	assert.Equal(t, "api", planMatchers(t, timeAgg.GetInput().GetSelect().GetFilter())["job"])
+}
+
+func TestParsesSumByRate(t *testing.T) {
+	t.Parallel()
+
+	aggregate := captureLogQL(t, `sum by(job) (rate({job="api"}[5m]))`).GetAggregate()
+	require.NotNil(t, aggregate, "root should be an Aggregate")
+	assert.Equal(t, qdata.AggSum, aggregate.GetOp())
+	assert.Equal(t, []string{"job"}, aggregate.GetBy())
+	assert.NotNil(t, aggregate.GetInput().GetTimeAgg(), "aggregate input should be a TimeAgg")
+}
+
+func TestRejectsUnsupportedLogQL(t *testing.T) {
+	t.Parallel()
+
+	// A label pipeline (| json) is outside the supported subset -> 400.
+	handler := &capturingHandler{result: logsResult(), seen: nil}
+	server := serve(t, handler)
+
+	status, _ := get(t, server.URL+"/loki/api/v1/query?query="+url.QueryEscape(`{job="api"} | json`))
+	assert.Equal(t, http.StatusBadRequest, status)
+	assert.Nil(t, handler.seen, "pipeline must not run for an unparseable query")
 }
