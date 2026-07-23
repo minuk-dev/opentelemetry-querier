@@ -105,18 +105,18 @@ message Query {
   google.protobuf.Duration step = 4;
   Modifier modifier = 5;
 
-  // DEPRECATED (design note #10, Phase 3): use plan. expr/dialect are the
-  // best-effort DSL-text fallback and are removed once every acceptor produces,
-  // and every dispatcher renders, a structured plan.
-  string expr = 6;    // source DSL text (PromQL for the Prometheus acceptor).
-  string dialect = 7; // DSL name of expr, e.g. "promql".
+  // 6 (expr) and 7 (dialect) were the DSL-text + language-tag transport; removed
+  // in favor of the structured plan (design note #10, Phase 3). The field numbers
+  // are reserved so they are never reused.
+  reserved 6, 7;
+  reserved "expr", "dialect";
 
   // Tenancy is request-context/transport metadata (Cortex/Mimir/Thanos/Loki
   // X-Scope-OrgID), not a query-language field, so it lives in the metadata map
   // under qdata.MetadataTenantID rather than as a dedicated field here.
 
-  // enforced_matchers are additional label matchers to inject into expr, kept
-  // separate so the query-rewrite processor can weave them into the DSL AST.
+  // enforced_matchers are additional label matchers to enforce on the query,
+  // AND-ed into every Select of the plan by the query-rewrite processor.
   repeated LabelMatcher enforced_matchers = 8;
 
   map<string, HeaderValues> header = 9; // inbound request headers.
@@ -124,14 +124,12 @@ message Query {
 
   // enforced_predicates is the optional richer form of enforced_matchers: a
   // forest of predicate trees (implicitly AND-ed) that supports boolean
-  // composition. Only dialects whose injector understands it consume it; PromQL
-  // keeps using the flat enforced_matchers. See design note #10, Phase 2.
+  // composition, AND-ed into every Select of the plan. See design note #10.
   repeated Predicate enforced_predicates = 11;
 
   // plan is the structured, language-neutral query (design note #10, Phase 3 /
-  // §4.3 IR). When set it is the source of truth: acceptors build it from their
-  // native query and dispatchers render it to their backend's native query, so
-  // no dialect tag is needed. expr/dialect above are the deprecated fallback.
+  // §4.3 IR). It is the query: acceptors build it from their native query and
+  // dispatchers render it to their backend's native query.
   QueryPlan plan = 12;
 }
 

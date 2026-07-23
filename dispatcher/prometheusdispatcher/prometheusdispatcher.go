@@ -115,17 +115,15 @@ func (d *Dispatcher) Dispatch(ctx context.Context, query *qdata.Query) (*qdata.R
 	return parseResponse(body)
 }
 
-// queryText resolves the PromQL to execute: the structured plan when present
-// (rendered to PromQL), otherwise the legacy expr carried verbatim. The plan is
-// the source of truth once acceptors produce it; expr is the deprecated fallback
-// (design note #10, Phase 3) and is shipped as-is, trusting the pipeline wired a
-// PromQL-producing acceptor.
+// queryText renders the query's structured plan to PromQL. The plan is the query
+// (design note #10, Phase 3); a query without one is rejected.
 func queryText(query *qdata.Query) (string, error) {
-	if plan := query.GetPlan(); plan != nil {
-		return planToPromQL(plan)
+	plan := query.GetPlan()
+	if plan == nil {
+		return "", qerror.New(qerror.CodeInvalidArgument, "promdispatcher: query has no plan")
 	}
 
-	return query.GetExpr(), nil
+	return planToPromQL(plan)
 }
 
 // buildRequest picks the instant vs range endpoint and encodes the form.

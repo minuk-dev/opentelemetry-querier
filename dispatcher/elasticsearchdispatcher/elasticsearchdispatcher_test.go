@@ -40,9 +40,11 @@ func newDispatcher(endpoint string) *elasticsearchdispatcher.Dispatcher {
 	})
 }
 
-// luceneQuery builds a Lucene query; the dispatcher rejects anything else.
-func luceneQuery(expr string) *qdata.Query {
-	return &qdata.Query{Expr: expr, Dialect: qdata.DialectLucene}
+// luceneQuery builds a logs query whose plan is a simple filter; the dispatch
+// tests exercise response parsing, so the filter content is immaterial (the
+// upstream body is canned).
+func luceneQuery() *qdata.Query {
+	return &qdata.Query{Plan: qdata.Plan(qdata.SelectNode(qdata.SignalLogs, qdata.LeafPredicate(eq("level", "info"))))}
 }
 
 func TestDispatchMapsHitsToLogs(t *testing.T) {
@@ -54,7 +56,7 @@ func TestDispatchMapsHitsToLogs(t *testing.T) {
 		`{"@timestamp":"2026-01-02T03:04:06Z","message":"world","level":"warn"}}`
 	server := newServer(t, http.StatusOK, `{"hits":{"hits":[`+hit1+`,`+hit2+`]}}`)
 
-	result, err := newDispatcher(server.URL).Dispatch(context.Background(), luceneQuery("level:info"))
+	result, err := newDispatcher(server.URL).Dispatch(context.Background(), luceneQuery())
 	require.NoError(t, err)
 
 	assert.Equal(t, qdata.SignalLogs, result.GetSignal())
@@ -69,36 +71,10 @@ func TestDispatchMapsHitsToLogs(t *testing.T) {
 	assert.Equal(t, "info", level.GetStringValue())
 }
 
-func TestDispatchSendsQueryStringAndRange(t *testing.T) {
+func TestDispatchSetsSortWithUnmappedType(t *testing.T) {
 	t.Parallel()
 
-	var got map[string]any
-
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		payload, _ := io.ReadAll(request.Body)
-		_ = json.Unmarshal(payload, &got)
-
-		writer.Header().Set("Content-Type", "application/json")
-		_, _ = writer.Write([]byte(`{"hits":{"hits":[]}}`))
-	}))
-	t.Cleanup(server.Close)
-
-	_, err := newDispatcher(server.URL).Dispatch(context.Background(), luceneQuery("level:error"))
-	require.NoError(t, err)
-
-	query, ok := got["query"].(map[string]any)
-	require.True(t, ok, "request must carry a query, got %+v", got)
-	boolQuery, ok := query["bool"].(map[string]any)
-	require.True(t, ok, "query must be a bool query")
-	must, ok := boolQuery["must"].([]any)
-	require.True(t, ok)
-	require.NotEmpty(t, must)
-
-	first, ok := must[0].(map[string]any)
-	require.True(t, ok)
-	queryString, ok := first["query_string"].(map[string]any)
-	require.True(t, ok, "first must clause should be a query_string")
-	assert.Equal(t, "level:error", queryString["query"], "expr must be sent as the query_string")
+	got := captureBody(t, luceneQuery())
 
 	// The sort must carry unmapped_type so an index missing the time field does
 	// not fail the whole search.
@@ -213,7 +189,7 @@ func TestDispatchUpstreamError(t *testing.T) {
 
 	server := newServer(t, http.StatusInternalServerError, "boom")
 
-	_, err := newDispatcher(server.URL).Dispatch(context.Background(), luceneQuery("level:info"))
+	_, err := newDispatcher(server.URL).Dispatch(context.Background(), luceneQuery())
 	require.Error(t, err, "upstream 500 should be an error")
 }
 
@@ -225,7 +201,7 @@ func TestDispatchBodyFallsBackToRawSource(t *testing.T) {
 	body := `{"hits":{"hits":[{"_index":"i","_id":"1","_source":{"@timestamp":"2026-01-02T03:04:05Z","code":500}}]}}`
 	server := newServer(t, http.StatusOK, body)
 
-	result, err := newDispatcher(server.URL).Dispatch(context.Background(), luceneQuery("code:500"))
+	result, err := newDispatcher(server.URL).Dispatch(context.Background(), luceneQuery())
 	require.NoError(t, err)
 
 	records := result.GetLogs().GetRecords()
@@ -245,7 +221,7 @@ func TestNumericEpochMillisTimestamp(t *testing.T) {
 	body := `{"hits":{"hits":[{"_index":"i","_id":"1","_source":{"@timestamp":1767322845000,"message":"hi"}}]}}`
 	server := newServer(t, http.StatusOK, body)
 
-	result, err := newDispatcher(server.URL).Dispatch(context.Background(), luceneQuery("*"))
+	result, err := newDispatcher(server.URL).Dispatch(context.Background(), luceneQuery())
 	require.NoError(t, err)
 
 	records := result.GetLogs().GetRecords()
@@ -262,7 +238,7 @@ func TestLargeIntegerFieldKeepsPrecision(t *testing.T) {
 		`{"@timestamp":"2026-01-02T03:04:05Z","message":"hi","event_id":9223372036854775807}}]}}`
 	server := newServer(t, http.StatusOK, body)
 
-	result, err := newDispatcher(server.URL).Dispatch(context.Background(), luceneQuery("*"))
+	result, err := newDispatcher(server.URL).Dispatch(context.Background(), luceneQuery())
 	require.NoError(t, err)
 
 	records := result.GetLogs().GetRecords()
@@ -284,7 +260,7 @@ func TestNestedTraceAndSpanID(t *testing.T) {
 		`"trace":{"id":"abc123"},"span.id":"def456"}}]}}`
 	server := newServer(t, http.StatusOK, body)
 
-	result, err := newDispatcher(server.URL).Dispatch(context.Background(), luceneQuery("*"))
+	result, err := newDispatcher(server.URL).Dispatch(context.Background(), luceneQuery())
 	require.NoError(t, err)
 
 	records := result.GetLogs().GetRecords()
@@ -302,7 +278,7 @@ func TestPartialResultsSurfaceAsWarnings(t *testing.T) {
 		`"hits":{"hits":[{"_index":"i","_id":"1","_source":{"@timestamp":"2026-01-02T03:04:05Z","message":"hi"}}]}}`
 	server := newServer(t, http.StatusOK, body)
 
-	result, err := newDispatcher(server.URL).Dispatch(context.Background(), luceneQuery("*"))
+	result, err := newDispatcher(server.URL).Dispatch(context.Background(), luceneQuery())
 	require.NoError(t, err)
 
 	require.Len(t, result.GetLogs().GetRecords(), 1, "hits should still be returned")
@@ -322,7 +298,7 @@ func TestFullResultsHaveNoWarnings(t *testing.T) {
 		`"hits":{"hits":[{"_index":"i","_id":"1","_source":{"@timestamp":"2026-01-02T03:04:05Z","message":"hi"}}]}}`
 	server := newServer(t, http.StatusOK, body)
 
-	result, err := newDispatcher(server.URL).Dispatch(context.Background(), luceneQuery("*"))
+	result, err := newDispatcher(server.URL).Dispatch(context.Background(), luceneQuery())
 	require.NoError(t, err)
 
 	assert.Empty(t, result.GetFeedback().GetNotifications(), "a complete response must not warn")
