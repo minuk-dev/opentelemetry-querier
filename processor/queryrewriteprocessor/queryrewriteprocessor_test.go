@@ -96,6 +96,34 @@ func TestEnforcedMatchersFromQuery(t *testing.T) {
 	assert.Equal(t, "prod", matcherMap(t, selectFilter(t, query))["namespace"])
 }
 
+func TestEnforcementComposesWithConflictingUserMatcher(t *testing.T) {
+	t.Parallel()
+
+	// The user pins a different tenant on an enforced label. Enforcement AND-
+	// composes (it does not override or drop the user's matcher), so both matchers
+	// survive; the backend then returns empty on the contradiction, which is safe
+	// (no cross-tenant leak). This pins the override->AND behaviour change.
+	query := metricSelectQuery(qdata.BoolPredicate(qdata.BoolAnd,
+		leafPred("__name__", "up"), leafPred("tenant_id", "evil")))
+	qdata.SetTenantID(query, testTenant)
+
+	require.NoError(t, queryrewriteprocessor.New(tenantConfig()).ProcessQuery(context.Background(), query))
+
+	matchers, ok := qdata.FlattenConjunction([]*qdata.Predicate{selectFilter(t, query)})
+	require.True(t, ok, "an AND of leaves must still flatten")
+
+	tenantValues := []string{}
+
+	for _, matcher := range matchers {
+		if matcher.GetName() == "tenant_id" {
+			tenantValues = append(tenantValues, matcher.GetValue())
+		}
+	}
+
+	assert.ElementsMatch(t, []string{"evil", testTenant}, tenantValues,
+		"both the user's and the enforced tenant_id matcher must be present (AND, not override)")
+}
+
 func TestEnforcedPredicatesConjunctionComposed(t *testing.T) {
 	t.Parallel()
 
