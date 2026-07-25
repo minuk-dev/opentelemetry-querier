@@ -10,6 +10,7 @@ use (
 	./cmd/querier
 	./component
 	./dispatcher
+	./dispatcher/crosssignaldispatcher
 	./dispatcher/elasticsearchdispatcher
 	./dispatcher/lokidispatcher
 	./dispatcher/prometheusdispatcher
