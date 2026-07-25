@@ -10,6 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/minuk-dev/opentelemetry-querier/component"
+	"github.com/minuk-dev/opentelemetry-querier/qdata"
 )
 
 var (
@@ -19,6 +20,8 @@ var (
 	errNoAcceptors = errors.New("querier: pipeline has no acceptors")
 	// errDispatcherCount is returned when a pipeline does not list exactly one dispatcher.
 	errDispatcherCount = errors.New("querier: pipeline must list exactly one dispatcher")
+	// errInvalidPipelineSignal is returned when a pipeline id's type does not name a signal.
+	errInvalidPipelineSignal = errors.New("querier: pipeline id type must name a signal")
 )
 
 // Config is the runtime configuration, mirroring the collector layout: component
@@ -37,8 +40,10 @@ type Config struct {
 	Service     ServiceConfig             `mapstructure:"service"`
 }
 
-// ServiceConfig lists the pipelines to run, keyed by pipeline ID
-// (e.g. "query/default").
+// ServiceConfig lists the pipelines to run, keyed by a signal-typed pipeline ID
+// ("<signal>" or "<signal>/<name>", e.g. "metrics" or "logs/cross"), mirroring
+// the opentelemetry-collector. The type token names the signal the pipeline
+// carries (metrics/logs/traces/profiles).
 type ServiceConfig struct {
 	Pipelines map[string]PipelineConfig `mapstructure:"pipelines"`
 }
@@ -90,6 +95,11 @@ func (c *Config) validate() error {
 	}
 
 	for name, pipe := range c.Service.Pipelines {
+		_, err := pipelineSignal(name)
+		if err != nil {
+			return err
+		}
+
 		if len(pipe.Acceptors) == 0 {
 			return fmt.Errorf("%w: %q", errNoAcceptors, name)
 		}
@@ -100,6 +110,29 @@ func (c *Config) validate() error {
 	}
 
 	return nil
+}
+
+// pipelineSignal parses a signal-typed pipeline id ("<signal>" or
+// "<signal>/<name>") and returns the signal named by its type token. The spans
+// signal uses the conventional "traces" token (opentelemetry-collector parlance).
+func pipelineSignal(idStr string) (qdata.Signal, error) {
+	id, err := parseID(idStr)
+	if err != nil {
+		return qdata.SignalUnspecified, err
+	}
+
+	signal, ok := map[string]qdata.Signal{
+		"metrics":  qdata.SignalMetrics,
+		"logs":     qdata.SignalLogs,
+		"traces":   qdata.SignalSpans,
+		"profiles": qdata.SignalProfiles,
+	}[id.Type().String()]
+	if !ok {
+		return qdata.SignalUnspecified,
+			fmt.Errorf("%w: %q (want metrics/logs/traces/profiles)", errInvalidPipelineSignal, idStr)
+	}
+
+	return signal, nil
 }
 
 // decodeStrict decodes an untyped tree into out with mapstructure, rejecting
