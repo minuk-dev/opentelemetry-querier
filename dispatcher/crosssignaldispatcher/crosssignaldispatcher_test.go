@@ -254,6 +254,41 @@ func TestIgnoringNarrowsJoinKeys(t *testing.T) {
 	assert.Equal(t, "api", rowValue(t, ignored, "job"))
 }
 
+func TestValueLabelIsPreservedNotClobbered(t *testing.T) {
+	t.Parallel()
+
+	// A metric series carrying a label literally named "value" must not lose it
+	// to the synthetic sample column: the label moves to "label_value" and the
+	// sample keeps the stable "value" column.
+	attrs := &qdata.KeyValueList{}
+	qdata.AttrPutString(attrs, "job", "api")
+	qdata.AttrPutString(attrs, "value", "user-label")
+	metricRes := &qdata.Result{Signal: qdata.SignalMetrics, Data: &qdatav1.Result_Metrics{
+		Metrics: &qdata.Metrics{Series: []*qdata.MetricSeries{{
+			Name: "up", Attributes: attrs, Points: []*qdata.MetricPoint{{Value: qdata.Double(0.5)}},
+		}}},
+	}}
+
+	sut := crosssignaldispatcher.New(map[qdata.Signal]dispatcher.Dispatcher{
+		qdata.SignalMetrics: &fakeDispatcher{Base: dispatcher.Base{}, result: metricRes, err: nil, seen: nil},
+		qdata.SignalLogs:    &fakeDispatcher{Base: dispatcher.Base{}, result: logResult("api"), err: nil, seen: nil},
+	})
+
+	result, err := sut.Dispatch(context.Background(), &qdata.Query{Plan: joinPlan("job")})
+	require.NoError(t, err)
+	require.Len(t, result.GetTable().GetRows(), 1)
+
+	row := result.GetTable().GetRows()[0].GetValues()
+
+	sample, ok := qdata.AttrGet(row, "value")
+	require.True(t, ok, "sample keeps the value column")
+	assert.InDelta(t, 0.5, sample.GetDoubleValue(), 1e-9)
+
+	label, ok := qdata.AttrGet(row, "label_value")
+	require.True(t, ok, "the original value label is preserved under label_value")
+	assert.Equal(t, "user-label", label.GetStringValue())
+}
+
 func TestFailClosed(t *testing.T) {
 	t.Parallel()
 

@@ -16,6 +16,10 @@ const (
 	metricNameColumn  = "__name__"
 	metricValueColumn = "value"
 	logBodyColumn     = "body"
+	// shadowedLabelPrefix renames a series label that collides with a synthetic
+	// column (e.g. a label literally named "value") so the label is preserved
+	// while the synthetic column keeps its stable name.
+	shadowedLabelPrefix = "label_"
 	// rightPrefix disambiguates a right-side column whose name also exists on the
 	// left and is not a join key.
 	rightPrefix = "right_"
@@ -76,11 +80,24 @@ func metricRows(metrics *qdata.Metrics) []*qdata.Row {
 			}
 		}
 
-		qdata.AttrPut(kvl, metricValueColumn, latestValue(series))
+		putSample(kvl, latestValue(series))
 		rows = append(rows, &qdata.Row{Values: kvl})
 	}
 
 	return rows
+}
+
+// putSample stores the metric sample under the reserved value column. A series
+// label literally named "value" would otherwise be clobbered, so it is moved to
+// a shadowedLabelPrefix column first — both survive and the value column keeps a
+// stable name for downstream readers.
+func putSample(kvl *qdata.KeyValueList, sample *qdata.Value) {
+	if label, ok := qdata.AttrGet(kvl, metricValueColumn); ok {
+		qdata.AttrDelete(kvl, metricValueColumn)
+		qdata.AttrPut(kvl, shadowedLabelPrefix+metricValueColumn, label)
+	}
+
+	qdata.AttrPut(kvl, metricValueColumn, sample)
 }
 
 func logRows(logs *qdata.Logs) []*qdata.Row {
@@ -96,7 +113,9 @@ func logRows(logs *qdata.Logs) []*qdata.Row {
 }
 
 // latestValue returns the last point's value of a series, or an unset Value when
-// the series has no points.
+// the series has no points. The relational join is instant-oriented: a range
+// series is intentionally reduced to its latest point (warnIfTruncated flags it).
+// A per-step representation is out of scope (issue #52).
 func latestValue(series *qdata.MetricSeries) *qdata.Value {
 	points := series.GetPoints()
 	if len(points) == 0 {
