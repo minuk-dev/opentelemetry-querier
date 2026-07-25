@@ -4,6 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/minuk-dev/opentelemetry-querier/dispatcher"
 	"github.com/minuk-dev/opentelemetry-querier/pipeline"
 	"github.com/minuk-dev/opentelemetry-querier/processor"
@@ -82,4 +85,33 @@ func TestHandleDefaultsResultSignalFromQuery(t *testing.T) {
 	if result.GetSignal() != qdata.SignalMetrics {
 		t.Fatalf("signal = %v, want metrics", result.GetSignal())
 	}
+}
+
+func TestHandlePopulatesQuerySignalsFromPlan(t *testing.T) {
+	t.Parallel()
+
+	// A cross-signal plan (metrics + logs); Handle mirrors its signal set onto
+	// Query.signals before any processor runs.
+	plan := qdata.Plan(qdata.BinaryNode(qdata.BinAnd,
+		qdata.SelectNode(qdata.SignalMetrics, nil),
+		qdata.SelectNode(qdata.SignalLogs, nil), nil))
+	query := &qdata.Query{Plan: plan}
+
+	pipe := pipeline.New("test", nil, &stubDispatcher{Base: dispatcher.Base{}, result: &qdata.Result{}})
+
+	_, err := pipe.Handle(context.Background(), query)
+	require.NoError(t, err)
+	assert.Equal(t, []qdata.Signal{qdata.SignalMetrics, qdata.SignalLogs}, query.GetSignals())
+}
+
+func TestHandleLeavesSignalsEmptyWithoutPlan(t *testing.T) {
+	t.Parallel()
+
+	query := &qdata.Query{Signal: qdata.SignalMetrics}
+
+	pipe := pipeline.New("test", nil, &stubDispatcher{Base: dispatcher.Base{}, result: &qdata.Result{}})
+
+	_, err := pipe.Handle(context.Background(), query)
+	require.NoError(t, err)
+	assert.Empty(t, query.GetSignals(), "no plan means no signal set to mirror")
 }
