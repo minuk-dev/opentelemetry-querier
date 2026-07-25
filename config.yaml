@@ -88,7 +88,9 @@ dispatchers:
 
 service:
   pipelines:
-    query/default:
+    # Pipelines are signal-typed: the id's type token names the signal it carries
+    # (metrics/logs/traces/profiles), mirroring the opentelemetry-collector.
+    metrics/default:
       acceptors: [otqp]
       processors: [authratelimit, tenant, simpleauthz, queryrewrite, responsefilter]
       dispatchers: [prometheus]
