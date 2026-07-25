@@ -14,9 +14,12 @@ Design note for [#10](https://github.com/minuk-dev/opentelemetry-querier/issues/
 > render a shape fails closed at render time. This realizes the Phase 3 §4.3 IR
 > the sections below deferred. The historical analysis is kept for context.
 
-Historical status (pre-IR): **Phases 0–2 implemented; Phase 3 tracked** in
-[#24](https://github.com/minuk-dev/opentelemetry-querier/issues/24) as speculative
-design, not committed work.
+Status: **Phases 0–3 implemented.** Phases 0–2 (IR + language-neutral enforcement)
+shipped first; Phase 3 (cross-signal) then landed in
+[#24](https://github.com/minuk-dev/opentelemetry-querier/issues/24) — the `Query.signals`
+set, the relational `Result.Table` payload, and `crosssignaldispatcher`, which executes
+a cross-signal plan by fan-out to per-signal backends plus an in-process join rather than
+requiring a unified store.
 
 ## Question
 
@@ -123,17 +126,30 @@ that a label-selector injector can't apply. A dialect whose injector natively
 understands boolean composition (SQL `WHERE`, Lucene) can later consume the tree
 directly instead of flattening.
 
-### Phase 3 — Cross-signal (heaviest, out of scope now)
+### Phase 3 — Cross-signal (implemented via in-process join, #24)
 
-Two coupled changes:
+Two coupled changes, both shipped:
 
-1. `Query.signal` → a signal *set* (or `SIGNAL_UNSPECIFIED` = "the dialect decides");
-2. a new relational `Result` payload (`Table` = repeated rows of `KeyValueList`) so join
-   output is representable.
+1. `Query.signals` (repeated `Signal`) generalizes the single `signal` field; the plan
+   is authoritative and `qdata.PlanSignals` / `qdata.QuerySignals` read the set.
+2. a new relational `Result` payload — `Table` = repeated `Row` (`KeyValueList`) — added
+   to the `Result.data` oneof so cross-signal join output is representable.
 
-This is where a real §4.3 IR (Substrait-style plan) would land. Only justified once
-there is a concrete cross-signal backend (e.g. SQL over a unified store); otherwise it
-is speculative weight.
+This is where a real §4.3 IR (Substrait-style plan) lands. Rather than wait for a
+unified metrics+logs store, `crosssignaldispatcher` executes a cross-signal plan by
+**fan-out + in-process join**: a top-level `BinaryOp` whose two operands are
+single-signal subtrees is dispatched to each signal's own backend (Prometheus, Loki)
+and each result is normalized to a relational table (metric series → rows, log records →
+rows). The operator selects the relational mode — `AND` → inner join (matched rows,
+columns merged), `UNLESS` → anti-join (left rows with no match) — and the join keys come
+from the `BinaryOp`'s vector matching (`on`, or the shared columns minus `ignoring`).
+The output is a `Result.Table`. A single-signal plan is delegated whole, so the
+dispatcher also works as a signal-aware router. Anything it cannot express — a
+multi-signal plan that is not a top-level join, an operand spanning more than one
+signal, a join with no usable key, or an operator other than `AND`/`UNLESS`
+(arithmetic/comparison/`OR` have no relational cross-signal meaning yet) — fails closed.
+A native cross-signal backend (SQL over a unified store) can later replace the in-process
+join without changing the `Query`/`Result` shape.
 
 ## Recommendation
 
@@ -143,6 +159,9 @@ already existed, turning "queryrewrite happens to parse PromQL" into "dialects
 register comprehension" (Phase 1) and "enforcement can express boolean composition"
 (Phase 2). They have shipped, and #10 was scoped down to them and closed.
 
-Phase 3 (cross-signal IR) remains **speculative until a concrete cross-signal backend
-exists** and is tracked on its own in
-[#24](https://github.com/minuk-dev/opentelemetry-querier/issues/24).
+Phase 3 (cross-signal IR) is **implemented** in
+[#24](https://github.com/minuk-dev/opentelemetry-querier/issues/24): the `Query.signals`
+set + relational `Result.Table` payload, plus `crosssignaldispatcher`, which executes a
+cross-signal plan end-to-end by fan-out to per-signal backends and an in-process join —
+so it no longer waits on a unified backend. A native cross-signal store can later slot in
+behind the same `Query`/`Result` shape.

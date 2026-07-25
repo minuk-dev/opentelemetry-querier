@@ -56,7 +56,10 @@ func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (*qdata.Resul
 		return nil, fmt.Errorf("pipeline %q: %w", p.Name, err)
 	}
 
-	if result.GetSignal() == qdata.SignalUnspecified {
+	// Backfill the single-signal convenience field from the query when a
+	// single-signal dispatcher left it unset. A relational Table (cross-signal)
+	// result is legitimately signal-unspecified, so it is left untouched.
+	if result.GetSignal() == qdata.SignalUnspecified && result.GetTable() == nil {
 		result.Signal = query.GetSignal()
 	}
 

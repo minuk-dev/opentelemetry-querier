@@ -7,6 +7,7 @@ package qdata
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"sort"
 	"strings"
@@ -99,6 +100,10 @@ type (
 	Spans = qdatav1.Spans
 	// Span keeps the OTel span fields as columns.
 	Span = qdatav1.Span
+	// Table is the relational/tabular result payload for cross-signal joins.
+	Table = qdatav1.Table
+	// Row is one relational row of a Table.
+	Row = qdatav1.Row
 
 	// Feedback is the side channel carried with a Result.
 	Feedback = qdatav1.Feedback
@@ -668,6 +673,111 @@ func collectSignals(node *Node, seen map[Signal]struct{}) {
 		collectSignals(variant.Binary.GetLhs(), seen)
 		collectSignals(variant.Binary.GetRhs(), seen)
 	}
+}
+
+// QuerySignals returns the authoritative set of signals a query touches, in
+// ascending order (issue #24). When the query carries a plan, the plan's Select
+// leaves are the ground truth (a cross-signal plan spans several signals). Only
+// when there is no plan does it fall back to the explicit signals field, and
+// finally to the single signal field for the single-signal path.
+func QuerySignals(query *Query) []Signal {
+	if plan := query.GetPlan(); plan != nil {
+		return PlanSignals(plan)
+	}
+
+	if signals := query.GetSignals(); len(signals) > 0 {
+		return dedupSignals(signals)
+	}
+
+	return []Signal{query.GetSignal()}
+}
+
+// SyncPlanSignals populates query.signals from the plan's Select leaves so a
+// consumer can read the signal set without walking the tree. It is a no-op when
+// the query has no plan.
+func SyncPlanSignals(query *Query) {
+	if query.GetPlan() == nil {
+		return
+	}
+
+	query.Signals = PlanSignals(query.GetPlan())
+}
+
+func dedupSignals(signals []Signal) []Signal {
+	seen := map[Signal]struct{}{}
+	for _, signal := range signals {
+		seen[signal] = struct{}{}
+	}
+
+	out := make([]Signal, 0, len(seen))
+	for signal := range seen {
+		out = append(out, signal)
+	}
+
+	slices.Sort(out)
+
+	return out
+}
+
+// ---- Relational result payload (issue #24, cross-signal joins) ----
+
+// Table well-formedness errors.
+var (
+	errTableNilRow        = errors.New("qdata: table has a nil row")
+	errTableUnknownColumn = errors.New("qdata: table row has a column absent from the schema")
+)
+
+// NewTable builds a relational Table with an ordered column schema and rows.
+func NewTable(columns []string, rows ...*Row) *Table {
+	return &Table{Columns: columns, Rows: rows}
+}
+
+// NewRow builds a Row from alternating key, value(*Value) pairs (like NewAttrs).
+func NewRow(pairs ...any) *Row {
+	return &Row{Values: NewAttrs(pairs...)}
+}
+
+// TableResult wraps a Table as a Result payload.
+func TableResult(table *Table) *Result {
+	return &Result{Data: &qdatav1.Result_Table{Table: table}}
+}
+
+// ValidateTable reports whether table is well-formed: no nil rows and, when a
+// column schema is declared, every row column belongs to it. An empty schema
+// means "self-describing rows" and skips the membership check.
+func ValidateTable(table *Table) error {
+	if len(table.GetColumns()) == 0 {
+		return firstNilRow(table)
+	}
+
+	schema := make(map[string]struct{}, len(table.GetColumns()))
+	for _, column := range table.GetColumns() {
+		schema[column] = struct{}{}
+	}
+
+	for _, row := range table.GetRows() {
+		if row == nil {
+			return errTableNilRow
+		}
+
+		for _, kv := range row.GetValues().GetValues() {
+			if _, ok := schema[kv.GetKey()]; !ok {
+				return fmt.Errorf("%w: %q", errTableUnknownColumn, kv.GetKey())
+			}
+		}
+	}
+
+	return nil
+}
+
+func firstNilRow(table *Table) error {
+	for _, row := range table.GetRows() {
+		if row == nil {
+			return errTableNilRow
+		}
+	}
+
+	return nil
 }
 
 // ---- Feedback side channel (spec §Side Channel Feedback) ----

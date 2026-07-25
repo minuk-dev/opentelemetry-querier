@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package opentelemetry.querier.qdata.v1;
 
+import "qdata/v1/common.proto";
 import "qdata/v1/logs.proto";
 import "qdata/v1/metrics.proto";
 import "qdata/v1/query.proto";
@@ -42,6 +43,23 @@ message Result {
     Metrics metrics = 2;
     Logs logs = 3;
     Spans spans = 4;
+    Table table = 6;
   }
   Feedback feedback = 5;
+}
+
+// Table is the relational/tabular result payload (issue #24): the output of a
+// cross-signal query (e.g. a join of metrics + logs) whose rows are neither
+// Metrics nor Logs nor Spans. A cross-signal dispatcher executes each Select
+// subtree against its own backend and joins the results into rows. columns is
+// the canonical, ordered column schema shared by every row.
+message Table {
+  repeated string columns = 1;
+  repeated Row rows = 2;
+}
+
+// Row is one relational row: an ordered set of column name/value pairs (reusing
+// KeyValueList). Its keys should be a subset of the owning Table's columns.
+message Row {
+  KeyValueList values = 1;
 }
