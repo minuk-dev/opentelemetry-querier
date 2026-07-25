@@ -56,7 +56,7 @@ func TestEndToEndMetricsLogsJoin(t *testing.T) {
 		&qdata.LabelMatcher{Name: "__name__", Op: qdata.MatchEqual, Value: "up"}))
 	rhs := qdata.SelectNode(qdata.SignalLogs, qdata.LeafPredicate(
 		&qdata.LabelMatcher{Name: "job", Op: qdata.MatchEqual, Value: "api"}))
-	plan := qdata.Plan(qdata.BinaryNode(qdata.BinDiv, lhs, rhs, &qdata.VectorMatch{On: []string{"job"}}))
+	plan := qdata.Plan(qdata.BinaryNode(qdata.BinAnd, lhs, rhs, &qdata.VectorMatch{On: []string{"job"}}))
 
 	result, err := sut.Dispatch(context.Background(), &qdata.Query{Plan: plan})
 	require.NoError(t, err)

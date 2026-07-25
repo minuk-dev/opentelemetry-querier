@@ -10,7 +10,6 @@ import (
 	"fmt"
 
 	"github.com/minuk-dev/opentelemetry-querier/dispatcher"
-	qdatav1 "github.com/minuk-dev/opentelemetry-querier/gen/qdata/v1"
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
 	"github.com/minuk-dev/opentelemetry-querier/qerror"
 )
@@ -85,6 +84,11 @@ func (d *Dispatcher) dispatchJoin(
 			"crosssignaldispatcher: a cross-signal plan must be a top-level binary join")
 	}
 
+	mode, err := joinModeFor(binary.GetOp())
+	if err != nil {
+		return nil, err
+	}
+
 	left, err := d.execSide(ctx, query, binary.GetLhs())
 	if err != nil {
 		return nil, err
@@ -95,7 +99,7 @@ func (d *Dispatcher) dispatchJoin(
 		return nil, err
 	}
 
-	table, err := joinTables(left.table, right.table, joinKeys(binary.GetMatching()))
+	table, err := joinTables(left.table, right.table, binary.GetMatching(), mode)
 	if err != nil {
 		return nil, err
 	}
@@ -167,10 +171,4 @@ func mergeFeedback(dst *qdata.Result, sides ...*qdata.Result) {
 			qdata.Notify(dst, note.GetSeverity(), note.GetCode(), note.GetMessage(), note.GetSource())
 		}
 	}
-}
-
-// joinKeys returns the labels to equijoin on: the BinaryOp's `on` list. An empty
-// list means "join on the tables' shared columns", resolved at join time.
-func joinKeys(matching *qdatav1.VectorMatch) []string {
-	return matching.GetOn()
 }

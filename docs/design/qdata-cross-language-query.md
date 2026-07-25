@@ -138,15 +138,18 @@ Two coupled changes, both shipped:
 This is where a real §4.3 IR (Substrait-style plan) lands. Rather than wait for a
 unified metrics+logs store, `crosssignaldispatcher` executes a cross-signal plan by
 **fan-out + in-process join**: a top-level `BinaryOp` whose two operands are
-single-signal subtrees is dispatched to each signal's own backend (Prometheus, Loki),
-each result is normalized to a relational table (metric series → rows, log records →
-rows), and the two are inner-joined on the `BinaryOp`'s matching labels (or the tables'
-shared columns) into a `Result.Table`. A single-signal plan is delegated whole, so the
+single-signal subtrees is dispatched to each signal's own backend (Prometheus, Loki)
+and each result is normalized to a relational table (metric series → rows, log records →
+rows). The operator selects the relational mode — `AND` → inner join (matched rows,
+columns merged), `UNLESS` → anti-join (left rows with no match) — and the join keys come
+from the `BinaryOp`'s vector matching (`on`, or the shared columns minus `ignoring`).
+The output is a `Result.Table`. A single-signal plan is delegated whole, so the
 dispatcher also works as a signal-aware router. Anything it cannot express — a
 multi-signal plan that is not a top-level join, an operand spanning more than one
-signal, a join with no usable key — fails closed. A native cross-signal backend (SQL
-over a unified store) can later replace the in-process join without changing the
-`Query`/`Result` shape.
+signal, a join with no usable key, or an operator other than `AND`/`UNLESS`
+(arithmetic/comparison/`OR` have no relational cross-signal meaning yet) — fails closed.
+A native cross-signal backend (SQL over a unified store) can later replace the in-process
+join without changing the `Query`/`Result` shape.
 
 ## Recommendation
 

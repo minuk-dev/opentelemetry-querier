@@ -65,7 +65,7 @@ func joinPlan(onLabels ...string) *qdata.QueryPlan {
 	rhs := qdata.SelectNode(qdata.SignalLogs, qdata.LeafPredicate(
 		&qdata.LabelMatcher{Name: "job", Op: qdata.MatchEqual, Value: "api"}))
 
-	return qdata.Plan(qdata.BinaryNode(qdata.BinDiv, lhs, rhs, &qdata.VectorMatch{On: onLabels}))
+	return qdata.Plan(qdata.BinaryNode(qdata.BinAnd, lhs, rhs, &qdata.VectorMatch{On: onLabels}))
 }
 
 // rowValue returns the string form of column in the first row of the result's
@@ -149,6 +149,109 @@ func TestNonMatchingKeysProduceNoRows(t *testing.T) {
 	result, err := sut.Dispatch(context.Background(), &qdata.Query{Plan: joinPlan("job")})
 	require.NoError(t, err)
 	assert.Empty(t, result.GetTable().GetRows(), "job=api never matches job=worker")
+}
+
+// metricResultJobs is a metrics result with one series per job label.
+func metricResultJobs(jobs ...string) *qdata.Result {
+	series := make([]*qdata.MetricSeries, 0, len(jobs))
+
+	for _, job := range jobs {
+		attrs := &qdata.KeyValueList{}
+		qdata.AttrPutString(attrs, "job", job)
+		series = append(series, &qdata.MetricSeries{
+			Name:       "up",
+			Attributes: attrs,
+			Points:     []*qdata.MetricPoint{{Value: qdata.Double(1)}},
+		})
+	}
+
+	return &qdata.Result{
+		Signal: qdata.SignalMetrics,
+		Data:   &qdatav1.Result_Metrics{Metrics: &qdata.Metrics{Series: series}},
+	}
+}
+
+func TestUnlessAntiJoin(t *testing.T) {
+	t.Parallel()
+
+	metrics := &fakeDispatcher{Base: dispatcher.Base{}, result: metricResultJobs("api", "worker"), err: nil, seen: nil}
+	logs := &fakeDispatcher{Base: dispatcher.Base{}, result: logResult("api"), err: nil, seen: nil}
+	sut := crosssignaldispatcher.New(map[qdata.Signal]dispatcher.Dispatcher{
+		qdata.SignalMetrics: metrics,
+		qdata.SignalLogs:    logs,
+	})
+
+	lhs := qdata.SelectNode(qdata.SignalMetrics, nil)
+	rhs := qdata.SelectNode(qdata.SignalLogs, nil)
+	plan := qdata.Plan(qdata.BinaryNode(qdata.BinUnless, lhs, rhs, &qdata.VectorMatch{On: []string{"job"}}))
+
+	result, err := sut.Dispatch(context.Background(), &qdata.Query{Plan: plan})
+	require.NoError(t, err)
+	require.Len(t, result.GetTable().GetRows(), 1, "UNLESS keeps only the metric job with no matching log")
+	assert.Equal(t, "worker", rowValue(t, result, "job"))
+}
+
+func TestUnsupportedOperatorFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	metrics := &fakeDispatcher{Base: dispatcher.Base{}, result: metricResult(0.5), err: nil, seen: nil}
+	logs := &fakeDispatcher{Base: dispatcher.Base{}, result: logResult("api"), err: nil, seen: nil}
+	sut := crosssignaldispatcher.New(map[qdata.Signal]dispatcher.Dispatcher{
+		qdata.SignalMetrics: metrics,
+		qdata.SignalLogs:    logs,
+	})
+
+	for _, operator := range []qdata.BinOp{qdata.BinDiv, qdata.BinOr} {
+		lhs := qdata.SelectNode(qdata.SignalMetrics, nil)
+		rhs := qdata.SelectNode(qdata.SignalLogs, nil)
+		plan := qdata.Plan(qdata.BinaryNode(operator, lhs, rhs, &qdata.VectorMatch{On: []string{"job"}}))
+
+		_, err := sut.Dispatch(context.Background(), &qdata.Query{Plan: plan})
+		require.Error(t, err, "operator %v is not a relational join and must fail closed", operator)
+	}
+}
+
+func TestIgnoringNarrowsJoinKeys(t *testing.T) {
+	t.Parallel()
+
+	// The metric and log agree on job but differ on instance. Without `ignoring`
+	// the shared-column join keys on {job, instance} and finds no match; with
+	// `ignoring(instance)` it keys on job alone and joins.
+	metricAttrs := &qdata.KeyValueList{}
+	qdata.AttrPutString(metricAttrs, "job", "api")
+	qdata.AttrPutString(metricAttrs, "instance", "m1")
+	metricRes := &qdata.Result{Signal: qdata.SignalMetrics, Data: &qdatav1.Result_Metrics{
+		Metrics: &qdata.Metrics{Series: []*qdata.MetricSeries{{
+			Name: "up", Attributes: metricAttrs, Points: []*qdata.MetricPoint{{Value: qdata.Double(0.5)}},
+		}}},
+	}}
+
+	logAttrs := &qdata.KeyValueList{}
+	qdata.AttrPutString(logAttrs, "job", "api")
+	qdata.AttrPutString(logAttrs, "instance", "l1")
+	logRes := &qdata.Result{Signal: qdata.SignalLogs, Data: &qdatav1.Result_Logs{
+		Logs: &qdata.Logs{Records: []*qdata.LogRecord{{Attributes: logAttrs, Body: qdata.Str("boom")}}},
+	}}
+
+	sut := crosssignaldispatcher.New(map[qdata.Signal]dispatcher.Dispatcher{
+		qdata.SignalMetrics: &fakeDispatcher{Base: dispatcher.Base{}, result: metricRes, err: nil, seen: nil},
+		qdata.SignalLogs:    &fakeDispatcher{Base: dispatcher.Base{}, result: logRes, err: nil, seen: nil},
+	})
+
+	lhs := qdata.SelectNode(qdata.SignalMetrics, nil)
+	rhs := qdata.SelectNode(qdata.SignalLogs, nil)
+
+	// Sanity: without ignoring, differing instance labels prevent a match.
+	plainPlan := qdata.Plan(qdata.BinaryNode(qdata.BinAnd, lhs, rhs, &qdata.VectorMatch{}))
+	plain, err := sut.Dispatch(context.Background(), &qdata.Query{Plan: plainPlan})
+	require.NoError(t, err)
+	assert.Empty(t, plain.GetTable().GetRows(), "differing instance labels block the shared-column join")
+
+	ignorePlan := qdata.Plan(qdata.BinaryNode(qdata.BinAnd, lhs, rhs, &qdata.VectorMatch{Ignoring: []string{"instance"}}))
+	ignored, err := sut.Dispatch(context.Background(), &qdata.Query{Plan: ignorePlan})
+	require.NoError(t, err)
+	require.Len(t, ignored.GetTable().GetRows(), 1, "ignoring(instance) narrows the key to job and joins")
+	assert.Equal(t, "api", rowValue(t, ignored, "job"))
 }
 
 func TestFailClosed(t *testing.T) {
