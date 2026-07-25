@@ -44,11 +44,8 @@ func New(name string, processors []processor.Processor, disp dispatcher.Dispatch
 // then runs the response path (processors in reverse order). A processor error
 // on the request path short-circuits before the dispatcher is reached.
 func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (*qdata.Result, error) {
-	// Mirror the plan's signal set onto Query.signals so processors and the
-	// dispatcher can read it without walking the plan tree. This is the single
-	// point every acceptor-produced query converges through; it is a no-op when
-	// the query carries no plan (the single-signal path). Symmetric to the
-	// result-signal backfill below.
+	// Mirror the plan's signal set onto Query.signals for downstream readers
+	// (no-op without a plan).
 	qdata.SyncPlanSignals(query)
 
 	for _, proc := range p.Processors {
