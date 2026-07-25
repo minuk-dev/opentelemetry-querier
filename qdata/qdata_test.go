@@ -180,3 +180,115 @@ func TestPlanSignals(t *testing.T) {
 		assert.Empty(t, qdata.PlanSignals(qdata.Plan(nil)))
 	})
 }
+
+func TestQuerySignals(t *testing.T) {
+	t.Parallel()
+
+	crossPlan := qdata.Plan(qdata.BinaryNode(qdata.BinDiv,
+		qdata.SelectNode(qdata.SignalLogs, nil), selectMetrics("x"), nil))
+
+	t.Run("plan is authoritative over signal fields", func(t *testing.T) {
+		t.Parallel()
+
+		query := &qdata.Query{Signal: qdata.SignalSpans, Plan: crossPlan}
+		assert.Equal(t, []qdata.Signal{qdata.SignalMetrics, qdata.SignalLogs}, qdata.QuerySignals(query))
+	})
+
+	t.Run("falls back to explicit signals set, deduped and sorted", func(t *testing.T) {
+		t.Parallel()
+
+		query := &qdata.Query{Signals: []qdata.Signal{qdata.SignalLogs, qdata.SignalMetrics, qdata.SignalLogs}}
+		assert.Equal(t, []qdata.Signal{qdata.SignalMetrics, qdata.SignalLogs}, qdata.QuerySignals(query))
+	})
+
+	t.Run("falls back to single signal field", func(t *testing.T) {
+		t.Parallel()
+
+		query := &qdata.Query{Signal: qdata.SignalMetrics}
+		assert.Equal(t, []qdata.Signal{qdata.SignalMetrics}, qdata.QuerySignals(query))
+	})
+}
+
+func TestSyncPlanSignals(t *testing.T) {
+	t.Parallel()
+
+	t.Run("mirrors plan signals onto the query", func(t *testing.T) {
+		t.Parallel()
+
+		query := &qdata.Query{Plan: qdata.Plan(qdata.BinaryNode(qdata.BinDiv,
+			qdata.SelectNode(qdata.SignalLogs, nil), selectMetrics("x"), nil))}
+		qdata.SyncPlanSignals(query)
+		assert.Equal(t, []qdata.Signal{qdata.SignalMetrics, qdata.SignalLogs}, query.GetSignals())
+	})
+
+	t.Run("no plan leaves signals untouched", func(t *testing.T) {
+		t.Parallel()
+
+		query := &qdata.Query{Signal: qdata.SignalMetrics}
+		qdata.SyncPlanSignals(query)
+		assert.Empty(t, query.GetSignals())
+	})
+}
+
+func TestValidateTable(t *testing.T) {
+	t.Parallel()
+
+	row := qdata.NewRow
+
+	cases := []struct {
+		name    string
+		table   *qdata.Table
+		wantErr bool
+	}{
+		{
+			name:    "rows within schema",
+			table:   qdata.NewTable([]string{"a", "b"}, row("a", qdata.Str("1"), "b", qdata.Str("2"))),
+			wantErr: false,
+		},
+		{
+			name:    "empty schema skips membership check",
+			table:   qdata.NewTable(nil, row("anything", qdata.Str("x"))),
+			wantErr: false,
+		},
+		{
+			name:    "column absent from schema",
+			table:   qdata.NewTable([]string{"a"}, row("a", qdata.Str("1"), "z", qdata.Str("9"))),
+			wantErr: true,
+		},
+		{
+			name:    "nil row with schema",
+			table:   qdata.NewTable([]string{"a"}, nil),
+			wantErr: true,
+		},
+		{
+			name:    "nil row without schema",
+			table:   qdata.NewTable(nil, nil),
+			wantErr: true,
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := qdata.ValidateTable(testCase.table)
+			if testCase.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestTableResult(t *testing.T) {
+	t.Parallel()
+
+	table := qdata.NewTable([]string{"metric", "message"},
+		qdata.NewRow("metric", qdata.Double(0.5), "message", qdata.Str("boom")))
+	result := qdata.TableResult(table)
+
+	require.NotNil(t, result.GetTable())
+	assert.Equal(t, []string{"metric", "message"}, result.GetTable().GetColumns())
+	assert.Len(t, result.GetTable().GetRows(), 1)
+}

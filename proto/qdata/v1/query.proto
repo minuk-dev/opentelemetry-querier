@@ -131,6 +131,14 @@ message Query {
   // §4.3 IR). It is the query: acceptors build it from their native query and
   // dispatchers render it to their backend's native query.
   QueryPlan plan = 12;
+
+  // signals is the set of telemetry signals a query touches (issue #24). It
+  // generalizes the single signal field (1) for cross-signal plans whose Select
+  // nodes span e.g. metrics + logs. When empty, the single signal field is
+  // authoritative (the 90% single-signal path); when the plan is present,
+  // qdata.PlanSignals(plan) is the ground truth and this field mirrors it so a
+  // consumer need not walk the tree. signal (1) is kept for back-compat.
+  repeated Signal signals = 13;
 }
 
 // ---- Structured query IR (design note #10, Phase 3 / §4.3) ----
