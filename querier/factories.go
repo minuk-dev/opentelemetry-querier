@@ -7,6 +7,7 @@ package querier
 import (
 	"github.com/minuk-dev/opentelemetry-querier/acceptor"
 	"github.com/minuk-dev/opentelemetry-querier/component"
+	"github.com/minuk-dev/opentelemetry-querier/connector"
 	"github.com/minuk-dev/opentelemetry-querier/dispatcher"
 	"github.com/minuk-dev/opentelemetry-querier/processor"
 )
@@ -17,4 +18,5 @@ type Factories struct {
 	Acceptors   map[component.Type]acceptor.Factory
 	Processors  map[component.Type]processor.Factory
 	Dispatchers map[component.Type]dispatcher.Factory
+	Connectors  map[component.Type]connector.Factory
 }

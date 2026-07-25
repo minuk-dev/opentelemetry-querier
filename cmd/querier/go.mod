@@ -28,6 +28,8 @@ require (
 	github.com/dennwc/varint v1.0.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/grafana/regexp v0.0.0-20250905093917-f7b3be9d1853 // indirect
+	github.com/minuk-dev/opentelemetry-querier/connector v0.0.0
+	github.com/minuk-dev/opentelemetry-querier/connector/crosssignalconnector v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/gen v0.0.0 // indirect
 	github.com/minuk-dev/opentelemetry-querier/pipeline v0.0.0 // indirect
 	github.com/minuk-dev/opentelemetry-querier/qdata v0.0.0 // indirect
@@ -89,3 +91,7 @@ replace github.com/minuk-dev/opentelemetry-querier/qdata => ../../qdata
 replace github.com/minuk-dev/opentelemetry-querier/qerror => ../../qerror
 
 replace github.com/minuk-dev/opentelemetry-querier/querier => ../../querier
+
+replace github.com/minuk-dev/opentelemetry-querier/connector => ../../connector
+
+replace github.com/minuk-dev/opentelemetry-querier/connector/crosssignalconnector => ../../connector/crosssignalconnector

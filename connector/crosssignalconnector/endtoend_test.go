@@ -1,4 +1,4 @@
-package crosssignaldispatcher_test
+package crosssignalconnector_test
 
 import (
 	"context"
@@ -9,20 +9,36 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/minuk-dev/opentelemetry-querier/dispatcher"
-	"github.com/minuk-dev/opentelemetry-querier/dispatcher/crosssignaldispatcher"
+	"github.com/minuk-dev/opentelemetry-querier/connector/crosssignalconnector"
 	"github.com/minuk-dev/opentelemetry-querier/dispatcher/lokidispatcher"
 	"github.com/minuk-dev/opentelemetry-querier/dispatcher/prometheusdispatcher"
+	"github.com/minuk-dev/opentelemetry-querier/pipeline"
+	"github.com/minuk-dev/opentelemetry-querier/processor"
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
 )
 
 // maxBodyBytes bounds the form body the test upstreams parse (gosec G120).
 const maxBodyBytes = 1 << 20
 
-// TestEndToEndMetricsLogsJoin drives the real Prometheus and Loki dispatchers
-// against httptest upstreams and joins their responses into a Table — the full
-// cross-signal path (issue #24 "Done when" #4).
-func TestEndToEndMetricsLogsJoin(t *testing.T) {
+// recordingProcessor counts the queries it processes so the test can prove the
+// per-signal pipeline's processors run on each sub-query (not bypassed).
+type recordingProcessor struct {
+	processor.Base
+
+	queries int
+}
+
+func (p *recordingProcessor) ProcessQuery(_ context.Context, _ *qdata.Query) error {
+	p.queries++
+
+	return nil
+}
+
+// TestEndToEndMetricsLogsJoinThroughPipelines drives the real Prometheus and Loki
+// dispatchers behind full per-signal pipelines and joins their responses into a
+// Table. It also asserts each target pipeline's processors run on the sub-query,
+// which the old dispatcher-based approach bypassed (issue #24 / connector rework).
+func TestEndToEndMetricsLogsJoinThroughPipelines(t *testing.T) {
 	t.Parallel()
 
 	promSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -43,13 +59,15 @@ func TestEndToEndMetricsLogsJoin(t *testing.T) {
 	}))
 	defer lokiSrv.Close()
 
-	sut := crosssignaldispatcher.New(map[qdata.Signal]dispatcher.Dispatcher{
-		qdata.SignalMetrics: prometheusdispatcher.New(prometheusdispatcher.Config{
-			Endpoint: promSrv.URL, TenantHeader: "", Timeout: 0,
-		}),
-		qdata.SignalLogs: lokidispatcher.New(lokidispatcher.Config{
-			Endpoint: lokiSrv.URL, TenantHeader: "", Timeout: 0, Limit: 0, Direction: "",
-		}),
+	metricsProc := &recordingProcessor{Base: processor.Base{}, queries: 0}
+	metricsPipe := pipeline.New("metrics", []processor.Processor{metricsProc},
+		prometheusdispatcher.New(prometheusdispatcher.Config{Endpoint: promSrv.URL, TenantHeader: "", Timeout: 0}))
+	logsPipe := pipeline.New("logs", nil, lokidispatcher.New(
+		lokidispatcher.Config{Endpoint: lokiSrv.URL, TenantHeader: "", Timeout: 0, Limit: 0, Direction: ""}))
+
+	sut := crosssignalconnector.New(map[qdata.Signal]pipeline.Handler{
+		qdata.SignalMetrics: metricsPipe,
+		qdata.SignalLogs:    logsPipe,
 	})
 
 	lhs := qdata.SelectNode(qdata.SignalMetrics, qdata.LeafPredicate(
@@ -74,6 +92,8 @@ func TestEndToEndMetricsLogsJoin(t *testing.T) {
 	value, ok := qdata.AttrGet(row, "value")
 	require.True(t, ok, "joined row carries the metric value")
 	assert.InDelta(t, 0.5, value.GetDoubleValue(), 1e-9)
+
+	assert.Equal(t, 1, metricsProc.queries, "the metrics pipeline's processors ran on the sub-query")
 }
 
 func assertColumn(t *testing.T, row *qdata.KeyValueList, column, want string) {

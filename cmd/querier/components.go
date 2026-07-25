@@ -8,6 +8,8 @@ import (
 	lokiacceptor "github.com/minuk-dev/opentelemetry-querier/acceptor/lokiacceptor"
 	otqpacceptor "github.com/minuk-dev/opentelemetry-querier/acceptor/otqpacceptor"
 	prometheusacceptor "github.com/minuk-dev/opentelemetry-querier/acceptor/prometheusacceptor"
+	"github.com/minuk-dev/opentelemetry-querier/connector"
+	crosssignalconnector "github.com/minuk-dev/opentelemetry-querier/connector/crosssignalconnector"
 	"github.com/minuk-dev/opentelemetry-querier/dispatcher"
 	elasticsearchdispatcher "github.com/minuk-dev/opentelemetry-querier/dispatcher/elasticsearchdispatcher"
 	lokidispatcher "github.com/minuk-dev/opentelemetry-querier/dispatcher/lokidispatcher"
@@ -49,6 +51,12 @@ func components() (querier.Factories, error) {
 		prometheusdispatcher.NewFactory(),
 		lokidispatcher.NewFactory(),
 		elasticsearchdispatcher.NewFactory(),
+	); err != nil {
+		return factories, err
+	}
+
+	if factories.Connectors, err = connector.MakeFactoryMap(
+		crosssignalconnector.NewFactory(),
 	); err != nil {
 		return factories, err
 	}

@@ -9,8 +9,9 @@ use (
 	./cmd/builder
 	./cmd/querier
 	./component
+	./connector
+	./connector/crosssignalconnector
 	./dispatcher
-	./dispatcher/crosssignaldispatcher
 	./dispatcher/elasticsearchdispatcher
 	./dispatcher/lokidispatcher
 	./dispatcher/prometheusdispatcher

@@ -30,3 +30,6 @@ dispatchers:
   - gomod: github.com/minuk-dev/opentelemetry-querier/dispatcher/prometheusdispatcher
   - gomod: github.com/minuk-dev/opentelemetry-querier/dispatcher/lokidispatcher
   - gomod: github.com/minuk-dev/opentelemetry-querier/dispatcher/elasticsearchdispatcher
+
+connectors:
+  - gomod: github.com/minuk-dev/opentelemetry-querier/connector/crosssignalconnector
