@@ -39,6 +39,7 @@ linters:
         - 'net/http\.Server'
         - 'net/http\.Client'
         - 'github.com/go-viper/mapstructure/v2\.DecoderConfig'
+        - 'github.com/testcontainers/testcontainers-go\..*'
 
     # Factories and components intentionally return interface types, mirroring the
     # opentelemetry-collector component model.
