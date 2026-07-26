@@ -25,5 +25,6 @@ use (
 	./qdata
 	./qerror
 	./test/e2e
+	./test/pipeline
 	./querier
 )
