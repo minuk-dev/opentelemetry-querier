@@ -25,5 +25,6 @@ use (
 	./processor/tenantprocessor
 	./qdata
 	./qerror
+	./test/e2e
 	./querier
 )

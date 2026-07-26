@@ -1,0 +1,1149 @@
+# PromQL alert expressions from samber/awesome-prometheus-alerts (_data/rules.yml).
+# Source: https://github.com/samber/awesome-prometheus-alerts
+# Licensed CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/).
+# Used here as a query corpus to verify the PromQL acceptor->dispatcher round-trip.
+# One PromQL expression per line; lines starting with # and blank lines are ignored.
+#
+( (mysql_slave_status_seconds_behind_master - mysql_slave_status_sql_delay) and ON (instance) mysql_slave_status_master_server_id > 0 ) > 30
+( mysql_slave_status_slave_io_running and ON (instance) mysql_slave_status_master_server_id > 0 ) == 0
+( mysql_slave_status_slave_sql_running and ON (instance) mysql_slave_status_master_server_id > 0) == 0
+((1 - (node_memory_SwapFree_bytes / node_memory_SwapTotal_bytes)) * 100 > 80) and node_memory_SwapTotal_bytes > 0
+((kube_daemonset_status_number_ready / kube_daemonset_status_desired_number_scheduled * 100 < 100 and kube_daemonset_status_desired_number_scheduled > 0) or kube_daemonset_status_desired_number_scheduled - kube_daemonset_status_current_number_scheduled > 0) and changes(kube_daemonset_status_updated_number_scheduled[5m]) == 0
+((lvm_vg_total_size_bytes - lvm_vg_free_size_bytes) / lvm_vg_total_size_bytes) * 100 > 90
+((node_bonding_active - node_bonding_slaves) != 0)
+((node_hwmon_temp_crit_alarm_celsius == 1) or (node_hwmon_temp_alarm == 1))
+((node_md_disks_required - ignoring(state) node_md_disks{state="active"}) > 0)
+((node_timex_offset_seconds > 0.05 and deriv(node_timex_offset_seconds[5m]) >= 0) or (node_timex_offset_seconds < -0.05 and deriv(node_timex_offset_seconds[5m]) <= 0))
+((pg_stat_user_tables_n_dead_tup > 10000) / (pg_stat_user_tables_n_live_tup + pg_stat_user_tables_n_dead_tup)) >= 0.1 and (pg_stat_user_tables_n_live_tup + pg_stat_user_tables_n_dead_tup) > 0
+((pg_stat_user_tables_n_tup_del + pg_stat_user_tables_n_tup_upd + pg_stat_user_tables_n_tup_hot_upd) > pg_settings_autovacuum_analyze_threshold) and (time() - pg_stat_user_tables_last_autoanalyze) > 24 * 60 * 60 * 10
+((pg_stat_user_tables_n_tup_del + pg_stat_user_tables_n_tup_upd + pg_stat_user_tables_n_tup_hot_upd) > pg_settings_autovacuum_vacuum_threshold) and (time() - pg_stat_user_tables_last_autovacuum) > 60 * 60 * 24 * 10
+((rate(node_network_receive_bytes_total[5m]) / node_network_speed_bytes) > .80) and node_network_speed_bytes > 0
+((rate(node_network_transmit_bytes_total[5m]) / node_network_speed_bytes) > .80) and node_network_speed_bytes > 0
+((sum by (backend) (haproxy_backend_current_sessions * 100) / sum by (backend) (haproxy_backend_limit_sessions))) > 80 and sum by (backend) (haproxy_backend_limit_sessions) > 0
+((sum by (instance) (pg_locks_count)) / (pg_settings_max_locks_per_transaction * pg_settings_max_connections)) > 0.20 and (pg_settings_max_locks_per_transaction * pg_settings_max_connections) > 0
+((sum by (proxy) (rate(haproxy_server_http_responses_total{code="4xx"}[1m])) / sum by (proxy) (rate(haproxy_server_http_responses_total[1m]))) * 100) > 5 and sum by (proxy) (rate(haproxy_server_http_responses_total[1m])) > 0
+((sum by (proxy) (rate(haproxy_server_http_responses_total{code="5xx"}[1m])) / sum by (proxy) (rate(haproxy_server_http_responses_total[1m]))) * 100) > 5 and sum by (proxy) (rate(haproxy_server_http_responses_total[1m])) > 0
+((sum by (server) (rate(haproxy_server_http_responses_total{code="4xx"}[1m])) / sum by (server) (rate(haproxy_server_http_responses_total[1m]))) * 100) > 5 and sum by (server) (rate(haproxy_server_http_responses_total[1m])) > 0
+((sum by (server) (rate(haproxy_server_http_responses_total{code="5xx"}[1m])) / sum by (server) (rate(haproxy_server_http_responses_total[1m]))) * 100) > 5 and sum by (server) (rate(haproxy_server_http_responses_total[1m])) > 0
+(1 - (sum by (job) (rate({__name__=~"otelcol_exporter_send_failed_(spans|metric_points|log_records)_total"}[1m])) / (sum by (job) (rate({__name__=~"otelcol_exporter_send_failed_(spans|metric_points|log_records)_total"}[1m])) + sum by (job) (rate({__name__=~"otelcol_exporter_sent_(spans|metric_points|log_records)_total"}[1m]))))) < 0.95
+(1 - (sum by (job) (rate({__name__=~"otelcol_receiver_refused_(spans|metric_points|log_records)_total"}[1m])) / (sum by (job) (rate({__name__=~"otelcol_receiver_refused_(spans|metric_points|log_records)_total"}[1m])) + sum by (job) (rate({__name__=~"otelcol_receiver_accepted_(spans|metric_points|log_records)_total"}[1m]))))) < 0.95
+(1 - (sum(container_fs_inodes_free{name!=""}) BY (instance) / sum(container_fs_inodes_total) BY (instance))) * 100 > 80 and sum(container_fs_inodes_total) BY (instance) > 0
+(1 - sum(rate(vault_core_response_status_code{type="5xx"}[5m])) by (instance) / sum(rate(vault_core_response_status_code[5m])) by (instance)) * 100 < 95 and sum(rate(vault_core_response_status_code{type="5xx"}[5m])) by (instance) > 1
+(abs((sum by (instance, name) (rate(container_cpu_usage_seconds_total{name!=""}[1m])) * 100) - (sum by (instance, name) (rate(container_cpu_usage_seconds_total{name!=""}[1m] offset 1m)) * 100)) or abs((sum by (instance, name) (rate(container_cpu_usage_seconds_total{name!=""}[1m])) * 100) - (sum by (instance, name) (rate(container_cpu_usage_seconds_total{name!=""}[5m] offset 1m)) * 100))) > 25
+(apcupsd_battery_volts / apcupsd_battery_nominal_volts) < 0.95 and apcupsd_battery_nominal_volts > 0
+(avg(tempodb_blocklist_length) / avg(tempodb_blocklist_length offset 7d) - 1) * 100 > 40 and avg(tempodb_blocklist_length offset 7d) > 0
+(avg_over_time(smartctl_device_temperature{temperature_type="current"} [5m]) unless on (instance, device) smartctl_device_temperature{temperature_type="drive_trip"}) > 60
+(aws_applicationelb_httpcode_elb_5_xx_count_sum offset 10m / aws_applicationelb_request_count_sum offset 10m) * 100 > 5 and aws_applicationelb_request_count_sum offset 10m > 0
+(aws_lambda_errors_sum offset 10m / aws_lambda_invocations_sum offset 10m) * 100 > 5 and aws_lambda_invocations_sum offset 10m > 0
+(ceph_health_detail{name="MON_DOWN"} == 1) * on() group_right() (count(ceph_mon_quorum_status == 1) == bool (floor(count(ceph_mon_metadata) / 2) + 1)) == 1
+(cortex_alertmanager_tenants_owned == 0) and on (instance) (cortex_alertmanager_tenants_owned offset 1h > 0)
+(cortex_distributor_inflight_push_requests / ignoring(limit) cortex_distributor_instance_limits{limit="max_inflight_push_requests"} * 100 > 80) and cortex_distributor_instance_limits{limit="max_inflight_push_requests"} > 0
+(cortex_ingester_memory_series / ignoring(limit) cortex_ingester_instance_limits{limit="max_series"} * 100 > 80) and cortex_ingester_instance_limits{limit="max_series"} > 0
+(cortex_ingester_memory_series / ignoring(limit) cortex_ingester_instance_limits{limit="max_series"} * 100 > 90) and cortex_ingester_instance_limits{limit="max_series"} > 0
+(cortex_ingester_memory_users / ignoring(limit) cortex_ingester_instance_limits{limit="max_tenants"} * 100 > 70) and cortex_ingester_instance_limits{limit="max_tenants"} > 0
+(cortex_ingester_memory_users / ignoring(limit) cortex_ingester_instance_limits{limit="max_tenants"} * 100 > 80) and cortex_ingester_instance_limits{limit="max_tenants"} > 0
+(cortex_ingester_memory_users == 0) and on (instance) (cortex_ingester_memory_users offset 1h > 0)
+(cortex_ruler_managers_total == 0) and on (instance) (cortex_ruler_managers_total offset 1h > 0)
+(count(digitalocean_droplet_up) / digitalocean_account_droplet_limit) * 100 > 80 and digitalocean_account_droplet_limit > 0
+(count(redis_instance_info{role="master"}) or vector(0)) < 1
+(elasticsearch_jvm_memory_used_bytes{area="heap"} / elasticsearch_jvm_memory_max_bytes{area="heap"}) * 100 > 80 and elasticsearch_jvm_memory_max_bytes{area="heap"} > 0
+(elasticsearch_jvm_memory_used_bytes{area="heap"} / elasticsearch_jvm_memory_max_bytes{area="heap"}) * 100 > 90 and elasticsearch_jvm_memory_max_bytes{area="heap"} > 0
+(freeswitch_session_active * 100 / freeswitch_session_limit) > 80 and freeswitch_session_limit > 0
+(freeswitch_session_active * 100 / freeswitch_session_limit) > 90 and freeswitch_session_limit > 0
+(go_memstats_heap_alloc_bytes / go_memstats_sys_bytes) * 100 > 90
+(haproxy_backend_current_sessions / haproxy_backend_limit_sessions * 100) > 80 and haproxy_backend_limit_sessions > 0
+(histogram_quantile(0.99, sum by (job, le) (rate(http_request_duration_seconds_bucket{job=~".*thanos-query.*", handler="query"}[5m]))) > 40 and sum by (job) (rate(http_request_duration_seconds_count{job=~".*thanos-query.*", handler="query"}[5m])) > 0)
+(histogram_quantile(0.99, sum by (job, le) (rate(http_request_duration_seconds_bucket{job=~".*thanos-query.*", handler="query_range"}[5m]))) > 90 and sum by (job) (rate(http_request_duration_seconds_count{job=~".*thanos-query.*", handler="query_range"}[5m])) > 0)
+(histogram_quantile(0.99, sum by (job, le) (rate(http_request_duration_seconds_bucket{job=~".*thanos-receive.*", handler="receive"}[5m]))) > 10 and sum by (job) (rate(http_request_duration_seconds_count{job=~".*thanos-receive.*", handler="receive"}[5m])) > 0)
+(histogram_quantile(0.99, sum by (job, le) (rate(thanos_bucket_store_series_gate_duration_seconds_bucket[5m]))) > 2 and sum by (job) (rate(thanos_bucket_store_series_gate_duration_seconds_count[5m])) > 0)
+(histogram_quantile(0.99, sum by (job, le) (rate(thanos_objstore_bucket_operation_duration_seconds_bucket{job=~".*thanos-store.*"}[5m]))) > 2 and  sum by (job) (rate(thanos_objstore_bucket_operation_duration_seconds_count{job=~".*thanos-store.*"}[5m])) > 0)
+(histogram_quantile(0.99, sum by (job, le) (rate(thanos_replicate_replication_run_duration_seconds_bucket[5m]))) > 20 and  sum by (job) (rate(thanos_replicate_replication_run_duration_seconds_count[5m])) > 0)
+(ifOperStatus{job=~"snmp.*"} == 2) and on(instance, job, ifIndex) (ifAdminStatus{job=~"snmp.*"} == 1)
+(increase(node_edac_correctable_errors_total[1m]) > 0)
+(increase(node_vmstat_oom_kill[30m]) > 0)
+(jvm_buffer_pool_used_bytes / jvm_buffer_pool_capacity_bytes) * 100 > 90 and jvm_buffer_pool_capacity_bytes > 0
+(kube_cronjob_status_last_schedule_time > kube_cronjob_status_last_successful_time) AND (kube_cronjob_status_active == 0) AND (kube_cronjob_spec_suspend == 0)
+(kube_horizontalpodautoscaler_spec_max_replicas - kube_horizontalpodautoscaler_status_desired_replicas) * on (horizontalpodautoscaler,namespace) (kube_horizontalpodautoscaler_status_condition{condition="ScalingLimited", status="true"} == 1) == 0
+(kube_horizontalpodautoscaler_status_desired_replicas >= kube_horizontalpodautoscaler_spec_max_replicas) and (kube_horizontalpodautoscaler_spec_max_replicas > 1) and (kube_horizontalpodautoscaler_spec_min_replicas != kube_horizontalpodautoscaler_spec_max_replicas)
+(kube_pod_container_status_restarts_total - kube_pod_container_status_restarts_total offset 10m >= 1) and ignoring (reason) min_over_time(kube_pod_container_status_last_terminated_reason{reason="OOMKilled"}[10m]) == 1
+(last_over_time(etcd_mvcc_db_total_size_in_bytes[5m]) / last_over_time(etcd_server_quota_backend_bytes[5m])) * 100 > 95
+(last_over_time(etcd_mvcc_db_total_size_in_use_in_bytes[5m]) / last_over_time(etcd_mvcc_db_total_size_in_bytes[5m])) < 0.5 and etcd_mvcc_db_total_size_in_use_in_bytes > 104857600
+(max by (scope) (patroni_primary) < 1) and (max by (scope) (patroni_standby_leader) < 1)
+(max_over_time(smartctl_device_temperature{temperature_type="current"} [5m]) unless on (instance, device) smartctl_device_temperature{temperature_type="drive_trip"}) > 70
+(max_over_time(thanos_query_concurrent_gate_queries_max[5m]) - avg_over_time(thanos_query_concurrent_gate_queries_in_flight[5m]) < 1)
+(memcached_current_bytes / memcached_limit_bytes * 100) > 90 and memcached_limit_bytes > 0
+(memcached_current_connections / memcached_max_connections * 100) > 80 and memcached_max_connections > 0
+(memcached_current_connections / memcached_max_connections * 100) > 95 and memcached_max_connections > 0
+(min by (instance) (time() - thanos_objstore_bucket_last_successful_upload_time{job=~".+/ingester.*"}) > 14400) and (max by (instance) (thanos_objstore_bucket_last_successful_upload_time{job=~".+/ingester.*"}) > 0) and (max by (instance) (rate(cortex_ingester_ingested_samples_total[4h])) > 0)
+(min by (instance, job) (cortex_bucket_stores_tenants_synced{component="store-gateway"}) == 0) and on (instance) (cortex_bucket_stores_tenants_synced{component="store-gateway"} offset 1h > 0)
+(min without (cpu) (rate(node_cpu_seconds_total{mode="idle"}[1h]))) > 0.8
+(min_over_time(node_timex_sync_status[3m]) == 0 and node_timex_maxerror_seconds >= 16)
+(mongodb_rs_members_optimeDate{member_state="PRIMARY"} - on (set) group_right mongodb_rs_members_optimeDate{member_state="SECONDARY"}) / 1000 > 30
+(node_edac_uncorrectable_errors_total > 0)
+(node_filesystem_avail_bytes{fstype!~"^(fuse.*|tmpfs|cifs|nfs)"} / node_filesystem_size_bytes < .10 and on (instance, device, mountpoint) node_filesystem_readonly == 0)
+(node_filesystem_files_free / node_filesystem_files < .10 and ON (instance, device, mountpoint) node_filesystem_readonly == 0) and node_filesystem_files > 0
+(node_md_disks{state="failed"} > 0)
+(node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < .10)
+(node_nf_conntrack_entries / node_nf_conntrack_entries_limit > 0.8) and node_nf_conntrack_entries_limit > 0
+(node_systemd_unit_state{state="failed"} == 1)
+(otelcol_exporter_queue_size / on(instance, job, exporter) otelcol_exporter_queue_capacity) > 0.8 and otelcol_exporter_queue_capacity > 0
+(otelcol_process_runtime_heap_alloc_bytes / on(instance, job) otelcol_process_runtime_total_sys_memory_bytes) > 0.9
+(pg_replication_slots_active == 0) and (pg_replication_is_replica == 0)
+(process_open_fds / process_max_fds) * 100 > 90 and process_max_fds > 0
+(rate(alertmanager_notifications_failed_total[5m]) / ignoring(reason) group_left rate(alertmanager_notifications_total[5m])) > 0.01 and ignoring(reason) rate(alertmanager_notifications_total[5m]) > 0
+(rate(elasticsearch_thread_pool_rejected_count[5m]) / (rate(elasticsearch_thread_pool_rejected_count[5m]) + rate(elasticsearch_thread_pool_completed_count[5m]))) * 100 > 5 and (rate(elasticsearch_thread_pool_rejected_count[5m]) + rate(elasticsearch_thread_pool_completed_count[5m])) > 0
+(rate(kube_state_metrics_list_total{result="error"}[5m]) / rate(kube_state_metrics_list_total[5m]) > 0.01 and rate(kube_state_metrics_list_total[5m]) > 0) or (rate(kube_state_metrics_watch_total{result="error"}[5m]) / rate(kube_state_metrics_watch_total[5m]) > 0.01 and rate(kube_state_metrics_watch_total[5m]) > 0)
+(rate(memcached_commands_total{command="get", status="hit"}[5m]) / (rate(memcached_commands_total{command="get", status="hit"}[5m]) + rate(memcached_commands_total{command="get", status="miss"}[5m])) * 100) < 80 and (rate(memcached_commands_total{command="get", status="hit"}[5m]) + rate(memcached_commands_total{command="get", status="miss"}[5m])) > 0
+(rate(node_context_switches_total[15m])/count without(mode,cpu) (node_cpu_seconds_total{mode="idle"})) / (rate(node_context_switches_total[1d])/count without(mode,cpu) (node_cpu_seconds_total{mode="idle"})) > 2 and rate(node_context_switches_total[1d]) > 0
+(rate(node_disk_io_time_seconds_total[5m]) > .80)
+(rate(node_disk_read_time_seconds_total[1m]) / rate(node_disk_reads_completed_total[1m]) > 0.1 and rate(node_disk_reads_completed_total[1m]) > 0)
+(rate(node_disk_write_time_seconds_total[1m]) / rate(node_disk_writes_completed_total[1m]) > 0.1 and rate(node_disk_writes_completed_total[1m]) > 0)
+(rate(node_network_receive_errs_total[2m]) / rate(node_network_receive_packets_total[2m]) > 0.01) and rate(node_network_receive_packets_total[2m]) > 0
+(rate(node_network_transmit_errs_total[2m]) / rate(node_network_transmit_packets_total[2m]) > 0.01) and rate(node_network_transmit_packets_total[2m]) > 0
+(rate(node_vmstat_pgmajfault[5m]) > 1000)
+(rate(prometheus_notifications_errors_total[5m]) / rate(prometheus_notifications_sent_total[5m])) * 100 > 1
+(rate(wireguard_sent_bytes_total[15m]) + rate(wireguard_received_bytes_total[15m])) == 0 and wireguard_latest_handshake_seconds > 0 and (time() - wireguard_latest_handshake_seconds) < 300
+(sum by (instance) (apache_workers{state="busy"}) / sum by (instance) (apache_scoreboard) ) * 100 > 80 and sum by (instance) (apache_scoreboard) > 0
+(sum by (instance)(jvm_memory_used_bytes{area="heap"}) / sum by (instance)(jvm_memory_max_bytes{area="heap"})) * 100 > 80 and sum by (instance)(jvm_memory_max_bytes{area="heap"}) > 0
+(sum by (instance)(jvm_memory_used_bytes{area="nonheap"}) / (sum by (instance)(jvm_memory_max_bytes{area="nonheap"}) > 0)) * 100 > 80
+(sum by (job) (increase(thanos_receive_metamonitoring_failed_queries_total[5m])) / 20) * 100 > 20
+(sum by (job) (rate(grpc_client_handled_total{grpc_code=~"Unknown|Internal|Unavailable|DataLoss|DeadlineExceeded|ResourceExhausted", job=~".*thanos-query.*"}[5m])) / sum by (job) (rate(grpc_client_started_total{job=~".*thanos-query.*"}[5m]))) * 100 > 5 and sum by (job) (rate(grpc_client_started_total{job=~".*thanos-query.*"}[5m])) > 0
+(sum by (job) (rate(grpc_server_handled_total{grpc_code=~"Unknown|ResourceExhausted|Internal|Unavailable|DataLoss|DeadlineExceeded", job=~".*thanos-query.*"}[5m]))/  sum by (job) (rate(grpc_server_started_total{job=~".*thanos-query.*"}[5m])) * 100 > 5) and sum by (job) (rate(grpc_server_started_total{job=~".*thanos-query.*"}[5m])) > 0
+(sum by (job) (rate(grpc_server_handled_total{grpc_code=~"Unknown|ResourceExhausted|Internal|Unavailable|DataLoss|DeadlineExceeded", job=~".*thanos-store.*"}[5m]))/  sum by (job) (rate(grpc_server_started_total{job=~".*thanos-store.*"}[5m])) * 100 > 5) and sum by (job) (rate(grpc_server_started_total{job=~".*thanos-store.*"}[5m])) > 0
+(sum by (job) (rate(http_requests_total{code=~"5..", job=~".*thanos-query.*", handler="query"}[5m]))/  sum by (job) (rate(http_requests_total{job=~".*thanos-query.*", handler="query"}[5m]))) * 100 > 5 and sum by (job) (rate(http_requests_total{job=~".*thanos-query.*", handler="query"}[5m])) > 0
+(sum by (job) (rate(http_requests_total{code=~"5..", job=~".*thanos-query.*", handler="query_range"}[5m]))/  sum by (job) (rate(http_requests_total{job=~".*thanos-query.*", handler="query_range"}[5m]))) * 100 > 5 and sum by (job) (rate(http_requests_total{job=~".*thanos-query.*", handler="query_range"}[5m])) > 0
+(sum by (job) (rate(http_requests_total{code=~"5..", job=~".*thanos-receive.*", handler="receive"}[5m]))/  sum by (job) (rate(http_requests_total{job=~".*thanos-receive.*", handler="receive"}[5m]))) * 100 > 5 and sum by (job) (rate(http_requests_total{job=~".*thanos-receive.*", handler="receive"}[5m])) > 0
+(sum by (job) (rate(thanos_compact_group_compactions_failures_total[5m])) / sum by (job) (rate(thanos_compact_group_compactions_total[5m])) * 100 > 5) and sum by (job) (rate(thanos_compact_group_compactions_total[5m])) > 0
+(sum by (job) (rate(thanos_objstore_bucket_operation_failures_total{job=~".*thanos-compact.*"}[5m])) / sum by (job) (rate(thanos_objstore_bucket_operations_total{job=~".*thanos-compact.*"}[5m])) * 100 > 5) and sum by (job) (rate(thanos_objstore_bucket_operations_total{job=~".*thanos-compact.*"}[5m])) > 0
+(sum by (job) (rate(thanos_objstore_bucket_operation_failures_total{job=~".*thanos-store.*"}[5m])) / sum by (job) (rate(thanos_objstore_bucket_operations_total{job=~".*thanos-store.*"}[5m])) * 100 > 5) and sum by (job) (rate(thanos_objstore_bucket_operations_total{job=~".*thanos-store.*"}[5m])) > 0
+(sum by (job) (rate(thanos_query_store_apis_dns_failures_total[5m])) / sum by (job) (rate(thanos_query_store_apis_dns_lookups_total[5m]))) * 100 > 1 and sum by (job) (rate(thanos_query_store_apis_dns_lookups_total[5m])) > 0
+(sum by (job) (rate(thanos_receive_forward_requests_total{result="error"}[5m]))/  sum by (job) (rate(thanos_receive_forward_requests_total[5m]))) * 100 > 20 and sum by (job) (rate(thanos_receive_forward_requests_total[5m])) > 0
+(sum by (job) (rate(thanos_receive_hashrings_file_errors_total[5m])) / sum by (job) (rate(thanos_receive_hashrings_file_refreshes_total[5m])) > 0) and sum by (job) (rate(thanos_receive_hashrings_file_refreshes_total[5m])) > 0
+(sum by (job) (rate(thanos_replicate_replication_runs_total{result="error"}[5m])) / on (job) group_left sum by (job) (rate(thanos_replicate_replication_runs_total[5m]))) * 100 >= 10 and sum by (job) (rate(thanos_replicate_replication_runs_total[5m])) > 0
+(sum by (job, instance) (rate(grpc_server_handled_total{grpc_code=~"Unknown|ResourceExhausted|Internal|Unavailable|DataLoss|DeadlineExceeded", job=~".*thanos-rule.*"}[5m]))/  sum by (job, instance) (rate(grpc_server_started_total{job=~".*thanos-rule.*"}[5m])) * 100 > 5) and sum by (job, instance) (rate(grpc_server_started_total{job=~".*thanos-rule.*"}[5m])) > 0
+(sum by (job, instance) (rate(prometheus_rule_evaluation_failures_total{job=~".*thanos-rule.*"}[5m])) / sum by (job, instance) (rate(prometheus_rule_evaluations_total{job=~".*thanos-rule.*"}[5m])) * 100 > 5) and sum by (job, instance) (rate(prometheus_rule_evaluations_total{job=~".*thanos-rule.*"}[5m])) > 0
+(sum by (job, instance) (rate(thanos_rule_alertmanagers_dns_failures_total[5m])) / sum by (job, instance) (rate(thanos_rule_alertmanagers_dns_lookups_total[5m])) * 100 > 1) and sum by (job, instance) (rate(thanos_rule_alertmanagers_dns_lookups_total[5m])) > 0
+(sum by (job, instance) (rate(thanos_rule_query_apis_dns_failures_total[5m])) / sum by (job, instance) (rate(thanos_rule_query_apis_dns_lookups_total[5m])) * 100 > 1) and sum by (job, instance) (rate(thanos_rule_query_apis_dns_lookups_total[5m])) > 0
+(sum by (job, instance, rule_group) (prometheus_rule_group_last_duration_seconds{job=~".*thanos-rule.*"}) > sum by (job, instance, rule_group) (prometheus_rule_group_interval_seconds{job=~".*thanos-rule.*"}))
+(sum by (job, kv_name) (rate(cortex_kv_request_duration_seconds_count{status_code!~"2.."}[5m])) / sum by (job, kv_name) (rate(cortex_kv_request_duration_seconds_count[5m]))) == 1 and sum by (job, kv_name) (rate(cortex_kv_request_duration_seconds_count[5m])) > 0
+(sum by (name, operation, job) (rate(thanos_cache_operation_failures_total[5m])) / sum by (name, operation, job) (rate(thanos_cache_operations_total[5m]))) * 100 > 5 and sum by (name, operation, job) (rate(thanos_cache_operations_total[5m])) > 0
+(sum by (pod, kv_name) (rate(cortex_kv_request_duration_seconds_count{status_code!~"2.+"}[5m])) / sum by (pod, kv_name) (rate(cortex_kv_request_duration_seconds_count[5m]))) == 1 and sum by (pod, kv_name) (rate(cortex_kv_request_duration_seconds_count[5m])) > 0
+(sum by (proxy) (rate(haproxy_backend_connection_errors_total[1m]))) > 100
+(sum by (proxy) (rate(haproxy_server_connection_errors_total[1m]))) > 100
+(sum by (realm) (rate(keycloak_code_to_tokens_errors_total[5m])) / sum by (realm) (rate(keycloak_code_to_tokens_total[5m]))) * 100 > 10 and sum by (realm) (rate(keycloak_code_to_tokens_total[5m])) > 0
+(sum by (realm) (rate(keycloak_failed_login_attempts_total[5m])) / (sum by (realm) (rate(keycloak_logins_total[5m])) + sum by (realm) (rate(keycloak_failed_login_attempts_total[5m])))) * 100 > 5 and (sum by (realm) (rate(keycloak_logins_total[5m])) + sum by (realm) (rate(keycloak_failed_login_attempts_total[5m]))) > 0
+(sum by (realm) (rate(keycloak_refresh_tokens_errors_total[5m])) / sum by (realm) (rate(keycloak_refresh_tokens_total[5m]))) * 100 > 10 and sum by (realm) (rate(keycloak_refresh_tokens_total[5m])) > 0
+(sum by (realm) (rate(keycloak_registrations_errors_total[5m])) / sum by (realm) (rate(keycloak_registrations_total[5m]))) * 100 > 10 and sum by (realm) (rate(keycloak_registrations_total[5m])) > 0
+(sum by (server) (rate(haproxy_server_response_errors_total[1m])) / sum by (server) (rate(haproxy_server_http_responses_total[1m]))) * 100 > 5 and sum by (server) (rate(haproxy_server_http_responses_total[1m])) > 0
+(sum by (zone) (rate(cloudflare_zone_requests_status{status=~"^5.."}[5m])) / on (zone) sum by (zone) (rate(cloudflare_zone_requests_status[5m]))) * 100 > 5 and sum by (zone) (rate(cloudflare_zone_requests_status[5m])) > 0
+(sum by(zone) (rate(cloudflare_zone_requests_status{status=~"^4.."}[15m])) / on (zone) sum by (zone) (rate(cloudflare_zone_requests_status[15m]))) * 100 > 5 and sum by (zone) (rate(cloudflare_zone_requests_status[15m])) > 0
+(sum(cilium_identity{type="cluster_local"}) by () / (2^16-256)) > 0.8
+(sum(cilium_identity{type="node_local"}) by (pod) / (2^16-1)) > 0.8
+(sum(container_memory_working_set_bytes{name!=""}) BY (instance, name) / sum(container_spec_memory_limit_bytes > 0) BY (instance, name) * 100) < 20
+(sum(container_memory_working_set_bytes{name!=""}) BY (instance, name) / sum(container_spec_memory_limit_bytes > 0) BY (instance, name) * 100) > 80
+(sum(phpfpm_processes_total{state="active"}) by (instance) * 100) / sum(phpfpm_processes_total) by (instance) > 80
+(sum(rate(container_cpu_usage_seconds_total{container!=""}[5m])) by (pod, container) / sum(container_spec_cpu_quota{container!=""}/container_spec_cpu_period{container!=""}) by (pod, container) * 100) < 20 and sum(container_spec_cpu_quota{container!=""}/container_spec_cpu_period{container!=""}) by (pod, container) > 0
+(sum(rate(container_cpu_usage_seconds_total{container!=""}[5m])) by (pod, container) / sum(container_spec_cpu_quota{container!=""}/container_spec_cpu_period{container!=""}) by (pod, container) * 100) > 80 and sum(container_spec_cpu_quota{container!=""}/container_spec_cpu_period{container!=""}) by (pod, container) > 0
+(sum(rate(rabbitmq_connections_closed_total[5m])) + sum(rate(rabbitmq_connections_opened_total[5m]))) / sum(rabbitmq_connections) > 0.1 and sum(rabbitmq_connections) >= 100
+(sum(rate(rest_client_requests_total{code=~"(4|5).."}[1m])) by (instance, job) / sum(rate(rest_client_requests_total[1m])) by (instance, job)) * 100 > 1 and sum(rate(rest_client_requests_total[1m])) by (instance, job) > 0
+(time() - cortex_bucket_stores_blocks_last_successful_sync_timestamp_seconds{component="store-gateway"} > 1800) and cortex_bucket_stores_blocks_last_successful_sync_timestamp_seconds{component="store-gateway"} > 0
+(time() - cortex_compactor_block_cleanup_last_successful_run_timestamp_seconds > 21600) and cortex_compactor_block_cleanup_last_successful_run_timestamp_seconds > 0
+(time() - cortex_compactor_last_successful_run_timestamp_seconds > 86400) and (cortex_compactor_last_successful_run_timestamp_seconds > 0)
+(time() - cortex_compactor_last_successful_run_timestamp_seconds > 86400) and cortex_compactor_last_successful_run_timestamp_seconds > 0
+(time() - cortex_ingester_oldest_unshipped_block_timestamp_seconds > 3600) and (cortex_ingester_oldest_unshipped_block_timestamp_seconds > 0)
+(time() - cortex_ingester_shipper_last_successful_upload_timestamp_seconds > 4 * 3600) and (cortex_ingester_shipper_last_successful_upload_timestamp_seconds > 0) and (rate(cortex_ingester_ingested_samples_total[5m]) > 0)
+(time() - max by (job) (max_over_time(thanos_objstore_bucket_last_successful_upload_time{job=~".*thanos-compact.*"}[24h]))) / 60 / 60 > 24
+(time() - systemd_timer_last_trigger_seconds) / 3600 > 24 and systemd_timer_last_trigger_seconds > 0
+(time() - thanos_objstore_bucket_last_successful_upload_time{component="compactor"} > 86400) and thanos_objstore_bucket_last_successful_upload_time{component="compactor"} > 0
+(time() - thanos_objstore_bucket_last_successful_upload_time{job=~".+/compactor.*"} > 86400) and (thanos_objstore_bucket_last_successful_upload_time{job=~".+/compactor.*"} > 0)
+(time() - vmware_vm_snapshot_timestamp_seconds) / (60 * 60 * 24) >= 7
+(up{job=~".*thanos-receive.*"} - 1) + on (job, instance) (sum by (job, instance) (increase(thanos_shipper_uploads_total{job=~".*thanos-receive.*"}[3h])) == 0)
+0 <= round((last_over_time(probe_ssl_earliest_cert_expiry[10m]) - time()) / 86400, 0.1) < 3
+1 - (avg without (cpu) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) > .80
+100 * (sum by (instance, job) (rate(cortex_ruler_write_requests_failed_total[5m])) / sum by (instance, job) (rate(cortex_ruler_write_requests_total[5m]))) > 1 and sum by (instance, job) (rate(cortex_ruler_write_requests_total[5m])) > 0
+100 * (sum without (database, user) (pgbouncer_pools_server_active_connections + pgbouncer_pools_server_idle_connections + pgbouncer_pools_server_used_connections) / clamp_min(pgbouncer_config_max_user_connections,1)) > 80
+100 * (sum without (database, user) (pgbouncer_pools_server_active_connections + pgbouncer_pools_server_idle_connections + pgbouncer_pools_server_used_connections) / clamp_min(pgbouncer_config_max_user_connections,1)) > 90
+100 * hadoop_namenode_capacityremaining / clamp_min(hadoop_namenode_capacitytotal, 1) < 20
+100 * hadoop_resourcemanager_allocatedmb / clamp_min(hadoop_resourcemanager_availablemb + hadoop_resourcemanager_allocatedmb, 1) > 80
+100 * sum by (instance, job) (rate(cortex_prometheus_rule_group_iterations_missed_total[5m])) / sum by (instance, job) (rate(cortex_prometheus_rule_group_iterations_total[5m])) > 5 and sum by (instance, job) (rate(cortex_prometheus_rule_group_iterations_total[5m])) > 0
+100 * sum by (instance, job) (rate(cortex_ruler_queries_failed_total[5m])) / sum by (instance, job) (rate(cortex_ruler_queries_total[5m])) > 1 and sum by (instance, job) (rate(cortex_ruler_queries_total[5m])) > 0
+100 * sum by (instance, job) (rate(cortex_ruler_write_requests_failed_total[5m])) / sum by (instance, job) (rate(cortex_ruler_write_requests_total[5m])) > 1 and sum by (instance, job) (rate(cortex_ruler_write_requests_total[5m])) > 0
+100 * sum by (instance, rule_group) (rate(cortex_prometheus_rule_group_iterations_missed_total[5m])) / sum by (instance, rule_group) (rate(cortex_prometheus_rule_group_iterations_total[5m])) > 1 and sum by (instance, rule_group) (rate(cortex_prometheus_rule_group_iterations_total[5m])) > 0
+100 * sum by (job) (increase(tempo_backend_scheduler_jobs_failed_total[5m])) / sum by (job) (increase(tempo_backend_scheduler_jobs_created_total[5m])) > 5 and sum by (job) (increase(tempo_backend_scheduler_jobs_created_total[5m])) > 0
+100 * sum by (job) (rate(tempo_distributor_produce_failures_total{reason!="cancelled-before-producing"}[5m])) / sum by (job) (rate(tempo_distributor_produce_records_total[5m])) > 0.1 and sum by (job) (rate(tempo_distributor_produce_records_total[5m])) > 0
+100 * sum by (job) (rate(tempo_metrics_generator_processor_service_graphs_dropped_spans_total[5m])) / sum by (job) (rate(tempo_metrics_generator_spans_received_total[5m])) > 0.5 and sum by (job) (rate(tempo_metrics_generator_spans_received_total[5m])) > 0
+100 * sum by (job, route) (rate(cortex_request_duration_seconds_count{status_code=~"5..", route!="ready"}[5m])) / sum by (job, route) (rate(cortex_request_duration_seconds_count{route!="ready"}[5m])) > 1 and sum by (job, route) (rate(cortex_request_duration_seconds_count{route!="ready"}[5m])) > 0
+100 * sum by (job, route) (rate(cortex_request_duration_seconds_count{status_code=~"5..", route!~"ready|debug_pprof"}[5m])) / sum by (job, route) (rate(cortex_request_duration_seconds_count{route!~"ready|debug_pprof"}[5m])) > 1 and sum by (job, route) (rate(cortex_request_duration_seconds_count{route!~"ready|debug_pprof"}[5m])) > 0
+100 * sum by (name, job) (rate(tempo_memcache_request_duration_seconds_count{status_code="500"}[5m])) / sum by (name, job) (rate(tempo_memcache_request_duration_seconds_count[5m])) > 20 and sum by (name, job) (rate(tempo_memcache_request_duration_seconds_count[5m])) > 0
+100 * sum(rate(http_server_request_duration_seconds_count{http_route="/api/services",http_response_status_code=~"5.."}[1m])) by (instance, job, namespace) / sum(rate(http_server_request_duration_seconds_count{http_route="/api/services"}[1m])) by (instance, job, namespace) > 1 and sum(rate(http_server_request_duration_seconds_count{http_route="/api/services"}[1m])) by (instance, job, namespace) > 0
+100 * sum(rate(http_server_request_duration_seconds_count{http_route="/api/traces",http_response_status_code=~"5.."}[1m])) by (instance, job, namespace) / sum(rate(http_server_request_duration_seconds_count{http_route="/api/traces"}[1m])) by (instance, job, namespace) > 1 and sum(rate(http_server_request_duration_seconds_count{http_route="/api/traces"}[1m])) by (instance, job, namespace) > 0
+100 * sum(rate(jaeger_agent_http_server_errors_total[1m])) by (instance, job, namespace) / sum(rate(jaeger_agent_http_server_total[1m])) by (instance, job, namespace) > 1 and sum(rate(jaeger_agent_http_server_total[1m])) by (instance, job, namespace) > 0
+100 * sum(rate(jaeger_agent_reporter_batches_failures_total[1m])) by (instance, job, namespace) / sum(rate(jaeger_agent_reporter_batches_submitted_total[1m])) by (instance, job, namespace) > 1 and sum(rate(jaeger_agent_reporter_batches_submitted_total[1m])) by (instance, job, namespace) > 0
+100 * sum(rate(jaeger_cassandra_errors_total[1m])) by (instance, job, namespace) / sum(rate(jaeger_cassandra_attempts_total[1m])) by (instance, job, namespace) > 1 and sum(rate(jaeger_cassandra_attempts_total[1m])) by (instance, job, namespace) > 0
+100 * sum(rate(jaeger_cassandra_read_errors_total[1m])) by (instance, job, namespace) / sum(rate(jaeger_cassandra_read_attempts_total[1m])) by (instance, job, namespace) > 1 and sum(rate(jaeger_cassandra_read_attempts_total[1m])) by (instance, job, namespace) > 0
+100 * sum(rate(jaeger_client_jaeger_rpc_http_requests{status_code=~"4xx|5xx"}[1m])) by (instance, job, namespace) / sum(rate(jaeger_client_jaeger_rpc_http_requests[1m])) by (instance, job, namespace) > 1 and sum(rate(jaeger_client_jaeger_rpc_http_requests[1m])) by (instance, job, namespace) > 0
+100 * sum(rate(jaeger_collector_spans_dropped_total[1m])) by (instance, job, namespace) / sum(rate(jaeger_collector_spans_received_total[1m])) by (instance, job, namespace) > 1 and sum(rate(jaeger_collector_spans_received_total[1m])) by (instance, job, namespace) > 0
+100 * sum(rate(jaeger_query_requests_total{result="err"}[1m])) by (instance, job, namespace) / sum(rate(jaeger_query_requests_total[1m])) by (instance, job, namespace) > 1 and sum(rate(jaeger_query_requests_total[1m])) by (instance, job, namespace) > 0
+100 * sum(rate(jaeger_reporter_spans{result=~"dropped|err"}[1m])) by (instance, job, namespace) / sum(rate(jaeger_reporter_spans[1m])) by (instance, job, namespace) > 1 and sum(rate(jaeger_reporter_spans[1m])) by (instance, job, namespace) > 0
+100 * sum(rate(jaeger_sampler_queries{result="err"}[1m])) by (instance, job, namespace) / sum(rate(jaeger_sampler_queries[1m])) by (instance, job, namespace) > 1 and sum(rate(jaeger_sampler_queries[1m])) by (instance, job, namespace) > 0
+100 * sum(rate(jaeger_storage_requests_total{result="err"}[1m])) by (instance, job, namespace, operation) / sum(rate(jaeger_storage_requests_total[1m])) by (instance, job, namespace, operation) > 1 and sum(rate(jaeger_storage_requests_total[1m])) by (instance, job, namespace, operation) > 0
+100 * sum(rate(jaeger_throttler_updates{result="err"}[1m])) by (instance, job, namespace) / sum(rate(jaeger_throttler_updates[1m])) by (instance, job, namespace) > 1 and sum(rate(jaeger_throttler_updates[1m])) by (instance, job, namespace) > 0
+100 * sum(rate(loki_request_duration_seconds_count{status_code=~"5.."}[1m])) by (namespace, job, route) / sum(rate(loki_request_duration_seconds_count[1m])) by (namespace, job, route) > 10 and sum(rate(loki_request_duration_seconds_count[1m])) by (namespace, job, route) > 0
+100 * sum(rate(promtail_request_duration_seconds_count{status_code=~"5..|failed"}[1m])) by (namespace, job, route, instance) / sum(rate(promtail_request_duration_seconds_count[1m])) by (namespace, job, route, instance) > 10 and sum(rate(promtail_request_duration_seconds_count[1m])) by (namespace, job, route, instance) > 0
+100 - ((windows_memory_physical_free_bytes / windows_memory_physical_total_bytes) * 100) > 90
+100 - (avg by (instance) (rate(windows_cpu_time_total{mode="idle"}[2m])) * 100) > 80
+100 - 100 * (windows_logical_disk_free_bytes / windows_logical_disk_size_bytes) > 80 and windows_logical_disk_size_bytes > 0
+100 / netdata_disk_space_GB_average * netdata_disk_space_GB_average{dimension=~"avail|cached"} < 20 and netdata_disk_space_GB_average > 0
+100 / netdata_system_ram_MiB_average * netdata_system_ram_MiB_average{dimension=~"free|cached"} < 20 and netdata_system_ram_MiB_average > 0
+3 <= round((last_over_time(probe_ssl_earliest_cert_expiry[10m]) - time()) / 86400, 0.1) < 20
+ClickHouseAsyncMetrics_CGroupMemoryUsed / ClickHouseAsyncMetrics_CGroupMemoryTotal * 100 > 80 and ClickHouseAsyncMetrics_CGroupMemoryTotal > 0
+ClickHouseAsyncMetrics_CGroupMemoryUsed / ClickHouseAsyncMetrics_CGroupMemoryTotal * 100 > 90 and ClickHouseAsyncMetrics_CGroupMemoryTotal > 0
+ClickHouseAsyncMetrics_DiskAvailable_backups / (ClickHouseAsyncMetrics_DiskAvailable_backups + ClickHouseAsyncMetrics_DiskUsed_backups) * 100 < 20 and (ClickHouseAsyncMetrics_DiskAvailable_backups + ClickHouseAsyncMetrics_DiskUsed_backups) > 0
+ClickHouseAsyncMetrics_DiskAvailable_default / (ClickHouseAsyncMetrics_DiskAvailable_default + ClickHouseAsyncMetrics_DiskUsed_default) * 100 < 10 and (ClickHouseAsyncMetrics_DiskAvailable_default + ClickHouseAsyncMetrics_DiskUsed_default) > 0
+ClickHouseAsyncMetrics_DiskAvailable_default / (ClickHouseAsyncMetrics_DiskAvailable_default + ClickHouseAsyncMetrics_DiskUsed_default) * 100 < 20 and (ClickHouseAsyncMetrics_DiskAvailable_default + ClickHouseAsyncMetrics_DiskUsed_default) > 0
+ClickHouseAsyncMetrics_MaxPartCountForPartition > 100
+ClickHouseAsyncMetrics_ReplicasMaxAbsoluteDelay > 300
+ClickHouseMetrics_InterserverConnection > 50
+ClickHouseMetrics_ReadonlyReplica > 0
+ClickHouseMetrics_TCPConnection > 400
+ClickHouseMetrics_ZooKeeperSession != 1
+absent(container_last_seen)
+absent(istio_build{component="pilot"})
+absent(up{job="alertmanager"})
+absent(up{job="cert-manager"})
+absent(up{job="nats"})
+absent(up{job="prometheus"})
+absent(up{job=~".*thanos-bucket-replicate.*"} == 1)
+absent(up{job=~".*thanos-compact.*"} == 1)
+absent(up{job=~".*thanos-query.*"} == 1)
+absent(up{job=~".*thanos-receive.*"} == 1)
+absent(up{job=~".*thanos-rule.*"} == 1)
+absent(up{job=~".*thanos-sidecar.*"} == 1)
+absent(up{job=~".*thanos-store.*"} == 1)
+alertmanager_config_last_reload_successful != 1
+amazonClientProvider_rateLimitDelayMil > 1000
+apache_up == 0
+apache_uptime_seconds_total / 60 < 1
+apcupsd_battery_charge_percent < 10
+apcupsd_battery_time_left_seconds < 900
+apcupsd_battery_time_on_seconds > 0
+apcupsd_internal_temperature_celsius >= 40
+apcupsd_ups_load_percent > 80
+apiserver_client_certificate_expiration_seconds_count{job="apiserver"} > 0 and histogram_quantile(0.01, sum by (job, le) (rate(apiserver_client_certificate_expiration_seconds_bucket{job="apiserver"}[5m]))) < 24*60*60
+apiserver_client_certificate_expiration_seconds_count{job="apiserver"} > 0 and histogram_quantile(0.01, sum by (job, le) (rate(apiserver_client_certificate_expiration_seconds_bucket{job="apiserver"}[5m]))) < 7*24*60*60
+argocd_app_info{health_status!~"Healthy|Progressing"} != 0
+argocd_app_info{sync_status!="Synced"} != 0
+argocd_cluster_connection_status < 1
+argocd_repo_pending_request_total > 50
+avg by (backend) (haproxy_backend_http_total_time_average_seconds) > 1
+avg by (datname) (pg_stat_activity_max_tx_duration{datname!~"template.*|postgres"}) > 2 * 60
+avg by (exported_namespace, namespace, name) (certmanager_certificate_expiration_timestamp_seconds - time()) < (21 * 24 * 3600)
+avg by (instance, proxy) (haproxy_backend_max_total_time_seconds) > 1
+avg by (job) (thanos_receive_config_last_reload_successful) != 1
+avg by (job, instance) (thanos_rule_config_last_reload_successful) != 1
+avg without (cpu) (rate(node_cpu_seconds_total{mode="iowait"}[5m])) > .10
+avg without (cpu) (rate(node_cpu_seconds_total{mode="steal"}[5m])) * 100 > 10
+avg(cassandra_table_tombstones_scanned{quantile="0.99"}) by (instance,cassandra_cluster,keyspace) > 100
+avg(mongodb_replset_member_optime_date{state="PRIMARY"}) - avg(mongodb_replset_member_optime_date{state="SECONDARY"}) > 10
+avg_over_time(probe_success{job="blackbox-exporter"}[30d]) * 100 < 99.9
+avg_over_time(speedtest_download[10m]) < 100
+avg_over_time(speedtest_upload[10m]) < 20
+avg_over_time(tempo_ingest_group_partition_lag_seconds{container="block-builder"}[6m]) > 200
+aws_applicationelb_target_response_time_average offset 10m > 2
+aws_applicationelb_unhealthy_host_count_average offset 10m > 0
+aws_ec2_cpuutilization_average offset 10m > 90
+aws_rds_cpuutilization_average offset 10m > 90
+aws_rds_database_connections_average offset 10m > 100
+aws_rds_free_storage_space_average offset 10m < 2000000000
+aws_sqs_approximate_age_of_oldest_message_maximum offset 10m > 3600
+aws_sqs_approximate_number_of_messages_visible_average offset 10m > 1000
+azurerm_api_ratelimit{type="reads"} < 100
+azurerm_api_ratelimit{type="writes"} < 50
+azurerm_stats_metric_collecttime_sum > 300
+blackbox_exporter_config_last_reload_successful != 1
+caddy_reverse_proxy_upstreams_healthy == 0
+cassandra_commit_log_pending_tasks > 15
+cassandra_endpoint_active < 1
+cassandra_stats{name="org:apache:cassandra:metrics:cache:keycache:hitrate:value"} < .85
+cassandra_stats{name="org:apache:cassandra:metrics:clientrequest:read:failures:oneminuterate"} > 0.05
+cassandra_stats{name="org:apache:cassandra:metrics:clientrequest:viewwrite:viewwritelatency:99thpercentile"} > 100000
+cassandra_stats{name="org:apache:cassandra:metrics:clientrequest:write:failures:oneminuterate"} > 0.05
+cassandra_stats{name="org:apache:cassandra:metrics:commitlog:pendingtasks:value"} > 15
+cassandra_stats{name="org:apache:cassandra:metrics:compaction:pendingtasks:value"} > 100
+cassandra_stats{name="org:apache:cassandra:metrics:table:tombstonescannedhistogram:99thpercentile"} > 1000
+cassandra_stats{name="org:apache:cassandra:metrics:threadpools:internal:antientropystage:currentlyblockedtasks:count"} > 0
+cassandra_stats{name="org:apache:cassandra:metrics:threadpools:internal:antientropystage:pendingtasks:value"} > 2
+cassandra_stats{name="org:apache:cassandra:metrics:threadpools:internal:compactionexecutor:currentlyblockedtasks:count"} > 0
+cassandra_stats{name="org:apache:cassandra:metrics:threadpools:internal:memtableflushwriter:currentlyblockedtasks:count"} > 0
+cassandra_table_estimated_pending_compactions > 100
+cassandra_thread_pool_blocked_tasks{pool="CompactionExecutor"} > 15
+cassandra_thread_pool_blocked_tasks{pool="MemtableFlushWriter"} > 15
+ceph_health_detail{name="MON_CLOCK_SKEW"} == 1
+ceph_health_detail{name="MON_DISK_LOW"} == 1
+ceph_health_detail{name="OSD_FULL"} == 1
+ceph_health_detail{name="OSD_NEARFULL"} == 1
+ceph_health_detail{name="PG_NOT_DEEP_SCRUBBED"} == 1
+ceph_health_detail{name="PG_NOT_SCRUBBED"} == 1
+ceph_health_detail{name="POOL_BACKFILLFULL"} == 1
+ceph_health_detail{name="POOL_FULL"} == 1
+ceph_health_detail{name="POOL_NEAR_FULL"} == 1
+ceph_health_detail{name="RECENT_CRASH"} == 1
+ceph_health_detail{name=~"MDS_DAMAGE|MDS_ALL_DOWN|FS_DEGRADED|FS_WITH_FAILED_MDS|MDS_HEALTH_READ_ONLY"} == 1
+ceph_health_status == 1
+ceph_health_status == 2
+ceph_healthcheck_slow_ops > 0
+ceph_osd_apply_latency_ms > 5000
+ceph_osd_up == 0
+ceph_osd_weight < 1
+ceph_pg_activating > 0
+ceph_pg_backfill_toofull > 0
+ceph_pg_down > 0
+ceph_pg_incomplete > 0
+ceph_pg_inconsistent > 0
+ceph_pg_total - ceph_pg_active > 0
+changes(cassandra_client_request_unavailable_exceptions_total{operation="read"}[1m]) > 0
+changes(cassandra_client_request_unavailable_exceptions_total{operation="write"}[1m]) > 0
+changes(cassandra_stats{name="org:apache:cassandra:metrics:clientrequest:read:unavailables:count"}[1m]) > 0
+changes(cassandra_stats{name="org:apache:cassandra:metrics:clientrequest:write:unavailables:count"}[1m]) > 0
+changes(cassandra_stats{name="org:apache:cassandra:metrics:storage:exceptions:count"}[1m]) > 1
+changes(cassandra_stats{name="org:apache:cassandra:metrics:storage:totalhints:count"}[1m]) > 3
+changes(cassandra_storage_exceptions_total[1m]) > 1
+changes(mgob_scheduler_backup_total{status="500"}[1h]) > 0
+changes(mongodb_rs_myState[10m]) > 0 and mongodb_rs_myState == 1
+changes(namedprocess_namegroup_oldest_start_time_seconds[5m]) > 0 and namedprocess_namegroup_num_procs > 0
+changes(node_uname_info[1h]) > 0
+changes(process_start_time_seconds{job=~".*loki.*"}[15m]) > 2
+changes(process_start_time_seconds{job=~"prometheus|pushgateway|alertmanager"}[15m]) > 2
+changes(redis_connected_slaves[1m]) > 1
+cilium_bpf_map_pressure{} > 0.9
+cloudflare_zone_pool_health_status == 0
+cloudwatch_exporter_scrape_duration_seconds > 300
+cloudwatch_exporter_scrape_error > 0
+cluster_node_gossip_health_score > 0
+consul_catalog_service_node_healthy == 0
+consul_health_node_status{status="critical"} == 1
+consul_raft_leader != 1
+consul_raft_peers < 3
+consul_up != 1
+container_health_state == 0
+cortex_compactor_last_successful_run_timestamp_seconds == 0
+cortex_prometheus_notifications_alertmanagers_discovered < 1
+cortex_ring_members{state="Unhealthy", name="ingester"} > 0
+cortex_ruler_config_last_reload_successful != 1
+cortex_runtime_config_last_reload_successful == 0
+cortex_tcp_connections / cortex_tcp_connections_limit * 100 > 80 and cortex_tcp_connections_limit > 0
+couchdb_erlang_memory_atom_used > 0.9 * couchdb_erlang_memory_atom
+couchdb_httpd_node_up == 0 or couchdb_httpd_up == 0
+couchdb_httpd_open_databases > 0.9 * 1000
+couchdb_httpd_open_os_files > 0.9 * 65535
+couchdb_httpd_request_time{metric="ArithmeticMean"} > 1000
+couchdb_httpd_request_time{metric="ArithmeticMean"} > 500
+couchdb_replicator_cluster_is_stable == 0
+couchdb_replicator_jobs{metric="pending"} > 10
+count by (collection, shard) (solr_collections_replica_state{state="active"}) < 1
+count by (instance) (alloy_build_info offset 2h) unless count by (instance) (alloy_build_info)
+count by (job) (rate(cortex_ingester_tsdb_wal_corruptions_total[5m]) > 0) > 1
+count without (instance, job) (redis_connected_slaves) - sum without (instance, job) (redis_connected_slaves) - 1 > 0
+count(bookie_SERVER_STATUS{} == 0) by (pod)
+count(ceph_mon_quorum_status == 0) <= (count(ceph_mon_metadata) - floor(count(ceph_mon_metadata) / 2 + 1))
+count(ceph_osd_up == 0) / count(ceph_osd_up) * 100 >= 10
+count(cilium_clustermesh_remote_cluster_readiness_status < 1) by (source_cluster, target_cluster) > 0
+count(cilium_kvstoremesh_remote_cluster_readiness_status < 1) by (source_cluster, target_cluster) > 0
+count(count by (git_version) (label_replace(kubernetes_build_info, "git_version", "$1", "git_version", "(v[0-9]*\.[0-9]*\.[0-9]*).*"))) > 1
+count(count by (job, sha256) (cortex_runtime_config_hash)) without(sha256) > 1
+count(count by (version) (gitlab_build_info)) > 1
+count(count(rabbitmq_build_info) by (rabbitmq_version)) > 1
+count(count_values("config_hash", alertmanager_config_hash)) > 1
+count(etcd_server_id) % 2 == 0
+count(redis_instance_info{role="master"}) > 1
+count(traefik_backend_server_up) by (backend) == 0
+count(traefik_service_server_up) by (service) == 0
+default_jenkins_builds_health_score < 1
+default_jenkins_builds_last_build_result_ordinal == 2
+default_jenkins_builds_last_build_tests_failing > 0
+delta(cassandra_stats{name="org:apache:cassandra:metrics:client:authfailure:count"}[1m]) > 5
+delta(cassandra_stats{name="org:apache:cassandra:metrics:connection:totaltimeouts:count"}[1m]) > 5
+delta(cortex_compactor_disk_out_of_space_errors_total[24h]) >= 1
+delta(flink_jobmanager_job_numRestarts[5m]) > 1
+delta(flink_jobmanager_job_numberOfFailedCheckpoints[10m]) > 1
+delta(flink_taskmanager_job_task_numRecordsIn[5m]) == 0 and flink_taskmanager_job_task_numRecordsIn > 0
+delta(kafka_burrow_partition_current_offset[1m]) < 0
+delta(redis_connected_slaves[1m]) < 0
+deployment_status == 4
+deriv(flink_taskmanager_Status_JVM_GarbageCollector_All_Time[5m]) > 100
+deriv(gitlab_ci_pipeline_failure_reasons[5m]) > 0.05
+deriv(go_goroutines[5m]) > 10
+deriv(go_memstats_heap_inuse_bytes[10m]) > 1e7
+digitalocean_account_active != 1
+digitalocean_database_status == 0
+digitalocean_droplet_up == 0
+digitalocean_floating_ipv4_active == 0
+digitalocean_incidents_total > 0
+digitalocean_kubernetes_cluster_up == 0
+digitalocean_loadbalancer_droplets == 0
+digitalocean_loadbalancer_status == 0
+ebpf_exporter_ebpf_program_attached == 0
+ebpf_exporter_enabled_configs == 0 or absent(ebpf_exporter_enabled_configs)
+elasticsearch_cluster_health_initializing_shards > 0
+elasticsearch_cluster_health_number_of_data_nodes < 3
+elasticsearch_cluster_health_number_of_nodes < 3
+elasticsearch_cluster_health_number_of_pending_tasks > 0
+elasticsearch_cluster_health_relocating_shards > 0
+elasticsearch_cluster_health_status{color="red"} == 1
+elasticsearch_cluster_health_status{color="yellow"} == 1
+elasticsearch_cluster_health_unassigned_shards > 0
+elasticsearch_filesystem_data_available_bytes / elasticsearch_filesystem_data_size_bytes * 100 < 10 and elasticsearch_filesystem_data_size_bytes > 0
+elasticsearch_filesystem_data_available_bytes / elasticsearch_filesystem_data_size_bytes * 100 < 20 and elasticsearch_filesystem_data_size_bytes > 0
+elasticsearch_os_cpu_percent > 90 or elasticsearch_process_cpu_percent > 90
+envoy_cluster_circuit_breakers_default_cx_open == 1 or envoy_cluster_circuit_breakers_default_rq_open == 1 or envoy_cluster_circuit_breakers_default_cx_pool_open == 1
+envoy_cluster_membership_healthy / envoy_cluster_membership_total * 100 < 75 and envoy_cluster_membership_total > 0
+envoy_cluster_membership_healthy == 0
+envoy_cluster_outlier_detection_ejections_active > 0
+envoy_server_days_until_first_cert_expiring < 0
+envoy_server_days_until_first_cert_expiring < 7
+envoy_server_live != 1
+envoy_server_memory_allocated / envoy_server_memory_heap_size * 100 > 90 and envoy_server_memory_heap_size > 0
+erlang_vm_dist_node_state < 3
+etcd_server_has_leader == 0
+eth_rpc_status == 1
+eth_rpc_status == 2
+eth_rpc_status == 3
+eth_rpc_status == 4
+ethereum_chain_head_number - ignoring(deployment,shard) group_right(deployment,shard) deployment_head > 100
+flink_jobmanager_Status_JVM_Memory_Heap_Used / flink_jobmanager_Status_JVM_Memory_Heap_Max > 0.9 and flink_jobmanager_Status_JVM_Memory_Heap_Max > 0
+flink_jobmanager_job_lastCheckpointDuration / 1000 > 60
+flink_jobmanager_numRegisteredTaskManagers == 0
+flink_jobmanager_numRunningJobs == 0
+flink_jobmanager_taskSlotsAvailable == 0
+flink_taskmanager_Status_JVM_Memory_Heap_Used / flink_taskmanager_Status_JVM_Memory_Heap_Max > 0.9 and flink_taskmanager_Status_JVM_Memory_Heap_Max > 0
+flink_taskmanager_job_task_backPressuredTimeMsPerSecond > 500
+flink_taskmanager_job_task_isBackPressured == 1
+freeswitch_up == 0
+gitlab_database_connection_pool_busy / gitlab_database_connection_pool_size * 100 > 90 and gitlab_database_connection_pool_size > 0
+gitlab_database_connection_pool_dead > 0
+gitlab_database_connection_pool_waiting > 0
+gitlab_workhorse_http_in_flight_requests > 100
+gnatsd_connz_num_connections > 1000
+gnatsd_connz_pending_bytes > 100000
+gnatsd_varz_cpu > 80
+gnatsd_varz_jetstream_stats_memory / gnatsd_varz_jetstream_config_max_memory > 0.8 and gnatsd_varz_jetstream_config_max_memory > 0
+gnatsd_varz_jetstream_stats_storage / gnatsd_varz_jetstream_config_max_storage > 0.8 and gnatsd_varz_jetstream_config_max_storage > 0
+gnatsd_varz_leafnodes == 0
+gnatsd_varz_mem > 200 * 1024 * 1024
+gnatsd_varz_routes > 10
+gnatsd_varz_slow_consumers > 0
+gnatsd_varz_subscriptions > 1000
+go_gc_duration_seconds{quantile="1"} > 1
+go_goroutines > 1000
+go_memstats_heap_objects > 10000000
+go_memstats_stack_inuse_bytes > 1e9
+go_threads > 500
+go_threads{job=~".*(mimir|cortex).*"} > 5000
+go_threads{job=~".*(mimir|cortex).*"} > 8000
+gotk_resource_info{ready="False", customresource_kind="HelmRelease"} > 0
+gotk_resource_info{ready="False", customresource_kind="Kustomization"} > 0
+gotk_resource_info{ready="False", customresource_kind=~"GitRepository|HelmRepository|Bucket|OCIRepository"} > 0
+gotk_resource_info{ready="False", customresource_kind=~"ImagePolicy|ImageRepository|ImageUpdateAutomation"} > 0
+hadoop_hbase_region_count > 5000
+hadoop_hbase_region_server_heap_bytes / hadoop_hbase_region_server_max_heap_bytes > 0.8 and hadoop_hbase_region_server_max_heap_bytes > 0
+hadoop_hbase_write_requests_latency_seconds > 0.5
+hadoop_namenode_numdeaddatanodes > 0
+haproxy_backend_active_servers + haproxy_backend_backup_servers == 0
+haproxy_backend_up == 0
+haproxy_server_up == 0
+haproxy_up == 0
+histogram_quantile(0.95, sum(rate(argocd_app_reconcile_bucket[5m])) by (le)) > 60
+histogram_quantile(0.95, sum(rate(argocd_git_request_duration_seconds_bucket[5m])) by (le, repo)) > 30
+histogram_quantile(0.95, sum(rate(gitlab_ci_pipeline_creation_duration_seconds_bucket[5m])) by (le)) > 30
+histogram_quantile(0.95, sum(rate(gitlab_workhorse_http_request_duration_seconds_bucket[5m])) by (le)) > 10
+histogram_quantile(0.95, sum(rate(grpc_server_handling_seconds_bucket{job="gitaly",grpc_type="unary"}[5m])) by (le)) > 1
+histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) > 10
+histogram_quantile(0.95, sum(rate(litellm_request_total_latency_metric_bucket[5m])) by (le)) > 10
+histogram_quantile(0.95, sum(rate(sidekiq_jobs_completion_seconds_bucket[5m])) by (le, worker)) > 300
+histogram_quantile(0.95, sum(rate(sidekiq_jobs_queue_duration_seconds_bucket[5m])) by (le)) > 60
+histogram_quantile(0.99, rate(etcd_http_successful_duration_seconds_bucket[1m])) > 0.15
+histogram_quantile(0.99, sum by (job, route, le) (rate(cortex_request_duration_seconds_bucket{route!~"ready|debug_pprof"}[5m]))) > 2.5
+histogram_quantile(0.99, sum by (le, instance, job, namespace) (rate(jaeger_collector_save_latency_bucket[5m]))) > 0.5
+histogram_quantile(0.99, sum(rate(apiserver_request_duration_seconds_bucket{verb!~"(?:CONNECT|WATCHLIST|WATCH|PROXY)"} [10m])) WITHOUT (subresource)) > 1
+histogram_quantile(0.99, sum(rate(cilium_policy_implementation_delay_bucket[5m])) by (le, pod)) > 60
+histogram_quantile(0.99, sum(rate(coredns_dns_request_duration_seconds_bucket[5m])) without (instance, pod)) > 4
+histogram_quantile(0.99, sum(rate(coredns_forward_request_duration_seconds_bucket[5m])) without (pod, instance, rcode)) > 4
+histogram_quantile(0.99, sum(rate(etcd_disk_backend_commit_duration_seconds_bucket[5m])) by (instance, le)) > 0.25
+histogram_quantile(0.99, sum(rate(etcd_disk_wal_fsync_duration_seconds_bucket[5m])) by (instance, le)) > 0.5
+histogram_quantile(0.99, sum(rate(etcd_disk_wal_fsync_duration_seconds_bucket[5m])) by (instance, le)) > 1
+histogram_quantile(0.99, sum(rate(etcd_network_peer_round_trip_time_seconds_bucket[5m])) by (instance, le)) > 0.15
+histogram_quantile(0.99, sum(rate(grpc_server_handling_seconds_bucket{grpc_method!="Defragment", grpc_type="unary"}[1m])) by (grpc_service, grpc_method, le)) > 0.15
+histogram_quantile(0.99, sum(rate(http_server_request_duration_seconds_bucket{http_route="/api/traces"}[5m])) by (le, instance, job, namespace)) > 2
+histogram_quantile(0.99, sum(rate(http_server_request_duration_seconds_bucket{http_route="/api/traces/{traceID}"}[5m])) by (le, instance, job, namespace)) > 5
+histogram_quantile(0.99, sum(rate(istio_request_duration_milliseconds_bucket[1m])) by (destination_canonical_service, destination_workload_namespace, le)) > 1000
+histogram_quantile(0.99, sum(rate(jaeger_storage_latency_seconds_bucket[5m])) by (le, instance, job, namespace, operation)) > 1
+histogram_quantile(0.99, sum(rate(loki_request_duration_seconds_bucket{route!~"(?i).*tail.*|/schedulerpb.SchedulerForQuerier/QuerierLoop"}[5m])) by (namespace, job, route, le)) > 1
+histogram_quantile(0.99, sum(rate(nginx_http_request_duration_seconds_bucket[2m])) by (host, node, le)) > 3
+histogram_quantile(0.99, sum(rate(promtail_request_duration_seconds_bucket[5m])) by (namespace, job, route, le)) > 1
+increase(ClickHouseErrorMetric_ALL_REPLICAS_ARE_STALE[5m]) > 0 or increase(ClickHouseErrorMetric_ALL_REPLICAS_LOST[5m]) > 0
+increase(ClickHouseErrorMetric_AUTHENTICATION_FAILED[5m]) > 3
+increase(ClickHouseErrorMetric_NO_AVAILABLE_REPLICA[5m]) > 0
+increase(ClickHouseErrorMetric_RESOURCE_ACCESS_DENIED[5m]) > 3
+increase(ClickHouseErrorMetric_TOO_FEW_LIVE_REPLICAS[5m]) > 0
+increase(ClickHouseProfileEvents_DelayedInserts[5m]) > 10
+increase(ClickHouseProfileEvents_DistributedRejectedInserts[5m]) > 3
+increase(ClickHouseProfileEvents_RejectedInserts[1m]) > 2
+increase(ClickHouseProfileEvents_ReplicatedDataLoss[1m]) > 0
+increase(ClickHouseProfileEvents_ZooKeeperHardwareExceptions[1m]) > 0
+increase(apache_duration_ms_total[5m]) / increase(apache_accesses_total[5m]) > 5000 and increase(apache_accesses_total[5m]) > 0
+increase(cassandra_client_request_failures_total{operation="read"}[1m]) > 5
+increase(cassandra_client_request_failures_total{operation="write"}[1m]) > 5
+increase(coredns_panics_total[1m]) > 0
+increase(cortex_alertmanager_state_initial_sync_completed_total{outcome="failed"}[1m]) > 0
+increase(cortex_compactor_blocks_marked_for_no_compaction_total[24h]) > 0
+increase(cortex_compactor_runs_failed_total{reason!="shutdown"}[2h]) > 1
+increase(couchdb_httpd_status_codes{code=~"4.."}[5m]) > 5
+increase(couchdb_replicator_changes_manager_deaths[5m]) > 0
+increase(couchdb_replicator_changes_queue_deaths[5m]) > 0
+increase(couchdb_replicator_changes_read_failures[5m]) > 5
+increase(couchdb_replicator_changes_reader_deaths[5m]) > 0
+increase(couchdb_replicator_connections{metric="owner_crashes"}[5m]) > 0
+increase(couchdb_replicator_connections{metric="worker_crashes"}[5m]) > 0
+increase(couchdb_replicator_failed_starts[5m]) > 0
+increase(couchdb_replicator_jobs{metric="crashes"}[5m]) > 0
+increase(couchdb_server_couch_log{level=~"error|critical"}[5m]) > 5
+increase(digitalocean_errors_total[5m]) > 3
+increase(elasticsearch_breakers_tripped[5m]) > 0
+increase(elasticsearch_indices_indexing_index_total{es_data_node="true"}[10m]) < 1
+increase(envoy_cluster_health_check_failure[5m]) > 5
+increase(envoy_cluster_upstream_cx_connect_fail[5m]) > 100
+increase(envoy_cluster_upstream_cx_none_healthy[5m]) > 3
+increase(envoy_http_downstream_rq_timeout[5m]) > 5
+increase(envoy_listener_downstream_cx_overflow[5m]) > 5
+increase(envoy_listener_downstream_global_cx_overflow[5m]) > 5
+increase(envoy_listener_ssl_connection_error[5m]) > 5
+increase(etcd_server_leader_changes_seen_total[10m]) > 2
+increase(etcd_server_proposals_failed_total[1h]) > 5
+increase(gitaly_authentications_total{status="denied"}[5m]) > 3
+increase(gitaly_circuit_breaker_transitions_total{to_state="open"}[5m]) > 0
+increase(gitlab_ci_runner_authentication_failure_total[5m]) > 5
+increase(gnatsd_varz_jetstream_stats_api_errors[5m]) > 5
+increase(hadoop_mapreduce_task_failures_total[1h]) > 100
+increase(hadoop_yarn_container_allocation_failures_total[1h]) > 10
+increase(haproxy_server_check_failures_total[1m]) > 2
+increase(jenkins_runs_failure_total[1h]) > 100
+increase(memcached_connections_rejected_total[5m]) > 3
+increase(memcached_item_too_large_total[5m]) > 3
+increase(mongodb_metrics_cursor_timed_out_total[1m]) > 100
+increase(mongodb_ss_metrics_cursor_timedOut[1m]) > 100
+increase(mysql_global_status_slow_queries[1m]) > 0
+increase(netdata_smartd_log_offline_uncorrectable_sector_count_sectors_average[2m]) > 0
+increase(netdata_smartd_log_reallocated_sectors_count_sectors_average[1m]) > 0
+increase(nginx_metric_errors_total[5m]) > 0
+increase(node_systemd_service_restart_total[5m]) > 2
+increase(opensearch_circuitbreaker_tripped_count[5m]) > 0
+increase(pg_stat_database_deadlocks{datname!~"template.*|postgres",datid!="0"}[1m]) > 5
+increase(pg_stat_database_xact_commit{datname!~"template.*|postgres",datid!="0"}[5m]) < 5
+increase(prometheus_rule_evaluation_failures_total[3m]) > 0
+increase(prometheus_rule_group_iterations_missed_total[5m]) > 0
+increase(prometheus_sd_refresh_failures_total[10m]) > 0
+increase(prometheus_target_scrapes_exceeded_sample_limit_total[10m]) > 10
+increase(prometheus_target_scrapes_sample_duplicate_timestamp_total[5m]) > 3
+increase(prometheus_target_scrapes_sample_out_of_order_total[5m]) > 3
+increase(prometheus_target_sync_failed_total[10m]) > 0
+increase(prometheus_template_text_expansion_failures_total[3m]) > 0
+increase(prometheus_tsdb_checkpoint_creations_failed_total[1m]) > 0
+increase(prometheus_tsdb_checkpoint_deletions_failed_total[1m]) > 0
+increase(prometheus_tsdb_compactions_failed_total[10m]) > 0
+increase(prometheus_tsdb_head_truncations_failed_total[1m]) > 0
+increase(prometheus_tsdb_reloads_failures_total[10m]) > 0
+increase(prometheus_tsdb_wal_corruptions_total[1m]) > 0
+increase(prometheus_tsdb_wal_truncations_failed_total[1m]) > 0
+increase(python_gc_objects_uncollectable_total[5m]) > 1
+increase(rabbitmq_channel_messages_unroutable_returned_total[5m]) > 3 or increase(rabbitmq_channel_messages_unroutable_dropped_total[5m]) > 3
+increase(redis_rejected_connections_total[1m]) > 5
+increase(solr_metrics_core_errors_total{category="QUERY"}[1m]) > 1
+increase(solr_metrics_core_errors_total{category="REPLICATION"}[1m]) > 1
+increase(solr_metrics_core_update_handler_errors_total[1m]) > 1
+increase(stackdriver_monitoring_scrape_errors_total[15m]) > 5
+increase(systemd_service_restart_total[1h]) > 5
+increase(systemd_socket_refused_connections_total[5m]) > 3
+ipmi_chassis_cooling_fault_state == 0
+ipmi_chassis_drive_fault_state == 0
+ipmi_chassis_power_state == 0
+ipmi_current_state == 1
+ipmi_current_state == 2
+ipmi_fan_speed_rpm == 0
+ipmi_fan_speed_state == 1
+ipmi_fan_speed_state == 2
+ipmi_power_state == 1
+ipmi_power_state == 2
+ipmi_sel_free_space_bytes < 512
+ipmi_sensor_state == 2
+ipmi_temperature_state == 1
+ipmi_temperature_state == 2
+ipmi_up == 0
+ipmi_voltage_state == 1
+ipmi_voltage_state == 2
+jaeger_collector_queue_length > 1000
+jenkins_health_check_score < 1
+jenkins_node_offline_value > 0
+jenkins_node_online_value == 0
+junos_up == 0
+jvm_memory_objects_pending_finalization > 1000
+jvm_threads_current > 300
+jvm_threads_deadlocked > 0
+jvm_threads_state{state="BLOCKED"} > 50
+kafka_burrow_topic_partition_offset - on(partition, cluster, topic) group_right() kafka_burrow_partition_current_offset >= (kafka_burrow_topic_partition_offset offset 15m - on(partition, cluster, topic) group_right() kafka_burrow_partition_current_offset offset 15m) AND kafka_burrow_topic_partition_offset - on(partition, cluster, topic) group_right() kafka_burrow_partition_current_offset > 0
+kube_cronjob_spec_suspend != 0
+kube_daemonset_status_number_misscheduled > 0
+kube_deployment_spec_replicas != kube_deployment_status_replicas_available
+kube_deployment_status_condition{condition="Progressing",status="false"} != 0
+kube_deployment_status_observed_generation != kube_deployment_metadata_generation
+kube_horizontalpodautoscaler_status_condition{status="false", condition="ScalingActive"} == 1
+kube_job_spec_completions - kube_job_status_succeeded - kube_job_status_failed > 0
+kube_job_status_active == 0 and kube_job_status_failed == 0 and kube_job_status_succeeded == 0 and (time() - kube_job_status_start_time) > 600
+kube_job_status_failed > 0
+kube_job_status_start_time > 0 and absent(kube_job_status_completion_time) and (time() - kube_job_status_start_time) > 3600
+kube_node_spec_taint{key="node.kubernetes.io/unschedulable"} == 1
+kube_node_status_condition{condition="DiskPressure",status="true"} == 1
+kube_node_status_condition{condition="MemoryPressure",status="true"} == 1
+kube_node_status_condition{condition="NetworkUnavailable",status="true"} == 1
+kube_node_status_condition{condition="Ready",status="true"} == 0
+kube_persistentvolume_status_phase{phase=~"Failed|Pending"} > 0
+kube_persistentvolumeclaim_status_phase{phase="Pending"} == 1
+kube_pod_container_status_waiting_reason{reason!="CrashLoopBackOff"} > 0
+kube_poddisruptionbudget_status_desired_healthy - kube_poddisruptionbudget_status_current_healthy > 0
+kube_replicaset_spec_replicas != kube_replicaset_status_ready_replicas
+kube_resourcequota{type="used"} / ignoring(type) (kube_resourcequota{type="hard"} > 0) > 1
+kube_statefulset_replicas > 0 and kube_statefulset_replicas != kube_statefulset_status_replicas_ready and changes(kube_statefulset_status_replicas_updated[10m]) == 0
+kube_statefulset_status_observed_generation != kube_statefulset_metadata_generation
+kube_statefulset_status_replicas_ready != kube_statefulset_status_replicas
+kubelet_volume_stats_available_bytes / kubelet_volume_stats_capacity_bytes * 100 < 10 and kubelet_volume_stats_capacity_bytes > 0
+kubelet_volume_stats_inodes_free / kubelet_volume_stats_inodes < 0.03 and kubelet_volume_stats_inodes > 0
+label_replace(count by(__name__) ({__name__=~".+"}), "name", "$1", "__name__", "(.+)") > 10000
+lvm_lv_used_percent{segtype="thin-pool"} > 90
+lvm_vg_missing_pv_count > 0
+max by (base_url) (solr_metrics_jvm_threads{item=~"blocked|deadlock"}) > 0
+max by (collection, shard) (solr_collections_shard_leader) < 1
+max by (job) (cortex_ingester_tsdb_head_max_timestamp_seconds - time() and cortex_ingester_tsdb_head_max_timestamp_seconds > 0) > 3600
+max by (job) (memberlist_client_cluster_members_count{job=~".*(mimir|cortex).*"}) > (sum by (job) (up{job=~".*(mimir|cortex).*"}) + 10)
+max by (job) (tempo_partition_ring_partitions{name="livestore-partitions", state=~"Active|Inactive"}) > count(count by (partition, job) (tempo_live_store_partition_owned)) by (job)
+max by (job) (tempo_partition_ring_partitions{name="livestore-partitions", state=~"Active|Inactive"}) > sum by (job) (tempo_block_builder_owned_partitions)
+max by (job) (tempo_ring_members{state="Unhealthy", name="distributor"}) > 0
+max by (job) (tempo_ring_members{state="Unhealthy", name="live-store"}) > 0
+max by (job) (tempo_ring_members{state="Unhealthy", name="metrics-generator"}) > 0
+max by (name, exported_namespace, namespace, condition) (certmanager_certificate_ready_status{condition!="True"} == 1)
+max by (name, job) (sum by (name, job, instance) (cortex_ring_members)) != min by (name, job) (sum by (name, job, instance) (cortex_ring_members))
+max by (tenant) (tempodb_blocklist_tenant_index_age_seconds) > 600
+max without (revision) (kube_statefulset_status_current_revision unless kube_statefulset_status_update_revision) * (kube_statefulset_replicas != kube_statefulset_status_replicas_updated)
+max without(job,name)(100*hadoop_nodemanager_allocatedgb/clamp_min(hadoop_nodemanager_availablegb+hadoop_nodemanager_allocatedgb,1)) > 80
+max without(job,name)(100*hadoop_nodemanager_nodecpuutilization) > 80
+max without(job,name)(100*hadoop_resourcemanager_allocatedvcores/clamp_min(hadoop_resourcemanager_availablevcores+hadoop_resourcemanager_allocatedvcores,1)) > 80
+max without(job,name)(hadoop_namenode_missingblocks) > 0
+max without(job,name)(hadoop_namenode_volumefailurestotal) > 0
+max(quantile_over_time(0.5, kube_horizontalpodautoscaler_status_desired_replicas[1d]) == kube_horizontalpodautoscaler_spec_min_replicas) by (horizontalpodautoscaler) > 3
+max(sidekiq_queue_latency_seconds) > 60
+max_over_time(kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"}[5m]) >= 1
+max_over_time(mysql_global_status_prepared_stmt_count[1m]) / mysql_global_variables_max_prepared_stmt_count * 100 > 80 and mysql_global_variables_max_prepared_stmt_count > 0
+max_over_time(mysql_global_status_threads_connected[1m]) / mysql_global_variables_max_connections * 100 > 80 and mysql_global_variables_max_connections > 0
+max_over_time(mysql_global_status_threads_running[1m]) / mysql_global_variables_max_connections * 100 > 60 and mysql_global_variables_max_connections > 0
+max_over_time(smartctl_device_temperature{temperature_type="current"} [10m]) >= on(device, instance) (smartctl_device_temperature{temperature_type="drive_trip"} * .80)
+max_over_time(smartctl_device_temperature{temperature_type="current"} [10m]) >= on(device, instance) smartctl_device_temperature{temperature_type="drive_trip"}
+meilisearch_http_response_time_seconds > 0.5
+meilisearch_index_docs_count == 0
+memcached_up == 0
+metrics_executor_diskUsed_bytes > 1e9
+metrics_executor_failedTasks_total / metrics_executor_totalTasks_total > 0.1 and metrics_executor_totalTasks_total > 0
+metrics_executor_failedTasks_total > 0 and metrics_executor_completedTasks_total == 0
+metrics_executor_totalGCTime_seconds_total / metrics_executor_totalDuration > 0.1 and metrics_executor_totalDuration > 0
+metrics_master_aliveWorkers_Value == 0
+metrics_master_waitingApps_Value > 10
+metrics_worker_coresFree_Value == 0
+metrics_worker_memFree_MB_Value == 0
+min by (base_url) (solr_metrics_core_fs_bytes{item="usableSpace"}) / max by (base_url) (solr_metrics_core_fs_bytes{item="totalSpace"}) <= 0.1
+min by (base_url) (solr_metrics_core_fs_bytes{item="usableSpace"}) / max by (base_url) (solr_metrics_core_fs_bytes{item="totalSpace"}) <= 0.2
+min by (instance, sans) (last_over_time(traefik_tls_certs_not_after[5m]) - time()) / 86400 < 14
+min by (instance, sans) (last_over_time(traefik_tls_certs_not_after[5m]) - time()) / 86400 < 7
+min by (job) (cortex_ring_members{state="Unhealthy", name="ingester"}) > 0
+min by (job) (memberlist_client_cluster_members_count{job=~".*(mimir|cortex).*"}) < (sum by (job) (up{job=~".*(mimir|cortex).*"}) * 0.5)
+min by (job, partition) (tempo_ingest_group_partition_lag_seconds{container="live-store"}) > 300
+min by (user, job) (time() - cortex_bucket_index_last_successful_update_timestamp_seconds) > 2100
+min without (alertmanager) (rate(prometheus_notifications_errors_total[5m]) / rate(prometheus_notifications_sent_total[5m])) * 100 > 3
+min(kafka_topic_partition_in_sync_replica) by (topic) < 3
+min(kube_deployment_status_replicas_available{deployment="istio-ingressgateway", namespace="istio-system"}) without (instance, pod) < 2
+min(time() - (loki_boltdb_shipper_compact_tables_operation_last_successful_run_timestamp_seconds > 0)) by (cluster, namespace) > 10800 or max(max_over_time(loki_boltdb_shipper_compact_tables_operation_last_successful_run_timestamp_seconds[3h])) by (cluster, namespace) == 0
+min(vault_autopilot_healthy) by (instance) == 0
+min_over_time(node_memory_MemFree_bytes[1w]) > node_memory_MemTotal_bytes * .8
+min_over_time(prometheus_notifications_queue_length[10m]) > 0
+minio_cluster_capacity_usable_free_bytes / minio_cluster_capacity_usable_total_bytes * 100 < 10 and minio_cluster_capacity_usable_total_bytes > 0
+minio_cluster_drive_offline_total > 0
+minio_cluster_health_erasure_set_status < 1
+minio_cluster_kms_online == 0
+minio_cluster_nodes_offline_total > 0
+mongodb_connections{state="current"} / (mongodb_connections{state="current"} + mongodb_connections{state="available"}) * 100 > 80 and (mongodb_connections{state="current"} + mongodb_connections{state="available"}) > 0
+mongodb_metrics_cursor_open{state="total_open"} > 10000
+mongodb_replset_member_state == 10
+mongodb_replset_member_state == 3
+mongodb_replset_member_state == 6
+mongodb_replset_member_state == 8
+mongodb_replset_member_state == 9
+mongodb_rs_members_health == 0
+mongodb_ss_connections{conn_type="current"} / (mongodb_ss_connections{conn_type="current"} + mongodb_ss_connections{conn_type="available"}) * 100 > 80 and (mongodb_ss_connections{conn_type="current"} + mongodb_ss_connections{conn_type="available"}) > 0
+mongodb_ss_metrics_cursor_open{csr_type="total"} > 10 * 1000
+mongodb_ss_uptime < 300
+mongodb_ss_wt_concurrentTransactions_available{txn_rw_type="read"} < 50
+mongodb_ss_wt_concurrentTransactions_available{txn_rw_type="write"} < 50
+mongodb_up == 0
+mssql_deadlocks > 5
+mssql_up == 0
+mysql_global_status_innodb_num_open_files / mysql_global_variables_open_files_limit * 100 > 75 and mysql_global_variables_open_files_limit > 0
+mysql_global_status_uptime < 60
+mysql_global_status_wsrep_local_state != 4 and mysql_global_variables_wsrep_desync == 0
+mysql_global_status_wsrep_local_state == 2 and mysql_global_status_wsrep_local_recv_queue > 100
+mysql_global_status_wsrep_ready != 1
+mysql_global_variables_innodb_force_recovery != 0
+mysql_heartbeat_now_timestamp_seconds - mysql_heartbeat_stored_timestamp_seconds > 30
+mysql_info_schema_innodb_metrics_transaction_trx_rseg_history_len > 50000
+mysql_up == 0
+namedprocess_namegroup_memory_bytes{memtype="resident"} > 4e+09
+namedprocess_namegroup_memory_bytes{memtype="swapped"} > 512e+06
+namedprocess_namegroup_num_procs == 0
+namedprocess_namegroup_states{state="Zombie"} > 5
+namedprocess_namegroup_worst_fd_ratio > 0.8
+namedprocess_namegroup_worst_fd_ratio > 0.95
+netdata_cpu_cpu_percentage_average{dimension="idle"} < 20
+netdata_cpu_cpu_percentage_average{dimension="steal"} > 10
+netdata_md_mismatch_cnt_unsynchronized_blocks_average > 1024
+netdata_smartd_log_current_pending_sector_count_sectors_average > 0
+node_filefd_allocated * 100 / node_filefd_maximum > 70
+node_filefd_allocated * 100 / node_filefd_maximum > 90
+node_filesystem_device_error{fstype!~"^(fuse.*|tmpfs|cifs|nfs)"} == 1
+node_hwmon_temp_celsius > node_hwmon_temp_max_celsius
+node_load1 / count without (cpu, mode) (node_cpu_seconds_total{mode="idle"}) > 2
+node_textfile_scrape_error == 1
+node_zfs_zpool_state{state!="online"} > 0
+nomad_nomad_blocked_evals_total_blocked > 0
+nomad_nomad_job_summary_failed > 0
+nomad_nomad_job_summary_lost > 0
+nomad_nomad_job_summary_queued > 0
+openebs_used_pool_capacity_percent > 80
+opensearch_cluster_pending_tasks_number > 0
+opensearch_cluster_shards_active_percent < 100.0
+opensearch_cluster_status == 1
+opensearch_cluster_status == 2
+opensearch_indices_indexing_is_throttled_bool > 0
+opensearch_jvm_mem_heap_used_percent > 75
+openstack_cinder_agent_state{adminState="enabled"} == 0
+openstack_cinder_limits_volume_used_gb / openstack_cinder_limits_volume_max_gb > 0.9 and openstack_cinder_limits_volume_max_gb > 0
+openstack_cinder_pool_capacity_free_gb / openstack_cinder_pool_capacity_total_gb < 0.1 and openstack_cinder_pool_capacity_total_gb > 0
+openstack_cinder_volume_status_counter{status=~"error.*"} > 0
+openstack_loadbalancer_loadbalancer_status{operating_status!="ONLINE"} > 0
+openstack_neutron_agent_state{adminState="up"} == 0
+openstack_neutron_floating_ips_associated_not_active > 0
+openstack_neutron_network_ip_availabilities_used / openstack_neutron_network_ip_availabilities_total > 0.9 and openstack_neutron_network_ip_availabilities_total > 0
+openstack_neutron_ports_no_ips > 0
+openstack_neutron_routers_not_active > 0
+openstack_nova_agent_state{adminState="enabled"} == 0
+openstack_nova_limits_instances_used / openstack_nova_limits_instances_max > 0.9 and openstack_nova_limits_instances_max > 0
+openstack_nova_limits_memory_used / openstack_nova_limits_memory_max > 0.9 and openstack_nova_limits_memory_max > 0
+openstack_nova_limits_vcpus_used / openstack_nova_limits_vcpus_max > 0.9 and openstack_nova_limits_vcpus_max > 0
+openstack_nova_local_storage_used_bytes / openstack_nova_local_storage_available_bytes > 0.9 and openstack_nova_local_storage_available_bytes > 0
+openstack_nova_memory_used_bytes / openstack_nova_memory_available_bytes > 0.9 and openstack_nova_memory_available_bytes > 0
+openstack_nova_vcpus_used / openstack_nova_vcpus_available > 0.9 and openstack_nova_vcpus_available > 0
+openstack_placement_resource_usage / (openstack_placement_resource_total * openstack_placement_resource_allocation_ratio) > 0.9 and openstack_placement_resource_total > 0
+oracledb_resource_current_utilization{resource_name="processes"} / oracledb_resource_limit_value{resource_name="processes"} * 100 > 85 and oracledb_resource_limit_value{resource_name="processes"} > 0
+oracledb_resource_current_utilization{resource_name="sessions"} / oracledb_resource_limit_value{resource_name="sessions"} * 100 > 85 and oracledb_resource_limit_value{resource_name="sessions"} > 0
+oracledb_sessions_value{status="ACTIVE", type="USER"} > 200
+oracledb_tablespace_used_percent > 85
+oracledb_tablespace_used_percent > 95
+oracledb_up == 0
+oracledb_wait_time_user_io > 300
+pg_bloat_btree_bloat_pct > 80 and on (idxname) (pg_bloat_btree_real_size > 100000000)
+pg_bloat_table_bloat_pct > 80 and on (relname) (pg_bloat_table_real_size > 200000000)
+pg_exporter_last_scrape_error > 0
+pg_general_index_info_pg_relation_size{indexrelname=~".*ccnew.*"}
+pg_replication_is_replica and changes(pg_replication_is_replica[1m]) > 0
+pg_replication_lag_seconds > 5
+pg_up == 0
+pgbouncer_pools_client_maxwait_seconds > 15
+pgbouncer_pools_client_waiting_connections > 20
+pgbouncer_pools_server_active_connections > 200
+predict_linear(etcd_mvcc_db_total_size_in_bytes[4h], 4*60*60) > etcd_server_quota_backend_bytes
+predict_linear(kubelet_volume_stats_available_bytes[6h:5m], 4 * 24 * 3600) < 0
+predict_linear(kubelet_volume_stats_inodes_free[6h:5m], 4 * 24 * 3600) < 0
+predict_linear(netdata_disk_space_GB_average{dimension=~"avail|cached"}[3h], 24 * 3600) < 0
+predict_linear(node_filesystem_avail_bytes{fstype!~"^(fuse.*|tmpfs|cifs|nfs)"}[3h], 86400) <= 0 and node_filesystem_avail_bytes > 0 and node_filesystem_readonly == 0
+predict_linear(node_filesystem_files_free{fstype!~"^(fuse.*|tmpfs|cifs|nfs)"}[1h], 86400) <= 0 and node_filesystem_files_free > 0 and node_filesystem_readonly == 0
+predict_linear(rabbitmq_disk_space_available_bytes[24h], 24*3600) < rabbitmq_disk_space_available_limit_bytes
+probe_duration_seconds > 1
+probe_http_status_code <= 199 OR probe_http_status_code >= 400
+probe_success == 0
+process_memory_map_areas{job=~".*(ingester|cortex|mimir|store-gateway).*"} / process_memory_map_areas_limit{job=~".*(ingester|cortex|mimir|store-gateway).*"} * 100 > 80 and process_memory_map_areas_limit{job=~".*(ingester|cortex|mimir|store-gateway).*"} > 0
+process_open_fds / process_max_fds > 0.85 and process_max_fds > 0
+process_open_fds{job=~".*gitlab.*"} / process_max_fds * 100 > 80 and process_max_fds > 0
+process_resident_memory_bytes{job=~".*gitlab.*"} > 2e+9
+process_virtual_memory_bytes > 4e9
+prometheus_config_last_reload_successful != 1
+prometheus_engine_queries / prometheus_engine_queries_concurrent_max > 0.8
+prometheus_notifications_alertmanagers_discovered < 1
+prometheus_rule_group_last_duration_seconds > prometheus_rule_group_interval_seconds
+prometheus_sd_discovered_targets == 0
+prometheus_target_interval_length_seconds{quantile="0.9"} / on (interval, instance, job) prometheus_target_interval_length_seconds{quantile="0.5"} > 1.05
+promtail_file_bytes_total unless promtail_read_bytes_total
+puma_active_connections / puma_max_threads * 100 > 90 and puma_max_threads > 0
+puma_pool_capacity == 0
+puma_queued_connections > 5
+puma_running_workers < puma_workers
+pve_cluster_info{quorate="0"} == 1
+pve_cpu_usage_ratio * 100 > 90
+pve_disk_usage_bytes{id=~"storage/.*"} / pve_disk_size_bytes{id=~"storage/.*"} * 100 > 80 and pve_disk_size_bytes{id=~"storage/.*"} > 0
+pve_disk_usage_bytes{id=~"storage/.*"} / pve_disk_size_bytes{id=~"storage/.*"} * 100 > 95 and pve_disk_size_bytes{id=~"storage/.*"} > 0
+pve_memory_usage_bytes / pve_memory_size_bytes * 100 > 90 and pve_memory_size_bytes > 0
+pve_not_backed_up_total > 0
+pve_replication_failed_syncs > 0
+pve_up{id=~"(qemu|lxc)/.*"} == 0
+pve_up{id=~"node/.*"} == 0
+queue_ready_depth > 0
+rabbitmq_alarms_free_disk_space_watermark > 0
+rabbitmq_alarms_memory_used_watermark > 0
+rabbitmq_connections > 1000
+rabbitmq_node_mem_used / rabbitmq_node_mem_limit * 100 > 90 and rabbitmq_node_mem_limit > 0
+rabbitmq_partitions > 0
+rabbitmq_process_open_fds / rabbitmq_process_max_fds * 100 > 90 and rabbitmq_process_max_fds > 0
+rabbitmq_process_resident_memory_bytes / rabbitmq_resident_memory_limit_bytes * 100 > 90 and rabbitmq_resident_memory_limit_bytes > 0
+rabbitmq_queue_consumers < 1
+rabbitmq_queue_consumers == 0
+rabbitmq_queue_consumers{queue="my-queue"} > 1
+rabbitmq_queue_messages_ready{queue="my-queue"} > 1000
+rabbitmq_queue_messages{queue="my-dead-letter-queue"} > 10
+rabbitmq_up == 0
+rate(ClickHouseProfileEvents_NetworkSendBytes[1m]) > 100*1024*1024 or rate(ClickHouseProfileEvents_NetworkReceiveBytes[1m]) > 100*1024*1024
+rate(cortex_alertmanager_partial_state_merges_failed_total[5m]) > 0.05
+rate(cortex_alertmanager_ring_check_errors_total[5m]) > 0.05
+rate(cortex_alertmanager_state_persist_failed_total[15m]) > 0.05
+rate(cortex_alertmanager_state_replication_failed_total[5m]) > 0.05
+rate(cortex_alertmanager_sync_configs_failed_total[5m]) > 0.05
+rate(cortex_ingester_tsdb_checkpoint_creations_failed_total[5m]) > 0.05
+rate(cortex_ingester_tsdb_checkpoint_deletions_failed_total[5m]) > 0.05
+rate(cortex_ingester_tsdb_compactions_failed_total[5m]) > 0.05
+rate(cortex_ingester_tsdb_head_truncations_failed_total[5m]) > 0.05
+rate(cortex_ingester_tsdb_wal_corruptions_total[5m]) > 0
+rate(cortex_ingester_tsdb_wal_truncations_failed_total[5m]) > 0.05
+rate(cortex_ingester_tsdb_wal_writes_failed_total[1m]) > 0.05
+rate(cortex_prometheus_notifications_dropped_total[5m]) > 0.05
+rate(cortex_prometheus_notifications_errors_total[5m]) > 0.05
+rate(couchdb_httpd_status_codes{code=~"5.."}[5m]) / rate(couchdb_httpd_requests[5m]) > 0.05 and rate(couchdb_httpd_requests[5m]) > 0
+rate(couchdb_httpd_temporary_view_reads[5m]) > 100
+rate(couchdb_mango_docs_examined[5m]) > 1000
+rate(couchdb_mango_query_invalid_index[5m]) > 5
+rate(couchdb_mango_too_many_docs_scanned[5m]) > 50
+rate(ebpf_exporter_decoder_errors_total[5m]) > 0.05
+rate(elasticsearch_indices_indexing_index_time_seconds_total[5m]) / rate(elasticsearch_indices_indexing_index_total[5m]) > 0.01 and rate(elasticsearch_indices_indexing_index_total[5m]) > 0
+rate(elasticsearch_indices_search_query_time_seconds[1m]) / rate(elasticsearch_indices_search_query_total[1m]) > 1 and rate(elasticsearch_indices_search_query_total[1m]) > 0
+rate(envoy_cluster_upstream_rq_timeout[5m]) / rate(envoy_cluster_upstream_rq_completed[5m]) * 100 > 5 and rate(envoy_cluster_upstream_rq_completed[5m]) > 0
+rate(envoy_cluster_upstream_rq_xx{envoy_response_code_class="4"}[5m]) / rate(envoy_cluster_upstream_rq_completed[5m]) * 100 > 5 and rate(envoy_cluster_upstream_rq_completed[5m]) > 0
+rate(envoy_cluster_upstream_rq_xx{envoy_response_code_class="5"}[5m]) / rate(envoy_cluster_upstream_rq_completed[5m]) * 100 > 5 and rate(envoy_cluster_upstream_rq_completed[5m]) > 0
+rate(gitaly_cgroup_cpu_cfs_throttled_seconds_total[5m]) > 0.1
+rate(go_gc_duration_seconds_sum[5m]) > 0.05
+rate(go_memstats_alloc_bytes_total[5m]) > 1e9
+rate(haproxy_backend_check_up_down_total[5m]) != 0
+rate(haproxy_process_dropped_logs_total[5m]) != 0
+rate(haproxy_server_check_up_down_total[5m]) != 0
+rate(ifHCInOctets{job=~"snmp.*"}[5m]) * 8 / ifSpeed > 0.80 and ifSpeed > 0
+rate(ifHCOutOctets{job=~"snmp.*"}[5m]) * 8 / ifSpeed > 0.80 and ifSpeed > 0
+rate(ifInErrors{job=~"snmp.*"}[5m]) / (rate(ifHCInUcastPkts{job=~"snmp.*"}[5m]) + rate(ifHCInBroadcastPkts{job=~"snmp.*"}[5m]) + rate(ifHCInMulticastPkts{job=~"snmp.*"}[5m])) > 0.05 and (rate(ifHCInUcastPkts{job=~"snmp.*"}[5m]) + rate(ifHCInBroadcastPkts{job=~"snmp.*"}[5m]) + rate(ifHCInMulticastPkts{job=~"snmp.*"}[5m])) > 0
+rate(ifOutErrors{job=~"snmp.*"}[5m]) / (rate(ifHCOutUcastPkts{job=~"snmp.*"}[5m]) + rate(ifHCOutBroadcastPkts{job=~"snmp.*"}[5m]) + rate(ifHCOutMulticastPkts{job=~"snmp.*"}[5m])) > 0.05 and (rate(ifHCOutUcastPkts{job=~"snmp.*"}[5m]) + rate(ifHCOutBroadcastPkts{job=~"snmp.*"}[5m]) + rate(ifHCOutMulticastPkts{job=~"snmp.*"}[5m])) > 0
+rate(istio_request_duration_milliseconds_sum{reporter="destination"}[1m]) / rate(istio_request_duration_milliseconds_count{reporter="destination"}[1m]) > 100 and rate(istio_request_duration_milliseconds_count{reporter="destination"}[1m]) > 0
+rate(jaeger_agent_thrift_udp_server_packets_dropped_total[1m]) > 1
+rate(junos_interface_transmit_bytes[1m]) * 8 > 1e+9 * 0.80
+rate(junos_interface_transmit_bytes[1m]) * 8 > 1e+9 * 0.90
+rate(jvm_classes_loaded_total[5m]) > 100
+rate(jvm_compilation_time_seconds_total[5m]) > 0.1
+rate(jvm_gc_collection_seconds_count{gc=~".*old.*|.*major.*"}[5m]) > 0.3
+rate(memcached_items_evicted_total[5m]) > 10
+rate(mysql_global_status_innodb_log_waits[15m]) > 10
+rate(mysql_global_status_questions[1m]) > 10000
+rate(namedprocess_namegroup_context_switches_total{ctxswitchtype="voluntary"}[5m]) > 50000
+rate(namedprocess_namegroup_cpu_seconds_total[5m]) * 100 > 80
+rate(namedprocess_namegroup_write_bytes_total[5m]) > 100e+06
+rate(node_disk_io_time_seconds_total[5m]) > 0.8
+rate(node_disk_io_time_weighted_seconds_total[5m]) > 10
+rate(oracledb_activity_user_rollbacks[5m]) / (rate(oracledb_activity_user_commits[5m]) + rate(oracledb_activity_user_rollbacks[5m])) * 100 > 20 and (rate(oracledb_activity_user_commits[5m]) + rate(oracledb_activity_user_rollbacks[5m])) > 0
+rate(otelcol_exporter_enqueue_failed_log_records_total[5m]) > 0.05
+rate(otelcol_exporter_enqueue_failed_metric_points_total[5m]) > 0.05
+rate(otelcol_exporter_enqueue_failed_spans_total[5m]) > 0.05
+rate(otelcol_exporter_send_failed_log_records[5m]) > 0.05
+rate(otelcol_exporter_send_failed_metric_points[5m]) > 0.05
+rate(otelcol_exporter_send_failed_spans[5m]) > 0.05
+rate(otelcol_processor_refused_metric_points[5m]) > 0.05
+rate(otelcol_processor_refused_spans[5m]) > 0.05
+rate(otelcol_receiver_accepted_spans{receiver=~"otlp"}[5m]) == 0 and rate(otelcol_receiver_refused_spans{receiver=~"otlp"}[5m]) > 0
+rate(otelcol_receiver_refused_log_records[5m]) > 0.05
+rate(otelcol_receiver_refused_metric_points[5m]) > 0.05
+rate(otelcol_receiver_refused_spans[5m]) > 0.05
+rate(pg_stat_bgwriter_checkpoints_timed_total[5m]) / (rate(pg_stat_bgwriter_checkpoints_timed_total[5m]) + rate(pg_stat_bgwriter_checkpoints_req_total[5m])) < 0.5 and (rate(pg_stat_bgwriter_checkpoints_timed_total[5m]) + rate(pg_stat_bgwriter_checkpoints_req_total[5m])) > 0
+rate(pg_txid_current[1m]) < 5
+rate(pollingMonitor_failed_total[5m]) > 0.05
+rate(python_gc_collections_total{generation="2"}[5m]) > 1
+rate(python_gc_objects_collected_total[5m]) > 10000
+rate(queue_dead_messages_total[5m]) > 0.05
+rate(queue_message_lag_seconds_sum[5m]) / rate(queue_message_lag_seconds_count[5m]) > 30 and rate(queue_message_lag_seconds_count[5m]) > 0
+rate(queue_zombies_total[5m]) > 0.05
+rate(rabbitmq_exchange_messages_published_in_total{exchange="my-exchange"}[1m]) < 5
+rate(rack_uncaught_errors_total[5m]) > 0.05
+rate(rateLimitThrottling_total[5m]) > 0.05
+rate(ruby_allocated_objects_total[5m]) > 100000
+rate(ruby_major_gc_ops_total[5m]) > 2
+rate(sidekiq_jobs_failed_total[5m]) > 0.1
+rate(stackdriver_monitoring_api_calls_total[5m]) * 60 > 100
+redis_cluster_slots_fail > 0
+redis_cluster_slots_pfail > 0
+redis_cluster_state == 0
+redis_connected_clients / redis_config_maxclients * 100 > 90 and redis_config_maxclients > 0
+redis_connected_clients < 5
+redis_master_link_up == 0
+redis_memory_used_bytes / redis_memory_max_bytes * 100 > 90 and on(instance) redis_memory_max_bytes > 0
+redis_memory_used_bytes / redis_total_system_memory_bytes * 100 > 90 and redis_total_system_memory_bytes > 0
+redis_up == 0
+resilience4j_circuitbreaker_state{state="open"} == 1
+round((last_over_time(probe_ssl_earliest_cert_expiry[10m]) - time()) / 86400, 0.1) < 0
+round((rate(opensearch_threadpool_threads_count{name="bulk",type="rejected"}[5m]) / rate(opensearch_threadpool_threads_count{name="bulk",type="completed"}[5m])) * 100, 0.001) > 5
+ruby_gc_stat_ext_heap_fragmentation{job=~".*gitlab.*"} > 0.5
+ruby_heap_free_slots > 500000
+ruby_heap_live_slots > 500000
+ruby_rss > 1e9
+sidekiq_queue_enqueued_jobs > 100
+smartctl_device_available_spare < smartctl_device_available_spare_threshold
+smartctl_device_critical_warning > 0
+smartctl_device_interface_speed{speed_type="current"} != on(device, instance) smartctl_device_interface_speed{speed_type="max"}
+smartctl_device_media_errors > 0
+smartctl_device_smart_status != 1
+solr_collections_live_nodes < 2
+ssl_ocsp_response_status == 1
+ssl_ocsp_response_status == 2
+ssl_probe_success == 0
+ssl_verified_cert_not_after{chain_no="0"} - time() < 86400 * 7
+stackdriver_monitoring_last_scrape_duration_seconds > 300
+stackdriver_monitoring_last_scrape_error > 0
+stddev by (job) (sum without (state) (cluster_node_peers)) != 0
+store_connection_wait_time_ms > 10
+store_connection_wait_time_ms > 20
+sum by (backend) (haproxy_backend_current_queue) > 0
+sum by (backend) (rate(haproxy_backend_connection_errors_total[1m])) > 100
+sum by (backend) (rate(haproxy_backend_retry_warnings_total[1m])) > 10
+sum by (backend) (rate(haproxy_server_http_responses_total{code="4xx"}[1m])) / sum by (backend) (rate(haproxy_server_http_responses_total[1m])) * 100 > 5 and sum by (backend) (rate(haproxy_server_http_responses_total[1m])) > 0
+sum by (backend) (rate(haproxy_server_http_responses_total{code="5xx"}[1m])) / sum by (backend) (rate(haproxy_server_http_responses_total[1m])) * 100 > 5 and sum by (backend) (rate(haproxy_server_http_responses_total[1m])) > 0
+sum by (base_url) (solr_metrics_jvm_memory_heap_bytes{item="used"}) / sum by (base_url) (solr_metrics_jvm_memory_heap_bytes{item="max"}) > 0.9
+sum by (cassandra_cluster,instance) (rate(cassandra_client_request_timeouts_total[5m])) > 5
+sum by (cluster, instance, node) (opensearch_os_cpu_percent) > 90
+sum by (cluster, instance, node) (opensearch_process_cpu_percent) > 90
+sum by (cluster, instance, node) (round((1 - (opensearch_fs_path_available_bytes / opensearch_fs_path_total_bytes)) * 100, 0.001)) > 85
+sum by (cluster, instance, node) (round((1 - (opensearch_fs_path_available_bytes / opensearch_fs_path_total_bytes)) * 100, 0.001)) > 90
+sum by (datname) (pg_stat_activity_count{datname!~"template.*|postgres"}) < 5
+sum by (datname) (rate(pg_stat_database_blks_hit{datname!~"template.*|postgres",datid!="0"}[5m])) / (sum by (datname) (rate(pg_stat_database_blks_hit{datname!~"template.*|postgres",datid!="0"}[5m])) + sum by (datname) (rate(pg_stat_database_blks_read{datname!~"template.*|postgres",datid!="0"}[5m]))) < 0.98 and (sum by (datname) (rate(pg_stat_database_blks_hit{datname!~"template.*|postgres",datid!="0"}[5m])) + sum by (datname) (rate(pg_stat_database_blks_read{datname!~"template.*|postgres",datid!="0"}[5m]))) > 0
+sum by (frontend) (rate(haproxy_frontend_requests_denied_total[2m])) > 10
+sum by (host) (rate(certmanager_acme_client_request_count{status="429"}[5m])) > 0
+sum by (instance) (gitlab_ruby_threads_running_threads) > on(instance) gitlab_ruby_threads_max_expected_threads * 1.5
+sum by (instance) (pg_stat_ssl_compression) > 0
+sum by (instance) (probe_http_duration_seconds) > 1
+sum by (instance) (probe_icmp_duration_seconds) > 1
+sum by (instance) (rate(controller_invocations_total{status="5xx", job=~".*clouddriver.*"}[5m])) / sum by (instance) (rate(controller_invocations_total{job=~".*clouddriver.*"}[5m])) > 0.05 and sum by (instance) (rate(controller_invocations_total{job=~".*clouddriver.*"}[5m])) > 0
+sum by (instance) (rate(controller_invocations_total{status="5xx"}[5m])) / sum by (instance) (rate(controller_invocations_total[5m])) > 0.05 and sum by (instance) (rate(controller_invocations_total[5m])) > 0
+sum by (instance) (rate(envoy_http_downstream_rq_xx{envoy_response_code_class="4"}[5m])) / sum by (instance) (rate(envoy_http_downstream_rq_completed[5m])) * 100 > 10 and sum by (instance) (rate(envoy_http_downstream_rq_completed[5m])) > 0
+sum by (instance) (rate(envoy_http_downstream_rq_xx{envoy_response_code_class="5"}[5m])) / sum by (instance) (rate(envoy_http_downstream_rq_completed[5m])) * 100 > 5 and sum by (instance) (rate(envoy_http_downstream_rq_completed[5m])) > 0
+sum by (instance) (tempodb_compaction_outstanding_blocks) > 100
+sum by (instance) (tempodb_compaction_outstanding_blocks) > 250
+sum by (instance)(rate(jvm_gc_collection_seconds_sum[5m])) > 0.05
+sum by (instance, job) ((up == 0) * on (instance) group_left(__name__) (node_time_seconds - node_boot_time_seconds > 600))
+sum by (instance, job, server) (pg_stat_activity_count) > min by (instance, job, server) ((pg_settings_max_connections - pg_settings_superuser_reserved_connections) * 0.8)
+sum by (instance, job, server) (pg_stat_activity_count) >= (min by (instance, job, server) (pg_settings_max_connections) - min by (instance, job, server) (pg_settings_superuser_reserved_connections))
+sum by (instance, namespace) (rate(cloudwatch_requests_total[5m])) * 60 > 100
+sum by (job) (alloy_component_controller_running_components{health_type!="healthy"}) > 0
+sum by (job) (cortex_query_frontend_queue_length) > 1
+sum by (job) (cortex_query_scheduler_queue_length) > 0
+sum by (job) (cortex_runtime_config_last_reload_successful == 0) > 0
+sum by (job) (increase(tempo_metrics_generator_active_processors_update_failed_total[5m])) > 2
+sum by (job) (increase(tempo_metrics_generator_registry_collections_failed_total[5m])) > 2
+sum by (job) (increase(tempo_overrides_user_configurable_overrides_reload_failed_total[1h])) > 5 and sum by (job) (increase(tempo_overrides_user_configurable_overrides_reload_failed_total[5m])) > 0
+sum by (job) (increase(tempodb_blocklist_poll_errors_total[1h])) > 2 and sum by (job) (increase(tempodb_blocklist_poll_errors_total[5m])) > 0
+sum by (job) (increase(tempodb_blocklist_tenant_index_errors_total[1h])) > 2 and sum by (job) (increase(tempodb_blocklist_tenant_index_errors_total[5m])) > 0
+sum by (job) (increase(tempodb_compaction_errors_total[1h])) > 2 and sum by (job) (increase(tempodb_compaction_errors_total[5m])) > 0
+sum by (job) (increase(thanos_receive_limits_config_reload_err_total[5m])) > 0
+sum by (job) (min_over_time(cortex_query_scheduler_queue_length[1m])) > 0
+sum by (job) (rate(cortex_ruler_ring_check_errors_total[5m])) > 0.05
+sum by (job) (rate(thanos_objstore_bucket_operation_failures_total[5m])) > 0.05
+sum by (job) (tempo_runtime_config_last_reload_successful == 0) > 0
+sum by (job) (up) == 0
+sum by (job) (up{job=~".*thanos-compact.*"}) > 1
+sum by (job, component_path, component_id) (rate(alloy_component_evaluation_slow_seconds[10m])) > 0
+sum by (job, instance) (rate(prometheus_rule_evaluations_total{job=~".*thanos-rule.*"}[5m])) <= 0  and sum by (job, instance) (thanos_rule_loaded_rules) > 0
+sum by (job, instance) (rate(thanos_alert_queue_alerts_dropped_total[5m])) > 0
+sum by (job, instance) (rate(thanos_alert_sender_alerts_dropped_total[5m])) > 0
+sum by (job, instance) (rate(thanos_objstore_bucket_operation_failures_total{job=~".*thanos-sidecar.*"}[5m])) > 0.05
+sum by (job, instance) (rate(thanos_rule_evaluation_with_warnings_total[5m])) > 0.05
+sum by (job, reason) (rate(tempo_distributor_usage_tracker_errors_total[5m])) > 0.05
+sum by (job, tenant) (increase(thanos_receive_head_series_limited_requests_total[5m])) > 0
+sum by (method) (rate(keycloak_request_duration_sum[5m])) / sum by (method) (rate(keycloak_request_duration_count[5m])) > 2000 and sum by (method) (rate(keycloak_request_duration_count[5m])) > 0
+sum by (monitor, partition) (pollingMonitor_itemsOverThreshold) > 0
+sum by (name) (sidekiq_queue_size) > 0
+sum by (namespace, pod) (kube_pod_status_phase{phase=~"Pending|Unknown|Failed"}) > 0
+sum by (namespace,datname,instance) (rate(pg_stat_database_xact_rollback{datname!~"template.*|postgres",datid!="0"}[3m])) / (sum by (namespace,datname,instance) (rate(pg_stat_database_xact_rollback{datname!~"template.*|postgres",datid!="0"}[3m])) + sum by (namespace,datname,instance) (rate(pg_stat_database_xact_commit{datname!~"template.*|postgres",datid!="0"}[3m]))) > 0.10 and (sum by (namespace,datname,instance) (rate(pg_stat_database_xact_rollback{datname!~"template.*|postgres",datid!="0"}[3m])) + sum by (namespace,datname,instance) (rate(pg_stat_database_xact_commit{datname!~"template.*|postgres",datid!="0"}[3m]))) > 0
+sum by (node) ((kube_pod_status_phase{phase="Running"} == 1) + on(uid, instance) group_left(node) (0 * kube_pod_info{pod_template_hash=""})) / sum by (node) (kube_node_status_allocatable{resource="pods"}) * 100 > 90
+sum by (proxy) (haproxy_backend_current_queue) > 0
+sum by (proxy) (rate(haproxy_backend_retry_warnings_total[1m])) > 10
+sum by (proxy) (rate(haproxy_frontend_denied_connections_total[2m])) > 10
+sum by (realm) (rate(keycloak_logins_total[15m])) == 0 and (sum by (realm) (rate(keycloak_logins_total[15m])) + sum by (realm) (rate(keycloak_failed_login_attempts_total[15m]))) > 0
+sum by (server) (rate(haproxy_server_connection_errors_total[1m])) > 100
+sum by (server) (rate(haproxy_server_http_responses_total{code="4xx"}[1m]) * 100) / sum by (server) (rate(haproxy_server_http_responses_total[1m])) > 5 and sum by (server) (rate(haproxy_server_http_responses_total[1m])) > 0
+sum by (server) (rate(haproxy_server_http_responses_total{code="5xx"}[1m]) * 100) / sum by (server) (rate(haproxy_server_http_responses_total[1m])) > 5 and sum by (server) (rate(haproxy_server_http_responses_total[1m])) > 0
+sum by (server) (rate(haproxy_server_response_errors_total[1m]) * 100) / sum by (server) (rate(haproxy_server_http_responses_total[1m])) > 5 and sum by (server) (rate(haproxy_server_http_responses_total[1m])) > 0
+sum by (tenant) (tempodb_blocklist_tenant_index_builder) == 0 and on() max(tempodb_blocklist_length) > 0
+sum by (topic, consumergroup) (delta(kafka_consumergroup_lag{topic!="__consumer_offsets",consumergroup!=""}[5m])) > 0
+sum by (zone) (100 * (rate(cloudflare_zone_requests_total[10m]) / clamp_min(rate(cloudflare_zone_requests_total[50m] offset 10m), 1))) > 150
+sum by (zone) (increase(cloudflare_zone_threats_total[5m])) > 3
+sum without (pod, instance) (rate(coredns_forward_healthcheck_broken_total[5m])) > 0
+sum without (pod, instance) (rate(coredns_forward_healthcheck_failures_total[5m])) > 0
+sum without (pod, instance, rcode) (rate(coredns_forward_responses_total{rcode="SERVFAIL"}[5m])) / sum without (pod, instance, rcode) (rate(coredns_forward_responses_total[5m])) > 0.01
+sum without (pod, instance, rcode) (rate(coredns_forward_responses_total{rcode="SERVFAIL"}[5m])) / sum without (pod, instance, rcode) (rate(coredns_forward_responses_total[5m])) > 0.03
+sum without (pod, instance, server, zone, view, rcode, plugin) (rate(coredns_dns_responses_total{rcode="SERVFAIL"}[5m])) / sum without (pod, instance, server, zone, view, rcode, plugin) (rate(coredns_dns_responses_total[5m])) > 0.01
+sum without (pod, instance, server, zone, view, rcode, plugin) (rate(coredns_dns_responses_total{rcode="SERVFAIL"}[5m])) / sum without (pod, instance, server, zone, view, rcode, plugin) (rate(coredns_dns_responses_total[5m])) > 0.03
+sum without (slab) (rate(memcached_slab_items_outofmemory_total[5m])) > 0.05
+sum without(type) (rate(prometheus_tsdb_head_samples_appended_total[5m])) <= 0 and (sum without(scrape_job) (prometheus_target_metadata_cache_entries) > 0 or sum without(rule_group) (prometheus_rule_group_rules) > 0)
+sum(avg(mongodb_mongod_replset_oplog_head_timestamp - mongodb_mongod_replset_oplog_tail_timestamp)) - sum(avg(mongodb_rs_members_optimeDate{member_state="PRIMARY"} - on (set) group_right mongodb_rs_members_optimeDate{member_state="SECONDARY"})) <= 0
+sum(bookie_ledger_dir__pulsar_data_bookkeeper_ledgers_usage) by (kubernetes_pod_name) > 75
+sum(cassandra_stats{name="org:apache:cassandra:net:failuredetector:downendpointcount"}) by (service,group,cluster,env) > 0
+sum(cilium_bpf_map_pressure{map_name=~"cilium_policy_.*"}) by (pod) > 0.9
+sum(cilium_controllers_failing{}) by (pod) > 0
+sum(cilium_endpoint_state{endpoint_state="invalid"}) by (pod) > 0
+sum(cilium_operator_ipam_ips{type!="available"}) by () / sum(cilium_operator_ipam_ips) by () > 0.9 and sum(cilium_operator_ipam_ips) by () > 0
+sum(cilium_operator_ipam_ips{type="available"}) by () <= 0
+sum(cilium_unreachable_health_endpoints{}) by (pod) > 0
+sum(cilium_unreachable_nodes{}) by (pod) > 0
+sum(digitalocean_droplet_price_monthly) + sum(digitalocean_volume_size_bytes) / 1024 / 1024 / 1024 / 10 + sum(digitalocean_snapshot_size_bytes) / 1024 / 1024 / 1024 / 20 > 100
+sum(gnatsd_varz_jetstream_stats_accounts) > 100
+sum(increase(argocd_app_sync_total{phase!="Succeeded"}[10m])) by (name, phase, project) > 0
+sum(increase(jaeger_storage_requests_total{result="ok"}[15m])) by (instance, job, namespace, operation) == 0 and sum(increase(jaeger_storage_requests_total[15m])) by (instance, job, namespace, operation) > 0
+sum(increase(litellm_spend_metric_total{model=~"(claude-|anthropic/).*"}[24h])) > 1
+sum(increase(loki_panic_total[5m])) by (namespace, job) > 0
+sum(increase(phpfpm_max_children_reached_total[5m])) by (instance) > 3
+sum(jenkins_plugins_withUpdate) by (instance) > 3
+sum(kafka_consumergroup_lag) by (consumergroup) > 10000
+sum(loki_boltdb_shipper_compactor_running) by (cluster) > 1
+sum(mongodb_ss_repl_isWritablePrimary) by (job) == 0
+sum(openstack_nova_server_status{status="ERROR"}) > 0
+sum(pgbouncer_pools_client_active_connections + pgbouncer_pools_client_waiting_connections) >= pgbouncer_config_max_client_conn
+sum(phpfpm_listen_queue_connections) by (instance) / sum(phpfpm_listen_queue_length_connections) by (instance) > 0.8
+sum(pilot_duplicate_envoy_clusters{}) > 0
+sum(pulsar_entry_size_le_overflow > 0) by (topic)
+sum(pulsar_storage_size) by (topic) > 20*1024*1024*1024
+sum(pulsar_storage_size) by (topic) > 5*1024*1024*1024
+sum(pulsar_storage_write_latency_le_overflow > 0) by (topic)
+sum(pulsar_subscription_back_log) by (subscription) > 100000
+sum(pulsar_subscription_back_log) by (subscription) > 5000
+sum(rabbitmq_build_info) < 3
+sum(rabbitmq_queue_messages_ready) BY (queue) > 1000
+sum(rabbitmq_queue_messages_unacked) BY (queue) > 1000
+sum(rabbitmq_running) < 3
+sum(rate(apiserver_request_terminations_total[10m])) / (sum(rate(apiserver_request_total[10m])) + sum(rate(apiserver_request_terminations_total[10m]))) > 0.20
+sum(rate(apiserver_request_total{job="apiserver",code=~"(?:5..)"}[1m])) by (instance, job) / sum(rate(apiserver_request_total{job="apiserver"}[1m])) by (instance, job) * 100 > 3 and sum(rate(apiserver_request_total{job="apiserver"}[1m])) by (instance, job) > 0
+sum(rate(argocd_git_fetch_fail_total[5m])) by (repo) > 0
+sum(rate(caddy_http_request_duration_seconds_count{code=~"4.."}[3m])) by (instance) / sum(rate(caddy_http_request_duration_seconds_count[3m])) by (instance) * 100 > 5 and sum(rate(caddy_http_request_duration_seconds_count[3m])) by (instance) > 0
+sum(rate(caddy_http_request_duration_seconds_count{code=~"5.."}[3m])) by (instance) / sum(rate(caddy_http_request_duration_seconds_count[3m])) by (instance) * 100 > 5 and sum(rate(caddy_http_request_duration_seconds_count[3m])) by (instance) > 0
+sum(rate(cilium_agent_api_process_time_seconds_count{return_code=~"5[0-9][0-9]"}[5m])) by (pod, return_code) > 0.05
+sum(rate(cilium_api_limiter_processed_requests_total{api_call=~"endpoint-create", outcome="fail"}[1m])) by (pod, api_call) > 0.05
+sum(rate(cilium_bpf_map_ops_total{outcome="fail"}[5m])) by (map_name, pod) > 0.05
+sum(rate(cilium_clustermesh_remote_cluster_failures[5m])) by (source_cluster, target_cluster) > 0
+sum(rate(cilium_datapath_conntrack_gc_runs_total{status="uncompleted"}[5m])) by (pod) > 0.05
+sum(rate(cilium_drop_count_total{reason!~"Policy denied"}[5m])) by (pod, reason) > 0.05
+sum(rate(cilium_drop_count_total{reason="CT: Map insertion failed"}[5m])) by (pod) > 0
+sum(rate(cilium_drop_count_total{reason="No mapping for NAT masquerade"}[1m])) by (pod) > 0
+sum(rate(cilium_drop_count_total{reason="Policy denied"}[1m])) by (pod) > 0
+sum(rate(cilium_endpoint_regenerations_total{outcome="fail"}[5m])) by (pod) > 0.05
+sum(rate(cilium_k8s_client_api_calls_total{endpoint!="metrics", return_code!~"2[0-9][0-9]"}[5m])) by (pod, endpoint, return_code) > 0.05
+sum(rate(cilium_k8s_client_api_calls_total{method=~"(PUT|POST|PATCH)", endpoint="endpoint", return_code!~"2[0-9][0-9]"}[5m])) by (pod, method, return_code) > 0.05
+sum(rate(cilium_kvstoremesh_kvstore_sync_errors_total[5m])) by (source_cluster) > 0.05
+sum(rate(cilium_kvstoremesh_remote_cluster_failures[5m])) by (source_cluster, target_cluster) > 0
+sum(rate(cilium_operator_ipam_interface_creation_ops[5m])) by () > 0.05
+sum(rate(cilium_policy_change_total{outcome="fail"}[5m])) by (pod) > 0.05
+sum(rate(container_cpu_cfs_throttled_periods_total{container!=""}[5m])) by (container, pod, namespace) / sum(rate(container_cpu_cfs_periods_total[5m])) by (container, pod, namespace) > ( 25 / 100 ) and sum(rate(container_cpu_cfs_periods_total[5m])) by (container, pod, namespace) > 0
+sum(rate(elasticsearch_indices_indexing_index_total[1m]))> 10000
+sum(rate(elasticsearch_indices_search_query_total[1m])) > 100
+sum(rate(etcd_http_failed_total[1m])) BY (method) / sum(rate(etcd_http_received_total[1m])) BY (method) > 0.01 and sum(rate(etcd_http_received_total[1m])) BY (method) > 0
+sum(rate(etcd_http_failed_total[1m])) BY (method) / sum(rate(etcd_http_received_total[1m])) BY (method) > 0.05 and sum(rate(etcd_http_received_total[1m])) BY (method) > 0
+sum(rate(etcd_network_peer_sent_failures_total[1m])) by (To) > 0.01
+sum(rate(gitlab_workhorse_http_request_duration_seconds_count{code=~"5.."}[5m])) / sum(rate(gitlab_workhorse_http_request_duration_seconds_count[5m])) * 100 > 10 and sum(rate(gitlab_workhorse_http_request_duration_seconds_count[5m])) > 0
+sum(rate(grpc_server_handled_total{grpc_code=~"Internal|Unavailable|DeadlineExceeded|ResourceExhausted|Aborted|Unknown"}[5m])) / sum(rate(grpc_server_handled_total[5m])) * 100 > 5 and sum(rate(grpc_server_handled_total[5m])) > 0
+sum(rate(grpc_server_handled_total{grpc_code=~"Unknown|FailedPrecondition|ResourceExhausted|Internal|Unavailable|DataLoss|DeadlineExceeded"}[1m])) BY (grpc_service, grpc_method) / sum(rate(grpc_server_handled_total[1m])) BY (grpc_service, grpc_method) > 0.01 and sum(rate(grpc_server_handled_total[1m])) BY (grpc_service, grpc_method) > 0
+sum(rate(grpc_server_handled_total{grpc_code=~"Unknown|FailedPrecondition|ResourceExhausted|Internal|Unavailable|DataLoss|DeadlineExceeded"}[1m])) BY (grpc_service, grpc_method) / sum(rate(grpc_server_handled_total[1m])) BY (grpc_service, grpc_method) > 0.05 and sum(rate(grpc_server_handled_total[1m])) BY (grpc_service, grpc_method) > 0
+sum(rate(grpc_server_handled_total{job="gitaly",grpc_code="ResourceExhausted"}[5m])) / sum(rate(grpc_server_handled_total{job="gitaly"}[5m])) * 100 > 1 and sum(rate(grpc_server_handled_total{job="gitaly"}[5m])) > 0
+sum(rate(grpc_server_handled_total{job="gitaly",grpc_code=~"Internal|Unavailable|DeadlineExceeded|ResourceExhausted|Aborted|Unknown|DataLoss"}[5m])) / sum(rate(grpc_server_handled_total{job="gitaly"}[5m])) * 100 > 5 and sum(rate(grpc_server_handled_total{job="gitaly"}[5m])) > 0
+sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) * 100 > 5 and sum(rate(http_requests_total[5m])) > 0
+sum(rate(hubble_dns_responses_total{rcode!="No Error"}[5m])) by (pod) / sum(rate(hubble_dns_responses_total[5m])) by (pod) > 0.1 and sum(rate(hubble_dns_responses_total[5m])) by (pod) > 0
+sum(rate(hubble_lost_events_total[5m])) by (pod) > 0.05
+sum(rate(istio_requests_total{reporter="destination", response_code=~"4.*"}[5m])) / sum(rate(istio_requests_total{reporter="destination"}[5m])) * 100 > 5 and sum(rate(istio_requests_total{reporter="destination"}[5m])) > 0
+sum(rate(istio_requests_total{reporter="destination", response_code=~"5.*"}[5m])) / sum(rate(istio_requests_total{reporter="destination"}[5m])) * 100 > 5 and sum(rate(istio_requests_total{reporter="destination"}[5m])) > 0
+sum(rate(istio_requests_total{reporter="destination"}[5m])) < 100
+sum(rate(istio_requests_total{reporter="destination"}[5m])) > 1000
+sum(rate(jaeger_storage_requests_total{result="err"}[1m])) by (instance, job, namespace, operation) > 0 and sum(rate(jaeger_storage_requests_total{result="ok"}[1m])) by (instance, job, namespace, operation) == 0
+sum(rate(litellm_proxy_failed_requests_metric_total[5m])) / sum(rate(litellm_proxy_total_requests_metric_total[5m])) > 0.05
+sum(rate(mixer_runtime_dispatches_total{adapter=~"prometheus"}[1m])) < 180
+sum(rate(nginx_http_requests_total{status=~"^4.."}[1m])) / sum(rate(nginx_http_requests_total[1m])) * 100 > 5 and sum(rate(nginx_http_requests_total[1m])) > 0
+sum(rate(nginx_http_requests_total{status=~"^5.."}[1m])) / sum(rate(nginx_http_requests_total[1m])) * 100 > 5 and sum(rate(nginx_http_requests_total[1m])) > 0
+sum(rate(phpfpm_slow_requests_total[5m])) by (instance) / sum(rate(phpfpm_accepted_connections_total[5m])) by (instance) > 0.1 and sum(rate(phpfpm_accepted_connections_total[5m])) by (instance) > 0
+sum(rate(pilot_xds_push_errors[1m])) / sum(rate(pilot_xds_pushes[1m])) * 100 > 5 and sum(rate(pilot_xds_pushes[1m])) > 0
+sum(rate(pulsar_function_user_exceptions_total[1m]) + rate(pulsar_function_system_exceptions_total[1m])) by (name) > 10
+sum(rate(pulsar_sink_sink_exceptions_total[1m])) by (name) > 10
+sum(rate(response_total{classification="failure"}[1m])) by (deployment, statefulset, daemonset) / sum(rate(response_total[1m])) by (deployment, statefulset, daemonset) * 100 > 10 and sum(rate(response_total[1m])) by (deployment, statefulset, daemonset) > 0
+sum(rate(traefik_backend_requests_total{code=~"4.*"}[3m])) by (backend) / sum(rate(traefik_backend_requests_total[3m])) by (backend) * 100 > 5 and sum(rate(traefik_backend_requests_total[3m])) by (backend) > 0
+sum(rate(traefik_backend_requests_total{code=~"5.*"}[3m])) by (backend) / sum(rate(traefik_backend_requests_total[3m])) by (backend) * 100 > 5 and sum(rate(traefik_backend_requests_total[3m])) by (backend) > 0
+sum(rate(traefik_config_reloads_failure_total[3m])) by (job) > 0
+sum(rate(traefik_service_requests_total{code=~"4.*"}[3m])) by (service) / sum(rate(traefik_service_requests_total[3m])) by (service) * 100 > 5 and sum(rate(traefik_service_requests_total[3m])) by (service) > 0
+sum(rate(traefik_service_requests_total{code=~"5.*"}[3m])) by (service) / sum(rate(traefik_service_requests_total[3m])) by (service) * 100 > 5 and sum(rate(traefik_service_requests_total[3m])) by (service) > 0
+sum(rate(vault_audit_log_request_failure[5m])) by (instance) > 0 or sum(rate(vault_audit_log_response_failure[5m])) by (instance) > 0
+sum(sidekiq_running_jobs) >= sum(sidekiq_concurrency) * 0.9
+sum(up{job=~".*etcd.*"} == bool 1) without (instance) < ((count(up{job=~".*etcd.*"}) without (instance) + 1) / 2)
+sum(vault_core_active) < 1
+sum(zk_server_leader) == 0
+sum(zk_server_leader) > 1
+sysUpTime / 100 < 300
+systemd_socket_current_connections > 100
+systemd_unit_state{state="failed"} == 1
+systemd_unit_state{state="inactive", type="service", name=~"your-critical-service.+"} == 1
+systemd_unit_tasks_current / ignoring(type) systemd_unit_tasks_max > 0.9 and ignoring(type) systemd_unit_tasks_max > 0
+tempo_ingest_group_partition_lag_seconds{container="block-builder"} > 300
+tempo_ingest_group_partition_lag_seconds{container="live-store"} > 1200
+tempo_ingest_group_partition_lag_seconds{container="live-store"} > 200
+tempo_ingest_group_partition_lag_seconds{container="metrics-generator"} > 900
+thanos_compact_halted == 1
+thanos_receive_replication_factor > 1 and ((sum by (job) (rate(thanos_receive_replications_total{result="error"}[5m])) / sum by (job) (rate(thanos_receive_replications_total[5m]))) > (max by (job) (floor((thanos_receive_replication_factor+1)/ 2)) / max by (job) (thanos_receive_hashring_nodes))) * 100
+thanos_sidecar_prometheus_up == 0 and on (namespace, pod) prometheus_tsdb_data_replay_duration_seconds != 0
+threadpool_blockingQueueSize > 0
+time() -  max by (job, instance, group) (prometheus_rule_group_last_evaluation_timestamp_seconds{job=~".*thanos-rule.*"})>10 * max by (job, instance, group) (prometheus_rule_group_interval_seconds{job=~".*thanos-rule.*"})
+time() - container_last_seen > 60
+time() - pg_postmaster_start_time_seconds < 60
+time() - rabbitmq_queue_head_message_timestamp{queue="my-queue"} > 60
+time() - redis_rdb_last_save_timestamp_seconds > 60 * 60 * 48
+time() - stackdriver_monitoring_last_scrape_timestamp > 600
+time() - wireguard_latest_handshake_seconds > 300 and wireguard_latest_handshake_seconds > 0
+up == 0 unless on(job) (sum by (job) (up) == 0)
+up{job="clickhouse"} == 0
+up{job="hadoop-namenode"} == 0
+up{job="hadoop-resourcemanager"} == 0
+up{job=~".*openstack.*"} == 0
+up{job=~".*otel.*collector.*"} == 0
+up{job=~"snmp.*"} == 0
+vault_core_unsealed == 0
+vault_raft_storage_stats_fsm_pending > 100
+vault_token_count_by_ttl{creation_ttl="+Inf"} > 3
+vector(1)
+vmware_vm_mem_usage_average / 100 >= 90 and vmware_vm_mem_usage_average / 100 < 95
+vmware_vm_mem_usage_average / 100 >= 95
+vmware_vm_snapshots > 3
+windows_disk_drive_status{status="OK"} != 1
+windows_exporter_collector_success == 0
+windows_service_state{state="running"} == 0
+windows_time_computed_time_offset_seconds > 1
+windows_time_ntp_round_trip_delay_seconds > 1
+wireguard_latest_handshake_seconds == 0
+zfs_pool_free_bytes * 100 / zfs_pool_size_bytes < 10 and zfs_pool_readonly == 0 and zfs_pool_size_bytes > 0
+zfs_pool_health > 0
+zfs_scrape_collector_success != 1
+zk_ruok == 0
+zk_up == 0
+{__name__=~"pg_settings_.*",__name__!="pg_settings_transaction_read_only"} != ON(__name__, instance) {__name__=~"pg_settings_.*",__name__!="pg_settings_transaction_read_only"} OFFSET 5m
