@@ -20,8 +20,8 @@ require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dennwc/varint v1.0.0 // indirect
 	github.com/grafana/regexp v0.0.0-20250905093917-f7b3be9d1853 // indirect
-	github.com/kr/text v0.2.0 // indirect
 	github.com/minuk-dev/opentelemetry-querier/dispatcher v0.0.0 // indirect
+	github.com/minuk-dev/opentelemetry-querier/dispatcher/prometheusdispatcher v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/processor v0.0.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
@@ -50,3 +50,5 @@ replace github.com/minuk-dev/opentelemetry-querier/processor => ../../processor
 replace github.com/minuk-dev/opentelemetry-querier/qdata => ../../qdata
 
 replace github.com/minuk-dev/opentelemetry-querier/qerror => ../../qerror
+
+replace github.com/minuk-dev/opentelemetry-querier/dispatcher/prometheusdispatcher => ../../dispatcher/prometheusdispatcher
