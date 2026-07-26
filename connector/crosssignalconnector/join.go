@@ -1,4 +1,4 @@
-package crosssignaldispatcher
+package crosssignalconnector
 
 import (
 	"slices"
@@ -49,7 +49,7 @@ func resultToTable(signal qdata.Signal, result *qdata.Result) (*qdata.Table, err
 		return completeSchema(data.Table), nil
 	default:
 		return nil, qerror.New(qerror.CodeInvalidArgument,
-			"crosssignaldispatcher: cannot join signal %s result (unsupported payload)", signal)
+			"crosssignalconnector: cannot join signal %s result (unsupported payload)", signal)
 	}
 }
 
@@ -59,7 +59,7 @@ func warnIfTruncated(result *qdata.Result, metrics *qdata.Metrics) {
 	for _, series := range metrics.GetSeries() {
 		if len(series.GetPoints()) > 1 {
 			qdata.Warn(result, "series_truncated",
-				"cross-signal join keeps only each series' latest point", "crosssignaldispatcher")
+				"cross-signal join keeps only each series' latest point", "crosssignalconnector")
 
 			return
 		}
@@ -184,7 +184,7 @@ func joinModeFor(operator qdatav1.BinOp) (joinMode, error) {
 	}[operator]
 	if !ok {
 		return joinInner, qerror.New(qerror.CodeInvalidArgument,
-			"crosssignaldispatcher: cross-signal operator %s is not a supported join (use AND or UNLESS)", operator)
+			"crosssignalconnector: cross-signal operator %s is not a supported join (use AND or UNLESS)", operator)
 	}
 
 	return mode, nil
@@ -221,7 +221,7 @@ func resolveKeys(left, right *qdata.Table, matching *qdatav1.VectorMatch) ([]str
 
 	if len(keys) == 0 {
 		return nil, qerror.New(qerror.CodeInvalidArgument,
-			"crosssignaldispatcher: no join key (sides share no columns after `ignoring`, and no `on` was given)")
+			"crosssignalconnector: no join key (sides share no columns after `ignoring`, and no `on` was given)")
 	}
 
 	return keys, nil

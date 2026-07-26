@@ -37,6 +37,7 @@ type Config struct {
 	Acceptors   map[string]map[string]any `mapstructure:"acceptors"`
 	Processors  map[string]map[string]any `mapstructure:"processors"`
 	Dispatchers map[string]map[string]any `mapstructure:"dispatchers"`
+	Connectors  map[string]map[string]any `mapstructure:"connectors"`
 	Service     ServiceConfig             `mapstructure:"service"`
 }
 
@@ -73,6 +74,7 @@ func LoadConfig(path string) (*Config, error) {
 		Acceptors:   nil,
 		Processors:  nil,
 		Dispatchers: nil,
+		Connectors:  nil,
 		Service:     ServiceConfig{Pipelines: nil},
 	}
 

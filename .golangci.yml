@@ -52,6 +52,7 @@ linters:
         - Acceptor$
         - Processor$
         - Dispatcher$
+        - Connector$
         - Config$
         - Component$
 

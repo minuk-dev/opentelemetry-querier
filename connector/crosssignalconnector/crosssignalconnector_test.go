@@ -1,4 +1,4 @@
-package crosssignaldispatcher_test
+package crosssignalconnector_test
 
 import (
 	"context"
@@ -7,22 +7,20 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/minuk-dev/opentelemetry-querier/dispatcher"
-	"github.com/minuk-dev/opentelemetry-querier/dispatcher/crosssignaldispatcher"
+	"github.com/minuk-dev/opentelemetry-querier/connector/crosssignalconnector"
 	qdatav1 "github.com/minuk-dev/opentelemetry-querier/gen/qdata/v1"
+	"github.com/minuk-dev/opentelemetry-querier/pipeline"
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
 )
 
-// fakeDispatcher returns a preset result (or error), recording the query it saw.
-type fakeDispatcher struct {
-	dispatcher.Base
-
+// fakeHandler returns a preset result (or error), recording the query it saw.
+type fakeHandler struct {
 	result *qdata.Result
 	err    error
 	seen   *qdata.Query
 }
 
-func (f *fakeDispatcher) Dispatch(_ context.Context, query *qdata.Query) (*qdata.Result, error) {
+func (f *fakeHandler) Handle(_ context.Context, query *qdata.Query) (*qdata.Result, error) {
 	f.seen = query
 
 	return f.result, f.err
@@ -68,8 +66,7 @@ func joinPlan(onLabels ...string) *qdata.QueryPlan {
 	return qdata.Plan(qdata.BinaryNode(qdata.BinAnd, lhs, rhs, &qdata.VectorMatch{On: onLabels}))
 }
 
-// rowValue returns the string form of column in the first row of the result's
-// table.
+// rowValue returns the string form of column in the first row of the result table.
 func rowValue(t *testing.T, result *qdata.Result, column string) string {
 	t.Helper()
 
@@ -84,23 +81,23 @@ func rowValue(t *testing.T, result *qdata.Result, column string) string {
 func TestSingleSignalRoutes(t *testing.T) {
 	t.Parallel()
 
-	backend := &fakeDispatcher{Base: dispatcher.Base{}, result: metricResult(1), err: nil, seen: nil}
-	sut := crosssignaldispatcher.New(map[qdata.Signal]dispatcher.Dispatcher{qdata.SignalMetrics: backend})
+	target := &fakeHandler{result: metricResult(1), err: nil, seen: nil}
+	sut := crosssignalconnector.New(map[qdata.Signal]pipeline.Handler{qdata.SignalMetrics: target})
 
 	query := &qdata.Query{Plan: qdata.Plan(qdata.SelectNode(qdata.SignalMetrics, nil))}
 
 	result, err := sut.Dispatch(context.Background(), query)
 	require.NoError(t, err)
-	assert.Same(t, backend.result, result, "single-signal query is delegated whole")
-	assert.Same(t, query, backend.seen, "the original query is passed through unchanged")
+	assert.Same(t, target.result, result, "single-signal query is delegated whole")
+	assert.Same(t, query, target.seen, "the original query is passed through to its pipeline")
 }
 
 func TestJoinMetricsAndLogs(t *testing.T) {
 	t.Parallel()
 
-	metrics := &fakeDispatcher{Base: dispatcher.Base{}, result: metricResult(0.5), err: nil, seen: nil}
-	logs := &fakeDispatcher{Base: dispatcher.Base{}, result: logResult("api"), err: nil, seen: nil}
-	sut := crosssignaldispatcher.New(map[qdata.Signal]dispatcher.Dispatcher{
+	metrics := &fakeHandler{result: metricResult(0.5), err: nil, seen: nil}
+	logs := &fakeHandler{result: logResult("api"), err: nil, seen: nil}
+	sut := crosssignalconnector.New(map[qdata.Signal]pipeline.Handler{
 		qdata.SignalMetrics: metrics,
 		qdata.SignalLogs:    logs,
 	})
@@ -122,14 +119,13 @@ func TestJoinMetricsAndLogs(t *testing.T) {
 func TestJoinOnSharedColumnsWhenNoOnGiven(t *testing.T) {
 	t.Parallel()
 
-	metrics := &fakeDispatcher{Base: dispatcher.Base{}, result: metricResult(0.5), err: nil, seen: nil}
-	logs := &fakeDispatcher{Base: dispatcher.Base{}, result: logResult("api"), err: nil, seen: nil}
-	sut := crosssignaldispatcher.New(map[qdata.Signal]dispatcher.Dispatcher{
+	metrics := &fakeHandler{result: metricResult(0.5), err: nil, seen: nil}
+	logs := &fakeHandler{result: logResult("api"), err: nil, seen: nil}
+	sut := crosssignalconnector.New(map[qdata.Signal]pipeline.Handler{
 		qdata.SignalMetrics: metrics,
 		qdata.SignalLogs:    logs,
 	})
 
-	// No `on`: the join falls back to the shared "job" column.
 	result, err := sut.Dispatch(context.Background(), &qdata.Query{Plan: joinPlan()})
 	require.NoError(t, err)
 	require.Len(t, result.GetTable().GetRows(), 1)
@@ -139,9 +135,9 @@ func TestJoinOnSharedColumnsWhenNoOnGiven(t *testing.T) {
 func TestNonMatchingKeysProduceNoRows(t *testing.T) {
 	t.Parallel()
 
-	metrics := &fakeDispatcher{Base: dispatcher.Base{}, result: metricResult(0.5), err: nil, seen: nil}
-	logs := &fakeDispatcher{Base: dispatcher.Base{}, result: logResult("worker"), err: nil, seen: nil}
-	sut := crosssignaldispatcher.New(map[qdata.Signal]dispatcher.Dispatcher{
+	metrics := &fakeHandler{result: metricResult(0.5), err: nil, seen: nil}
+	logs := &fakeHandler{result: logResult("worker"), err: nil, seen: nil}
+	sut := crosssignalconnector.New(map[qdata.Signal]pipeline.Handler{
 		qdata.SignalMetrics: metrics,
 		qdata.SignalLogs:    logs,
 	})
@@ -174,9 +170,9 @@ func metricResultJobs(jobs ...string) *qdata.Result {
 func TestUnlessAntiJoin(t *testing.T) {
 	t.Parallel()
 
-	metrics := &fakeDispatcher{Base: dispatcher.Base{}, result: metricResultJobs("api", "worker"), err: nil, seen: nil}
-	logs := &fakeDispatcher{Base: dispatcher.Base{}, result: logResult("api"), err: nil, seen: nil}
-	sut := crosssignaldispatcher.New(map[qdata.Signal]dispatcher.Dispatcher{
+	metrics := &fakeHandler{result: metricResultJobs("api", "worker"), err: nil, seen: nil}
+	logs := &fakeHandler{result: logResult("api"), err: nil, seen: nil}
+	sut := crosssignalconnector.New(map[qdata.Signal]pipeline.Handler{
 		qdata.SignalMetrics: metrics,
 		qdata.SignalLogs:    logs,
 	})
@@ -194,9 +190,9 @@ func TestUnlessAntiJoin(t *testing.T) {
 func TestUnsupportedOperatorFailsClosed(t *testing.T) {
 	t.Parallel()
 
-	metrics := &fakeDispatcher{Base: dispatcher.Base{}, result: metricResult(0.5), err: nil, seen: nil}
-	logs := &fakeDispatcher{Base: dispatcher.Base{}, result: logResult("api"), err: nil, seen: nil}
-	sut := crosssignaldispatcher.New(map[qdata.Signal]dispatcher.Dispatcher{
+	metrics := &fakeHandler{result: metricResult(0.5), err: nil, seen: nil}
+	logs := &fakeHandler{result: logResult("api"), err: nil, seen: nil}
+	sut := crosssignalconnector.New(map[qdata.Signal]pipeline.Handler{
 		qdata.SignalMetrics: metrics,
 		qdata.SignalLogs:    logs,
 	})
@@ -214,9 +210,6 @@ func TestUnsupportedOperatorFailsClosed(t *testing.T) {
 func TestIgnoringNarrowsJoinKeys(t *testing.T) {
 	t.Parallel()
 
-	// The metric and log agree on job but differ on instance. Without `ignoring`
-	// the shared-column join keys on {job, instance} and finds no match; with
-	// `ignoring(instance)` it keys on job alone and joins.
 	metricAttrs := &qdata.KeyValueList{}
 	qdata.AttrPutString(metricAttrs, "job", "api")
 	qdata.AttrPutString(metricAttrs, "instance", "m1")
@@ -233,15 +226,14 @@ func TestIgnoringNarrowsJoinKeys(t *testing.T) {
 		Logs: &qdata.Logs{Records: []*qdata.LogRecord{{Attributes: logAttrs, Body: qdata.Str("boom")}}},
 	}}
 
-	sut := crosssignaldispatcher.New(map[qdata.Signal]dispatcher.Dispatcher{
-		qdata.SignalMetrics: &fakeDispatcher{Base: dispatcher.Base{}, result: metricRes, err: nil, seen: nil},
-		qdata.SignalLogs:    &fakeDispatcher{Base: dispatcher.Base{}, result: logRes, err: nil, seen: nil},
+	sut := crosssignalconnector.New(map[qdata.Signal]pipeline.Handler{
+		qdata.SignalMetrics: &fakeHandler{result: metricRes, err: nil, seen: nil},
+		qdata.SignalLogs:    &fakeHandler{result: logRes, err: nil, seen: nil},
 	})
 
 	lhs := qdata.SelectNode(qdata.SignalMetrics, nil)
 	rhs := qdata.SelectNode(qdata.SignalLogs, nil)
 
-	// Sanity: without ignoring, differing instance labels prevent a match.
 	plainPlan := qdata.Plan(qdata.BinaryNode(qdata.BinAnd, lhs, rhs, &qdata.VectorMatch{}))
 	plain, err := sut.Dispatch(context.Background(), &qdata.Query{Plan: plainPlan})
 	require.NoError(t, err)
@@ -257,9 +249,6 @@ func TestIgnoringNarrowsJoinKeys(t *testing.T) {
 func TestValueLabelIsPreservedNotClobbered(t *testing.T) {
 	t.Parallel()
 
-	// A metric series carrying a label literally named "value" must not lose it
-	// to the synthetic sample column: the label moves to "label_value" and the
-	// sample keeps the stable "value" column.
 	attrs := &qdata.KeyValueList{}
 	qdata.AttrPutString(attrs, "job", "api")
 	qdata.AttrPutString(attrs, "value", "user-label")
@@ -269,9 +258,9 @@ func TestValueLabelIsPreservedNotClobbered(t *testing.T) {
 		}}},
 	}}
 
-	sut := crosssignaldispatcher.New(map[qdata.Signal]dispatcher.Dispatcher{
-		qdata.SignalMetrics: &fakeDispatcher{Base: dispatcher.Base{}, result: metricRes, err: nil, seen: nil},
-		qdata.SignalLogs:    &fakeDispatcher{Base: dispatcher.Base{}, result: logResult("api"), err: nil, seen: nil},
+	sut := crosssignalconnector.New(map[qdata.Signal]pipeline.Handler{
+		qdata.SignalMetrics: &fakeHandler{result: metricRes, err: nil, seen: nil},
+		qdata.SignalLogs:    &fakeHandler{result: logResult("api"), err: nil, seen: nil},
 	})
 
 	result, err := sut.Dispatch(context.Background(), &qdata.Query{Plan: joinPlan("job")})
@@ -292,21 +281,21 @@ func TestValueLabelIsPreservedNotClobbered(t *testing.T) {
 func TestFailClosed(t *testing.T) {
 	t.Parallel()
 
-	metrics := &fakeDispatcher{Base: dispatcher.Base{}, result: metricResult(1), err: nil, seen: nil}
-	logs := &fakeDispatcher{Base: dispatcher.Base{}, result: logResult("api"), err: nil, seen: nil}
-	full := map[qdata.Signal]dispatcher.Dispatcher{qdata.SignalMetrics: metrics, qdata.SignalLogs: logs}
+	metrics := &fakeHandler{result: metricResult(1), err: nil, seen: nil}
+	logs := &fakeHandler{result: logResult("api"), err: nil, seen: nil}
+	full := map[qdata.Signal]pipeline.Handler{qdata.SignalMetrics: metrics, qdata.SignalLogs: logs}
 
 	t.Run("no plan", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := crosssignaldispatcher.New(full).Dispatch(context.Background(), &qdata.Query{})
+		_, err := crosssignalconnector.New(full).Dispatch(context.Background(), &qdata.Query{})
 		require.Error(t, err)
 	})
 
-	t.Run("missing backend for single signal", func(t *testing.T) {
+	t.Run("missing target for single signal", func(t *testing.T) {
 		t.Parallel()
 
-		sut := crosssignaldispatcher.New(map[qdata.Signal]dispatcher.Dispatcher{})
+		sut := crosssignalconnector.New(map[qdata.Signal]pipeline.Handler{})
 		_, err := sut.Dispatch(context.Background(),
 			&qdata.Query{Plan: qdata.Plan(qdata.SelectNode(qdata.SignalMetrics, nil))})
 		require.Error(t, err)
@@ -315,22 +304,20 @@ func TestFailClosed(t *testing.T) {
 	t.Run("multi-signal plan that is not a top-level binary", func(t *testing.T) {
 		t.Parallel()
 
-		// A function whose args span two signals: multi-signal but not a join.
 		plan := qdata.Plan(qdata.FunctionNode("vector", []*qdata.Node{
 			qdata.SelectNode(qdata.SignalMetrics, nil),
 			qdata.SelectNode(qdata.SignalLogs, nil),
 		}))
-		_, err := crosssignaldispatcher.New(full).Dispatch(context.Background(), &qdata.Query{Plan: plan})
+		_, err := crosssignalconnector.New(full).Dispatch(context.Background(), &qdata.Query{Plan: plan})
 		require.Error(t, err)
 	})
 
 	t.Run("no join key", func(t *testing.T) {
 		t.Parallel()
 
-		// Metrics labelled by region, logs by zone: no shared column and no `on`.
-		regionMetrics := &fakeDispatcher{Base: dispatcher.Base{}, result: metricByLabel("region", "eu"), err: nil, seen: nil}
-		zoneLogs := &fakeDispatcher{Base: dispatcher.Base{}, result: logByLabel("zone", "a"), err: nil, seen: nil}
-		sut := crosssignaldispatcher.New(map[qdata.Signal]dispatcher.Dispatcher{
+		regionMetrics := &fakeHandler{result: metricByLabel("region", "eu"), err: nil, seen: nil}
+		zoneLogs := &fakeHandler{result: logByLabel("zone", "a"), err: nil, seen: nil}
+		sut := crosssignalconnector.New(map[qdata.Signal]pipeline.Handler{
 			qdata.SignalMetrics: regionMetrics,
 			qdata.SignalLogs:    zoneLogs,
 		})
