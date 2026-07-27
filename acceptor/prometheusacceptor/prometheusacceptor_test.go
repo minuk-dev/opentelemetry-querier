@@ -59,6 +59,15 @@ func metricsResult() *qdata.Result {
 	}
 }
 
+func tableResult() *qdata.Result {
+	table := qdata.NewTable([]string{"service", "error_rate", "log"},
+		qdata.NewRow("service", qdata.Str("api"), "error_rate", qdata.Double(0.5), "log", qdata.Str("boom")),
+		qdata.NewRow("service", qdata.Str("web"), "error_rate", qdata.Double(0)),
+	)
+
+	return qdata.TableResult(table)
+}
+
 func serve(t *testing.T, handler pipeline.Handler) *httptest.Server {
 	t.Helper()
 
@@ -133,6 +142,41 @@ func TestRangeQueryReturnsMatrix(t *testing.T) {
 	if len(body.Data.Result) != 1 || len(body.Data.Result[0].Values) != 1 {
 		t.Fatalf("result = %+v", body.Data.Result)
 	}
+}
+
+func TestTableResultRendersGenericTable(t *testing.T) {
+	t.Parallel()
+
+	server := serve(t, stubHandler{result: tableResult(), err: nil})
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL+"/api/v1/query?query=up", nil)
+	require.NoError(t, err)
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+
+	defer func() { _ = resp.Body.Close() }()
+
+	var body struct {
+		Status string `json:"status"`
+		Data   struct {
+			ResultType string   `json:"resultType"`
+			Columns    []string `json:"columns"`
+			Rows       [][]any  `json:"rows"`
+		} `json:"data"`
+	}
+
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "success", body.Status)
+	assert.Equal(t, "table", body.Data.ResultType)
+	assert.Equal(t, []string{"service", "error_rate", "log"}, body.Data.Columns)
+	// A cross-signal join row renders column-aligned; the absent "log" cell is null.
+	assert.Equal(t, [][]any{
+		{"api", 0.5, "boom"},
+		{"web", float64(0), nil},
+	}, body.Data.Rows)
 }
 
 func TestMissingQueryIsBadRequest(t *testing.T) {

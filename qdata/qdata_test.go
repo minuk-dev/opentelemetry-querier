@@ -1,6 +1,7 @@
 package qdata_test
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -291,4 +292,79 @@ func TestTableResult(t *testing.T) {
 	require.NotNil(t, result.GetTable())
 	assert.Equal(t, []string{"metric", "message"}, result.GetTable().GetColumns())
 	assert.Len(t, result.GetTable().GetRows(), 1)
+}
+
+func TestValueJSON(t *testing.T) {
+	t.Parallel()
+
+	instant := time.Date(2023, 11, 14, 22, 13, 20, 0, time.UTC)
+
+	cases := []struct {
+		name  string
+		value *qdata.Value
+		want  any
+	}{
+		{"double", qdata.Double(0.5), 0.5},
+		{"int", qdata.Int(-7), int64(-7)},
+		{"uint", qdata.Uint(9), uint64(9)},
+		{"string", qdata.Str("hi"), "hi"},
+		{"bool", qdata.Bool(true), true},
+		{"timestamp", qdata.Timestamp(instant), "2023-11-14T22:13:20Z"},
+		{"json passthrough", qdata.JSON(`{"k":1}`), json.RawMessage(`{"k":1}`)},
+		{"array recurses", qdata.Array(qdata.Int(1), qdata.Str("x")), []any{int64(1), "x"}},
+		{"nil value", nil, nil},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, testCase.want, qdata.ValueJSON(testCase.value))
+		})
+	}
+}
+
+func TestRenderTable(t *testing.T) {
+	t.Parallel()
+
+	t.Run("schema drives column order and absent cells are null", func(t *testing.T) {
+		t.Parallel()
+
+		table := qdata.NewTable([]string{"metric", "message"},
+			qdata.NewRow("metric", qdata.Double(0.5), "message", qdata.Str("boom")),
+			qdata.NewRow("metric", qdata.Double(1)),
+		)
+
+		wire := qdata.RenderTable(table)
+
+		assert.Equal(t, []string{"metric", "message"}, wire.Columns)
+		assert.Equal(t, [][]any{{0.5, "boom"}, {float64(1), nil}}, wire.Rows)
+	})
+
+	t.Run("schema-less table derives columns from row keys in first-seen order", func(t *testing.T) {
+		t.Parallel()
+
+		table := qdata.NewTable(nil,
+			qdata.NewRow("b", qdata.Str("1"), "a", qdata.Str("2")),
+			qdata.NewRow("c", qdata.Str("3")),
+		)
+
+		wire := qdata.RenderTable(table)
+
+		assert.Equal(t, []string{"b", "a", "c"}, wire.Columns)
+		assert.Equal(t, [][]any{{"1", "2", nil}, {nil, nil, "3"}}, wire.Rows)
+	})
+
+	t.Run("empty table renders non-nil empty arrays", func(t *testing.T) {
+		t.Parallel()
+
+		wire := qdata.RenderTable(qdata.NewTable(nil))
+
+		assert.Equal(t, []string{}, wire.Columns)
+		assert.Equal(t, [][]any{}, wire.Rows)
+
+		encoded, err := json.Marshal(wire)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"columns":[],"rows":[]}`, string(encoded))
+	})
 }

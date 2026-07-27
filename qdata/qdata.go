@@ -6,6 +6,7 @@
 package qdata
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -325,6 +326,60 @@ func ValueString(value *Value) string {
 		return value.GetJsonValue()
 	default:
 		return value.String()
+	}
+}
+
+// ValueJSON renders a Value as the native Go type it maps to for JSON encoding,
+// so numbers stay numbers and booleans stay booleans (unlike ValueString, which
+// stringifies everything for fingerprints). Timestamps render as RFC3339Nano and
+// durations as their Go string form; a raw JSON value is passed through verbatim;
+// arrays and maps recurse. A nil value (or an unset oneof) renders as nil, which
+// encodes to JSON null.
+func ValueJSON(value *Value) any {
+	switch variant := value.GetValue().(type) {
+	case *qdatav1.Value_DoubleValue:
+		return variant.DoubleValue
+	case *qdatav1.Value_IntValue:
+		return variant.IntValue
+	case *qdatav1.Value_UintValue:
+		return variant.UintValue
+	case *qdatav1.Value_StringValue:
+		return variant.StringValue
+	case *qdatav1.Value_BytesValue:
+		return variant.BytesValue
+	case *qdatav1.Value_BoolValue:
+		return variant.BoolValue
+	case *qdatav1.Value_TimestampValue:
+		return variant.TimestampValue.AsTime().UTC().Format(time.RFC3339Nano)
+	case *qdatav1.Value_DurationValue:
+		return variant.DurationValue.AsDuration().String()
+	default:
+		return valueJSONComposite(value)
+	}
+}
+
+// valueJSONComposite renders the non-scalar Value variants (raw JSON, arrays and
+// maps) for ValueJSON; an unset oneof renders as nil.
+func valueJSONComposite(value *Value) any {
+	switch variant := value.GetValue().(type) {
+	case *qdatav1.Value_JsonValue:
+		return json.RawMessage(variant.JsonValue)
+	case *qdatav1.Value_ArrayValue:
+		out := make([]any, 0, len(variant.ArrayValue.GetValues()))
+		for _, item := range variant.ArrayValue.GetValues() {
+			out = append(out, ValueJSON(item))
+		}
+
+		return out
+	case *qdatav1.Value_MapValue:
+		out := make(map[string]any, len(variant.MapValue.GetValues()))
+		for _, entry := range variant.MapValue.GetValues() {
+			out[entry.GetKey()] = ValueJSON(entry.GetValue())
+		}
+
+		return out
+	default:
+		return nil
 	}
 }
 
@@ -778,6 +833,68 @@ func firstNilRow(table *Table) error {
 	}
 
 	return nil
+}
+
+// TableWire is the language-neutral JSON rendering of a relational Table result
+// (issue #51): an ordered column schema plus column-aligned rows. A cross-signal
+// join has no native Prometheus/Loki/Elasticsearch response shape, so the HTTP
+// acceptors serialize a Table as this generic table rather than dropping it.
+type TableWire struct {
+	Columns []string `json:"columns"`
+	Rows    [][]any  `json:"rows"`
+}
+
+// RenderTable renders a Table as column-aligned rows for a generic JSON table
+// response. Columns come from the table's declared schema; a schema-less table
+// (self-describing rows) derives its columns from the union of row keys in
+// first-seen order. Each cell is the ValueJSON of its column; a column absent
+// from a row renders as null. Columns and Rows are always non-nil so the JSON
+// carries empty arrays rather than null.
+func RenderTable(table *Table) TableWire {
+	columns := table.GetColumns()
+	if len(columns) == 0 {
+		columns = unionRowColumns(table)
+	}
+
+	rows := make([][]any, 0, len(table.GetRows()))
+
+	for _, row := range table.GetRows() {
+		cells := make([]any, len(columns))
+		for i, column := range columns {
+			if value, ok := AttrGet(row.GetValues(), column); ok {
+				cells[i] = ValueJSON(value)
+			}
+		}
+
+		rows = append(rows, cells)
+	}
+
+	if columns == nil {
+		columns = []string{}
+	}
+
+	return TableWire{Columns: columns, Rows: rows}
+}
+
+// unionRowColumns collects every column key used by any row, in first-seen order,
+// for a Table that declares no explicit schema.
+func unionRowColumns(table *Table) []string {
+	seen := map[string]struct{}{}
+
+	var columns []string
+
+	for _, row := range table.GetRows() {
+		for _, attr := range row.GetValues().GetValues() {
+			if _, ok := seen[attr.GetKey()]; ok {
+				continue
+			}
+
+			seen[attr.GetKey()] = struct{}{}
+			columns = append(columns, attr.GetKey())
+		}
+	}
+
+	return columns
 }
 
 // ---- Feedback side channel (spec §Side Channel Feedback) ----
