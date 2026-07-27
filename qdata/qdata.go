@@ -364,7 +364,7 @@ func ValueJSON(value *Value) any {
 func valueJSONComposite(value *Value) any {
 	switch variant := value.GetValue().(type) {
 	case *qdatav1.Value_JsonValue:
-		return json.RawMessage(variant.JsonValue)
+		return jsonCell(variant.JsonValue)
 	case *qdatav1.Value_ArrayValue:
 		return lo.Map(variant.ArrayValue.GetValues(), func(item *Value, _ int) any {
 			return ValueJSON(item)
@@ -376,6 +376,19 @@ func valueJSONComposite(value *Value) any {
 	default:
 		return nil
 	}
+}
+
+// jsonCell passes raw JSON text through as structured JSON when it is valid, so
+// it nests into the response instead of being re-quoted. Empty or malformed text
+// falls back to a plain string: a json.RawMessage carrying invalid bytes makes
+// the whole response fail to encode (and the acceptors have already written the
+// 200 header by then), so one bad cell must not sink the entire result.
+func jsonCell(raw string) any {
+	if json.Valid([]byte(raw)) {
+		return json.RawMessage(raw)
+	}
+
+	return raw
 }
 
 // SetMetadata sets a processor-to-processor hint on a Query, allocating the map
@@ -840,16 +853,13 @@ type TableWire struct {
 }
 
 // RenderTable renders a Table as column-aligned rows for a generic JSON table
-// response. Columns come from the table's declared schema; a schema-less table
-// (self-describing rows) derives its columns from the union of row keys in
-// first-seen order. Each cell is the ValueJSON of its column; a column absent
-// from a row renders as null. Columns and Rows are always non-nil so the JSON
-// carries empty arrays rather than null.
+// response. Columns are the declared schema (in order) followed by any row keys
+// the schema does not cover, so a row value outside the declared schema is still
+// rendered rather than silently dropped. Each cell is the ValueJSON of its
+// column; a column absent from a row renders as null. Columns and Rows are always
+// non-nil so the JSON carries empty arrays rather than null.
 func RenderTable(table *Table) TableWire {
-	columns := table.GetColumns()
-	if len(columns) == 0 {
-		columns = unionRowColumns(table)
-	}
+	columns := tableColumns(table)
 
 	// lo.Map yields non-nil (possibly empty) slices, so an empty table renders as
 	// [] rather than null; an absent cell is ValueJSON(nil), which is null.
@@ -864,15 +874,34 @@ func RenderTable(table *Table) TableWire {
 	return TableWire{Columns: columns, Rows: rows}
 }
 
-// unionRowColumns collects every column key used by any row, in first-seen order,
-// for a Table that declares no explicit schema. lo.Uniq keeps first occurrence
-// and returns a non-nil slice, so a schema-less empty table yields [] columns.
-func unionRowColumns(table *Table) []string {
-	return lo.Uniq(lo.FlatMap(table.GetRows(), func(row *Row, _ int) []string {
-		return lo.Map(row.GetValues().GetValues(), func(attr *KeyValue, _ int) string {
-			return attr.GetKey()
-		})
-	}))
+// tableColumns returns the columns to render: the declared schema first (deduped,
+// in order), then any row key the schema omits (in first-seen order), so no row
+// value is dropped even when the Table's rows step outside its declared schema.
+// The result is a fresh, non-nil slice — never aliasing the Table's own Columns.
+func tableColumns(table *Table) []string {
+	seen := make(map[string]struct{}, len(table.GetColumns()))
+	columns := make([]string, 0, len(table.GetColumns()))
+
+	appendCol := func(column string) {
+		if _, ok := seen[column]; ok {
+			return
+		}
+
+		seen[column] = struct{}{}
+		columns = append(columns, column)
+	}
+
+	for _, column := range table.GetColumns() {
+		appendCol(column)
+	}
+
+	for _, row := range table.GetRows() {
+		for _, attr := range row.GetValues().GetValues() {
+			appendCol(attr.GetKey())
+		}
+	}
+
+	return columns
 }
 
 // ---- Feedback side channel (spec §Side Channel Feedback) ----

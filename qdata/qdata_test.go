@@ -311,6 +311,8 @@ func TestValueJSON(t *testing.T) {
 		{"bool", qdata.Bool(true), true},
 		{"timestamp", qdata.Timestamp(instant), "2023-11-14T22:13:20Z"},
 		{"json passthrough", qdata.JSON(`{"k":1}`), json.RawMessage(`{"k":1}`)},
+		{"invalid json falls back to string", qdata.JSON("{oops"), "{oops"},
+		{"empty json falls back to string", qdata.JSON(""), ""},
 		{"array recurses", qdata.Array(qdata.Int(1), qdata.Str("x")), []any{int64(1), "x"}},
 		{"nil value", nil, nil},
 	}
@@ -339,6 +341,21 @@ func TestRenderTable(t *testing.T) {
 
 		assert.Equal(t, []string{"metric", "message"}, wire.Columns)
 		assert.Equal(t, [][]any{{0.5, "boom"}, {float64(1), nil}}, wire.Rows)
+	})
+
+	t.Run("row keys outside the declared schema are appended, not dropped", func(t *testing.T) {
+		t.Parallel()
+
+		// "extra" is absent from the schema; it must still be rendered as a
+		// trailing column rather than silently lost.
+		table := qdata.NewTable([]string{"metric"},
+			qdata.NewRow("metric", qdata.Double(0.5), "extra", qdata.Str("kept")),
+		)
+
+		wire := qdata.RenderTable(table)
+
+		assert.Equal(t, []string{"metric", "extra"}, wire.Columns)
+		assert.Equal(t, [][]any{{0.5, "kept"}}, wire.Rows)
 	})
 
 	t.Run("schema-less table derives columns from row keys in first-seen order", func(t *testing.T) {

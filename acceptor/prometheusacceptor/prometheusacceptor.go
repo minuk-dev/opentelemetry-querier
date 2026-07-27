@@ -143,12 +143,13 @@ func (a *Acceptor) serve(writer http.ResponseWriter, request *http.Request, quer
 		return
 	}
 
-	data := any(&promData{ResultType: resultType, Result: metricsToResult(result.GetMetrics(), resultType)})
-
 	// A cross-signal join yields a Table, which has no native Prometheus result
 	// shape; render it as a generic columns/rows table instead of dropping it.
+	var data any
 	if table := result.GetTable(); table != nil {
 		data = &promTableData{ResultType: "table", TableWire: qdata.RenderTable(table)}
+	} else {
+		data = &promData{ResultType: resultType, Result: metricsToResult(result.GetMetrics(), resultType)}
 	}
 
 	writeJSON(writer, http.StatusOK, promResponse{
