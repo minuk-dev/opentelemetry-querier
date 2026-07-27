@@ -19,6 +19,8 @@ require (
 	github.com/minuk-dev/opentelemetry-querier/dispatcher/elasticsearchdispatcher v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/processor v0.0.0 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
+	github.com/samber/lo v1.53.0 // indirect
+	golang.org/x/text v0.38.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 

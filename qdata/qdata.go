@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/samber/lo"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -365,19 +366,13 @@ func valueJSONComposite(value *Value) any {
 	case *qdatav1.Value_JsonValue:
 		return json.RawMessage(variant.JsonValue)
 	case *qdatav1.Value_ArrayValue:
-		out := make([]any, 0, len(variant.ArrayValue.GetValues()))
-		for _, item := range variant.ArrayValue.GetValues() {
-			out = append(out, ValueJSON(item))
-		}
-
-		return out
+		return lo.Map(variant.ArrayValue.GetValues(), func(item *Value, _ int) any {
+			return ValueJSON(item)
+		})
 	case *qdatav1.Value_MapValue:
-		out := make(map[string]any, len(variant.MapValue.GetValues()))
-		for _, entry := range variant.MapValue.GetValues() {
-			out[entry.GetKey()] = ValueJSON(entry.GetValue())
-		}
-
-		return out
+		return lo.Associate(variant.MapValue.GetValues(), func(entry *KeyValue) (string, any) {
+			return entry.GetKey(), ValueJSON(entry.GetValue())
+		})
 	default:
 		return nil
 	}
@@ -856,45 +851,28 @@ func RenderTable(table *Table) TableWire {
 		columns = unionRowColumns(table)
 	}
 
-	rows := make([][]any, 0, len(table.GetRows()))
+	// lo.Map yields non-nil (possibly empty) slices, so an empty table renders as
+	// [] rather than null; an absent cell is ValueJSON(nil), which is null.
+	rows := lo.Map(table.GetRows(), func(row *Row, _ int) []any {
+		return lo.Map(columns, func(column string, _ int) any {
+			value, _ := AttrGet(row.GetValues(), column)
 
-	for _, row := range table.GetRows() {
-		cells := make([]any, len(columns))
-		for i, column := range columns {
-			if value, ok := AttrGet(row.GetValues(), column); ok {
-				cells[i] = ValueJSON(value)
-			}
-		}
-
-		rows = append(rows, cells)
-	}
-
-	if columns == nil {
-		columns = []string{}
-	}
+			return ValueJSON(value)
+		})
+	})
 
 	return TableWire{Columns: columns, Rows: rows}
 }
 
 // unionRowColumns collects every column key used by any row, in first-seen order,
-// for a Table that declares no explicit schema.
+// for a Table that declares no explicit schema. lo.Uniq keeps first occurrence
+// and returns a non-nil slice, so a schema-less empty table yields [] columns.
 func unionRowColumns(table *Table) []string {
-	seen := map[string]struct{}{}
-
-	var columns []string
-
-	for _, row := range table.GetRows() {
-		for _, attr := range row.GetValues().GetValues() {
-			if _, ok := seen[attr.GetKey()]; ok {
-				continue
-			}
-
-			seen[attr.GetKey()] = struct{}{}
-			columns = append(columns, attr.GetKey())
-		}
-	}
-
-	return columns
+	return lo.Uniq(lo.FlatMap(table.GetRows(), func(row *Row, _ int) []string {
+		return lo.Map(row.GetValues().GetValues(), func(attr *KeyValue, _ int) string {
+			return attr.GetKey()
+		})
+	}))
 }
 
 // ---- Feedback side channel (spec §Side Channel Feedback) ----
