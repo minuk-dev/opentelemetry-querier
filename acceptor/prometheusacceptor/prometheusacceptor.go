@@ -143,9 +143,18 @@ func (a *Acceptor) serve(writer http.ResponseWriter, request *http.Request, quer
 		return
 	}
 
+	// A cross-signal join yields a Table, which has no native Prometheus result
+	// shape; render it as a generic columns/rows table instead of dropping it.
+	var data any
+	if table := result.GetTable(); table != nil {
+		data = &promTableData{ResultType: "table", TableWire: qdata.RenderTable(table)}
+	} else {
+		data = &promData{ResultType: resultType, Result: metricsToResult(result.GetMetrics(), resultType)}
+	}
+
 	writeJSON(writer, http.StatusOK, promResponse{
 		Status:    "success",
-		Data:      &promData{ResultType: resultType, Result: metricsToResult(result.GetMetrics(), resultType)},
+		Data:      data,
 		ErrorType: "",
 		Error:     "",
 		Warnings:  feedbackWarnings(result.GetFeedback()),
@@ -283,16 +292,24 @@ func injectHeaders(query *qdata.Query, header http.Header) {
 // ---- response serialization ----
 
 type promResponse struct {
-	Status    string    `json:"status"`
-	Data      *promData `json:"data,omitempty"`
-	ErrorType string    `json:"errorType,omitempty"`
-	Error     string    `json:"error,omitempty"`
-	Warnings  []string  `json:"warnings,omitempty"`
+	Status    string   `json:"status"`
+	Data      any      `json:"data,omitempty"`
+	ErrorType string   `json:"errorType,omitempty"`
+	Error     string   `json:"error,omitempty"`
+	Warnings  []string `json:"warnings,omitempty"`
 }
 
 type promData struct {
 	ResultType string       `json:"resultType"`
 	Result     []promSeries `json:"result"`
+}
+
+// promTableData is the response data for a Table result: resultType "table"
+// alongside the generic columns/rows table (issue #51).
+type promTableData struct {
+	qdata.TableWire
+
+	ResultType string `json:"resultType"`
 }
 
 type promSeries struct {

@@ -45,6 +45,15 @@ func logsResult() *qdata.Result {
 	}
 }
 
+func tableResult() *qdata.Result {
+	table := qdata.NewTable([]string{"service", "error_rate", "log"},
+		qdata.NewRow("service", qdata.Str("api"), "error_rate", qdata.Double(0.5), "log", qdata.Str("boom")),
+		qdata.NewRow("service", qdata.Str("web"), "error_rate", qdata.Double(0)),
+	)
+
+	return qdata.TableResult(table)
+}
+
 func serve(t *testing.T, handler pipeline.Handler) *httptest.Server {
 	t.Helper()
 
@@ -135,6 +144,24 @@ func TestSearchRendersHits(t *testing.T) {
 	source := firstHitSource(t, body)
 	assert.Equal(t, "hello", source["message"])
 	assert.Equal(t, "info", source["level"])
+}
+
+func TestTableResultRendersGenericTable(t *testing.T) {
+	t.Parallel()
+
+	server := serve(t, &captureHandler{result: tableResult(), err: nil, seen: nil})
+
+	status, body := do(t, http.MethodGet, server.URL+"/logs-*/_search?q=*", "")
+	require.Equal(t, http.StatusOK, status)
+
+	// A join has no native _search shape, so the response is a generic table
+	// rather than a hits envelope.
+	assert.NotContains(t, body, "hits")
+	assert.Equal(t, []any{"service", "error_rate", "log"}, body["columns"])
+	assert.Equal(t, []any{
+		[]any{"api", 0.5, "boom"},
+		[]any{"web", float64(0), nil},
+	}, body["rows"])
 }
 
 func TestQueryParamBecomesLucenePlan(t *testing.T) {

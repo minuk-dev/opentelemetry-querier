@@ -259,12 +259,21 @@ func injectHeaders(query *qdata.Query, header http.Header) {
 
 // ---- response serialization ----
 
-// resultToResponse renders a qdata logs Result as an Elasticsearch _search
-// response: each record becomes a hit whose _source carries the timestamp,
-// message and attributes. The envelope is built as a generic map because
-// Elasticsearch's field names (timed_out, _index, _source, ...) are snake_case
-// or underscore-prefixed and cannot be expressed as camelCase struct tags.
-func resultToResponse(result *qdata.Result) map[string]any {
+// resultToResponse renders a qdata Result as an Elasticsearch response. A logs
+// Result becomes a _search hits envelope: each record is a hit whose _source
+// carries the timestamp, message and attributes. A cross-signal join yields a
+// Table, which has no native _search shape, so it is rendered as a generic
+// columns/rows table instead of being dropped (issue #51). The envelope is built
+// as a generic map because Elasticsearch's field names (timed_out, _index,
+// _source, ...) are snake_case or underscore-prefixed and cannot be expressed as
+// camelCase struct tags.
+func resultToResponse(result *qdata.Result) any {
+	if table := result.GetTable(); table != nil {
+		wire := qdata.RenderTable(table)
+
+		return map[string]any{"columns": wire.Columns, "rows": wire.Rows}
+	}
+
 	records := result.GetLogs().GetRecords()
 	hits := make([]map[string]any, 0, len(records))
 

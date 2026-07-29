@@ -6,6 +6,7 @@
 package qdata
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/samber/lo"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -326,6 +328,67 @@ func ValueString(value *Value) string {
 	default:
 		return value.String()
 	}
+}
+
+// ValueJSON renders a Value as the native Go type it maps to for JSON encoding,
+// so numbers stay numbers and booleans stay booleans (unlike ValueString, which
+// stringifies everything for fingerprints). Timestamps render as RFC3339Nano and
+// durations as their Go string form; a raw JSON value is passed through verbatim;
+// arrays and maps recurse. A nil value (or an unset oneof) renders as nil, which
+// encodes to JSON null.
+func ValueJSON(value *Value) any {
+	switch variant := value.GetValue().(type) {
+	case *qdatav1.Value_DoubleValue:
+		return variant.DoubleValue
+	case *qdatav1.Value_IntValue:
+		return variant.IntValue
+	case *qdatav1.Value_UintValue:
+		return variant.UintValue
+	case *qdatav1.Value_StringValue:
+		return variant.StringValue
+	case *qdatav1.Value_BytesValue:
+		return variant.BytesValue
+	case *qdatav1.Value_BoolValue:
+		return variant.BoolValue
+	case *qdatav1.Value_TimestampValue:
+		return variant.TimestampValue.AsTime().UTC().Format(time.RFC3339Nano)
+	case *qdatav1.Value_DurationValue:
+		return variant.DurationValue.AsDuration().String()
+	default:
+		return valueJSONComposite(value)
+	}
+}
+
+// valueJSONComposite renders the non-scalar Value variants (raw JSON, arrays and
+// maps) for ValueJSON; an unset oneof renders as nil.
+func valueJSONComposite(value *Value) any {
+	switch variant := value.GetValue().(type) {
+	case *qdatav1.Value_JsonValue:
+		return jsonCell(variant.JsonValue)
+	case *qdatav1.Value_ArrayValue:
+		return lo.Map(variant.ArrayValue.GetValues(), func(item *Value, _ int) any {
+			return ValueJSON(item)
+		})
+	case *qdatav1.Value_MapValue:
+		return lo.Associate(variant.MapValue.GetValues(), func(entry *KeyValue) (string, any) {
+			return entry.GetKey(), ValueJSON(entry.GetValue())
+		})
+	default:
+		return nil
+	}
+}
+
+// jsonCell passes raw JSON text through as structured JSON when it is valid, so
+// it nests into the response instead of being re-quoted. Empty or malformed text
+// falls back to a plain string: a json.RawMessage carrying invalid bytes makes
+// the whole response fail to encode (and the acceptors have already written the
+// 200 header by then), so one bad cell must not sink the entire result.
+func jsonCell(raw string) any {
+	if json.Valid([]byte(raw)) {
+		return json.RawMessage(raw)
+	}
+
+	return raw
 }
 
 // SetMetadata sets a processor-to-processor hint on a Query, allocating the map
@@ -778,6 +841,67 @@ func firstNilRow(table *Table) error {
 	}
 
 	return nil
+}
+
+// TableWire is the language-neutral JSON rendering of a relational Table result
+// (issue #51): an ordered column schema plus column-aligned rows. A cross-signal
+// join has no native Prometheus/Loki/Elasticsearch response shape, so the HTTP
+// acceptors serialize a Table as this generic table rather than dropping it.
+type TableWire struct {
+	Columns []string `json:"columns"`
+	Rows    [][]any  `json:"rows"`
+}
+
+// RenderTable renders a Table as column-aligned rows for a generic JSON table
+// response. Columns are the declared schema (in order) followed by any row keys
+// the schema does not cover, so a row value outside the declared schema is still
+// rendered rather than silently dropped. Each cell is the ValueJSON of its
+// column; a column absent from a row renders as null. Columns and Rows are always
+// non-nil so the JSON carries empty arrays rather than null.
+func RenderTable(table *Table) TableWire {
+	columns := tableColumns(table)
+
+	// lo.Map yields non-nil (possibly empty) slices, so an empty table renders as
+	// [] rather than null; an absent cell is ValueJSON(nil), which is null.
+	rows := lo.Map(table.GetRows(), func(row *Row, _ int) []any {
+		return lo.Map(columns, func(column string, _ int) any {
+			value, _ := AttrGet(row.GetValues(), column)
+
+			return ValueJSON(value)
+		})
+	})
+
+	return TableWire{Columns: columns, Rows: rows}
+}
+
+// tableColumns returns the columns to render: the declared schema first (deduped,
+// in order), then any row key the schema omits (in first-seen order), so no row
+// value is dropped even when the Table's rows step outside its declared schema.
+// The result is a fresh, non-nil slice — never aliasing the Table's own Columns.
+func tableColumns(table *Table) []string {
+	seen := make(map[string]struct{}, len(table.GetColumns()))
+	columns := make([]string, 0, len(table.GetColumns()))
+
+	appendCol := func(column string) {
+		if _, ok := seen[column]; ok {
+			return
+		}
+
+		seen[column] = struct{}{}
+		columns = append(columns, column)
+	}
+
+	for _, column := range table.GetColumns() {
+		appendCol(column)
+	}
+
+	for _, row := range table.GetRows() {
+		for _, attr := range row.GetValues().GetValues() {
+			appendCol(attr.GetKey())
+		}
+	}
+
+	return columns
 }
 
 // ---- Feedback side channel (spec §Side Channel Feedback) ----

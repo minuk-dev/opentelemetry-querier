@@ -12,6 +12,8 @@ require (
 	github.com/minuk-dev/opentelemetry-querier/gen v0.0.0 // indirect
 	github.com/minuk-dev/opentelemetry-querier/processor v0.0.0 // indirect
 	github.com/minuk-dev/opentelemetry-querier/qdata v0.0.0 // indirect
+	github.com/samber/lo v1.53.0 // indirect
+	golang.org/x/text v0.38.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 

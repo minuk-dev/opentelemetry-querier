@@ -303,13 +303,21 @@ func injectHeaders(query *qdata.Query, header http.Header) {
 // ---- response serialization ----
 
 type lokiResponse struct {
-	Status string   `json:"status"`
-	Data   lokiData `json:"data"`
+	Status string `json:"status"`
+	Data   any    `json:"data"`
 }
 
 type lokiData struct {
 	ResultType string      `json:"resultType"`
 	Result     []lokiEntry `json:"result"`
+}
+
+// lokiTableData is the response data for a Table result: resultType "table"
+// alongside the generic columns/rows table (issue #51).
+type lokiTableData struct {
+	qdata.TableWire
+
+	ResultType string `json:"resultType"`
 }
 
 // lokiEntry is one stream (Values holds [ts, line] pairs), one matrix series
@@ -326,6 +334,12 @@ type lokiEntry struct {
 // streams; range metrics become a matrix; instant metrics become a vector (a
 // single value per series), matching Loki's own instant-vs-range result types.
 func resultToResponse(result *qdata.Result, instant bool) lokiResponse {
+	// A cross-signal join yields a Table, which has no native Loki result shape;
+	// render it as a generic columns/rows table instead of dropping it.
+	if table := result.GetTable(); table != nil {
+		return lokiResponse{Status: "success", Data: lokiTableData{ResultType: "table", TableWire: qdata.RenderTable(table)}}
+	}
+
 	if metrics := result.GetMetrics(); metrics != nil && len(metrics.GetSeries()) > 0 {
 		if instant {
 			return lokiResponse{Status: "success", Data: lokiData{ResultType: "vector", Result: metricsToVector(metrics)}}

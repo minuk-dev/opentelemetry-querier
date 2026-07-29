@@ -76,6 +76,15 @@ func metricsResult() *qdata.Result {
 	}
 }
 
+func tableResult() *qdata.Result {
+	table := qdata.NewTable([]string{"service", "error_rate", "log"},
+		qdata.NewRow("service", qdata.Str("api"), "error_rate", qdata.Double(0.5), "log", qdata.Str("boom")),
+		qdata.NewRow("service", qdata.Str("web"), "error_rate", qdata.Double(0)),
+	)
+
+	return qdata.TableResult(table)
+}
+
 func serve(t *testing.T, handler pipeline.Handler) *httptest.Server {
 	t.Helper()
 
@@ -111,6 +120,41 @@ func get(t *testing.T, url string) (int, apiResponse) {
 	}
 
 	return resp.StatusCode, decoded
+}
+
+func TestTableResultRendersGenericTable(t *testing.T) {
+	t.Parallel()
+
+	server := serve(t, stubHandler{result: tableResult(), err: nil})
+
+	target := server.URL + `/loki/api/v1/query?query={job="api"}`
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, target, nil)
+	require.NoError(t, err)
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+
+	defer func() { _ = resp.Body.Close() }()
+
+	var body struct {
+		Status string `json:"status"`
+		Data   struct {
+			ResultType string   `json:"resultType"`
+			Columns    []string `json:"columns"`
+			Rows       [][]any  `json:"rows"`
+		} `json:"data"`
+	}
+
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "success", body.Status)
+	assert.Equal(t, "table", body.Data.ResultType)
+	assert.Equal(t, []string{"service", "error_rate", "log"}, body.Data.Columns)
+	assert.Equal(t, [][]any{
+		{"api", 0.5, "boom"},
+		{"web", float64(0), nil},
+	}, body.Data.Rows)
 }
 
 func TestInstantQueryReturnsStreams(t *testing.T) {
