@@ -58,9 +58,11 @@ func TestAuthRateLimit(t *testing.T) {
 		t.Parallel()
 
 		upstream := newUpstream(t)
-		// rps=1, burst=1: the first request drains the bucket; a second one
-		// arriving before it refills a whole token is rate-limited.
-		base := front(t, upstream, authProc(1))
+		// burst=1 with a deliberately tiny refill rate: the first request drains
+		// the single token, and refilling one more takes ~1000s, so the second
+		// request is rate-limited regardless of any GC/CI/scheduler stall between
+		// the two calls. This keeps the assertion independent of wall-clock timing.
+		base := front(t, upstream, authProc(0.001))
 
 		headers := map[string]string{"Authorization": "Bearer dev-token"}
 
@@ -73,7 +75,8 @@ func TestAuthRateLimit(t *testing.T) {
 }
 
 // authProc builds the gateway processor requiring the "dev-token" bearer and
-// limiting to rps requests per second with a burst of 1.
+// limiting to rps requests per second with a burst of 1. A fractional rps starves
+// the refill so over-limit tests stay independent of wall-clock timing.
 func authProc(rps float64) processor.Processor {
 	return authratelimitprocessor.New(authratelimitprocessor.Config{
 		RequireBearer:     true,

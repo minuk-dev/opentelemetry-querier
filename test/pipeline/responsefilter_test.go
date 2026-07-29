@@ -73,6 +73,31 @@ func TestResponseFilter(t *testing.T) {
 	})
 }
 
+// TestResponseFilterNoWarningThroughRealDispatcher pins the limitation the fake
+// dispatcher in TestResponseFilter works around: through the real acceptor ->
+// dispatcher path the Prometheus wire format carries no metric type, so every
+// series is UNKNOWN and the counter-without-rate check never fires — even with
+// WarnCounterWithoutRate enabled. This exercises the real end-to-end path so a
+// regression in metric-type handling would be caught here.
+func TestResponseFilterNoWarningThroughRealDispatcher(t *testing.T) {
+	t.Parallel()
+
+	filter := responsefilterprocessor.New(responsefilterprocessor.Config{
+		DropLabels:             nil,
+		MaskLabels:             nil,
+		MaskWith:               "",
+		WarnCounterWithoutRate: true,
+	})
+
+	upstream := newUpstream(t)
+	base := front(t, upstream, filter)
+
+	code, body := getWith(t, base, nil)
+
+	assert.Equal(t, http.StatusOK, code, "body: %s", body)
+	assert.NotContains(t, body, "rate()", "an untyped series cannot trigger the counter warning")
+}
+
 // counterDispatcher is a fake dispatcher that returns a single raw cumulative
 // counter series, standing in for storage on the response path.
 type counterDispatcher struct {
