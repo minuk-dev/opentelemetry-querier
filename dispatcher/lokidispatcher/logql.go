@@ -66,6 +66,11 @@ func renderSelect(sel *qdata.Select) (string, error) {
 			return "", opErr
 		}
 
+		nameErr := checkIdentifier("stream label", matcher.GetName())
+		if nameErr != nil {
+			return "", nameErr
+		}
+
 		parts = append(parts, matcher.GetName()+operator+strconv.Quote(matcher.GetValue()))
 	}
 
@@ -112,7 +117,10 @@ func renderAggregate(agg *qdata.Aggregate) (string, error) {
 		return "", err
 	}
 
-	grouping := groupingClause(agg)
+	grouping, err := groupingClause(agg)
+	if err != nil {
+		return "", err
+	}
 
 	// quantile/topk/bottomk take a leading scalar parameter.
 	if aggTakesParam(agg.GetOp()) {
@@ -125,19 +133,34 @@ func renderAggregate(agg *qdata.Aggregate) (string, error) {
 }
 
 // groupingClause renders the optional " by(...)" / " without(...)" clause.
-func groupingClause(agg *qdata.Aggregate) string {
-	if by := agg.GetBy(); len(by) > 0 {
-		return " by(" + strings.Join(by, ",") + ")"
+func groupingClause(agg *qdata.Aggregate) (string, error) {
+	if byLabels := agg.GetBy(); len(byLabels) > 0 {
+		err := checkIdentifiers("grouping label", byLabels)
+		if err != nil {
+			return "", err
+		}
+
+		return " by(" + strings.Join(byLabels, ",") + ")", nil
 	}
 
 	if without := agg.GetWithout(); len(without) > 0 {
-		return " without(" + strings.Join(without, ",") + ")"
+		err := checkIdentifiers("grouping label", without)
+		if err != nil {
+			return "", err
+		}
+
+		return " without(" + strings.Join(without, ",") + ")", nil
 	}
 
-	return ""
+	return "", nil
 }
 
 func renderFunction(function *qdata.Function) (string, error) {
+	nameErr := checkIdentifier("function name", function.GetName())
+	if nameErr != nil {
+		return "", nameErr
+	}
+
 	args := make([]string, 0, len(function.GetArgs())+len(function.GetStringArgs()))
 
 	for _, arg := range function.GetArgs() {
@@ -175,6 +198,32 @@ func renderBinary(bin *qdata.BinaryOp) (string, error) {
 	// Parenthesize operands so operator precedence in the source plan is
 	// preserved regardless of LogQL's own precedence rules.
 	return fmt.Sprintf("(%s) %s (%s)", lhs, symbol, rhs), nil
+}
+
+// checkIdentifier gates an identifier that is interpolated into the rendered
+// LogQL without a quoting delimiter (stream label, grouping label, function
+// name). Anything outside the bare-identifier grammar could close its construct
+// and append attacker-chosen LogQL — including a second stream selector that the
+// enforced tenant matchers never reach — so it fails closed instead (issue #64).
+func checkIdentifier(kind, name string) error {
+	if !qdata.ValidIdentifier(name) {
+		return qerror.New(qerror.CodeInvalidArgument,
+			"lokidispatcher: invalid %s %q: want [a-zA-Z_][a-zA-Z0-9_]*", kind, name)
+	}
+
+	return nil
+}
+
+// checkIdentifiers applies checkIdentifier to every name in a label list.
+func checkIdentifiers(kind string, names []string) error {
+	for _, name := range names {
+		err := checkIdentifier(kind, name)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func matchOpSymbol(op qdata.MatchOp) (string, error) {
