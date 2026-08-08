@@ -12,6 +12,7 @@ import (
 
 	"github.com/minuk-dev/opentelemetry-querier/dispatcher/lokidispatcher"
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
+	"github.com/minuk-dev/opentelemetry-querier/qerror"
 )
 
 func newServer(t *testing.T, status int, body string) *httptest.Server {
@@ -280,4 +281,59 @@ func TestValidateRejectsBadConfig(t *testing.T) {
 	require.NoError(t, lokidispatcher.Validate(lokidispatcher.Config{
 		Endpoint: "", TenantHeader: "", Timeout: 0, Limit: 100, Direction: "backward",
 	}), "well-formed config must pass")
+}
+
+// TestDispatchRejectsInjectedIdentifiers covers issue #64: plan identifiers are
+// interpolated into the LogQL text with no quoting delimiter, so one carrying
+// LogQL syntax used to close its construct and append a second stream selector —
+// one the enforced tenant matchers never reach. Every identifier site must now
+// fail closed before the upstream is contacted.
+func TestDispatchRejectsInjectedIdentifiers(t *testing.T) {
+	t.Parallel()
+
+	// A stream selector that escapes its own braces: the enforced tenant matcher
+	// sorts into the left side, leaving `or {job="secret"}` completely unscoped.
+	escaping := logsSelect(eq("tenant", "acme"), eq(`zz="1"} or {job`, "secret"))
+	apiSelect := logsSelect(eq("job", "api"))
+
+	cases := map[string]*qdata.QueryPlan{
+		"stream label escapes the selector": qdata.Plan(escaping),
+		"stream label with whitespace":      qdata.Plan(logsSelect(eq("job name", "api"))),
+		"empty stream label":                qdata.Plan(logsSelect(eq("", "api"))),
+		"dotted attribute name":             qdata.Plan(logsSelect(eq("http.status_code", "200"))),
+		"grouping label escapes by()": qdata.Plan(
+			qdata.AggregateNode(qdata.AggSum, []string{`a) or {job="secret"} # `}, nil, 0, apiSelect)),
+		"without label escapes": qdata.Plan(
+			qdata.AggregateNode(qdata.AggSum, nil, []string{`a) or {job="secret"} # `}, 0, apiSelect)),
+		"function name is arbitrary logql": qdata.Plan(
+			qdata.FunctionNode(`abs(1) or {job="secret"} or abs`, nil)),
+	}
+
+	for name, plan := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				t.Error("upstream must not be called for a plan with an invalid identifier")
+			}))
+			t.Cleanup(server.Close)
+
+			_, err := newDispatcher(server.URL).Dispatch(context.Background(), &qdata.Query{Plan: plan})
+			require.Error(t, err)
+			assert.Equal(t, qerror.CodeInvalidArgument, qerror.CodeOf(err),
+				"an unrenderable identifier is the caller's fault, not the upstream's")
+		})
+	}
+}
+
+// TestDispatchAcceptsOrdinaryIdentifiers guards the fix against over-blocking:
+// the identifiers real LogQL uses must keep rendering.
+func TestDispatchAcceptsOrdinaryIdentifiers(t *testing.T) {
+	t.Parallel()
+
+	plan := qdata.Plan(qdata.AggregateNode(qdata.AggSum, []string{"job", "_x", "a1"}, nil, 0,
+		logsSelect(eq("job", "api"), eq("level", "info"))))
+
+	assert.Equal(t, `sum by(job,_x,a1)({job="api",level="info"})`,
+		captureQuery(t, &qdata.Query{Plan: plan}))
 }
