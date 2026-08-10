@@ -73,6 +73,18 @@ linters:
     generated: strict
     paths:
       - gen
+    rules:
+      # The Cortex/Mimir multi-tenancy header is spelled "X-Scope-OrgID" across
+      # the ecosystem (and in config.yaml), which is not Go's canonical MIME form
+      # ("X-Scope-Orgid"). Reading it is still correct: http.Header.Get
+      # canonicalizes its key at runtime — staticcheck's S1035 confirms this by
+      # rejecting an explicit CanonicalHeaderKey call as redundant. So the
+      # diagnostic has no valid resolution in code, and a //nolint:canonicalheader
+      # is not one either: nolintlint reports that directive as unused even though
+      # it does suppress the issue, so the two linters deadlock.
+      - linters:
+          - canonicalheader
+        text: X-Scope-OrgID
 
 formatters:
   enable:
