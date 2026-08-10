@@ -53,7 +53,7 @@ func newUpstream(t *testing.T) *fakeUpstream {
 		upstream.mu.Lock()
 		upstream.query = request.FormValue("query")
 		// Get canonicalizes at runtime; the const mirrors config.yaml verbatim.
-		upstream.tenant = request.Header.Get(tenantHeader) //nolint:canonicalheader
+		upstream.tenant = request.Header.Get(tenantHeader)
 		body := upstream.body
 		upstream.mu.Unlock()
 
