@@ -6,7 +6,7 @@ require (
 	github.com/minuk-dev/opentelemetry-querier/gen v0.0.0
 	github.com/samber/lo v1.53.0
 	github.com/stretchr/testify v1.11.1
-	google.golang.org/protobuf v1.36.11
+	google.golang.org/protobuf v1.36.12
 )
 
 require (

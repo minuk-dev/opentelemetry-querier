@@ -9,7 +9,7 @@ require (
 	github.com/minuk-dev/opentelemetry-querier/qdata v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/qerror v0.0.0
 	github.com/stretchr/testify v1.11.1
-	google.golang.org/protobuf v1.36.11
+	google.golang.org/protobuf v1.36.12
 )
 
 require (
