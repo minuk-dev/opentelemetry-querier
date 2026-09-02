@@ -12,6 +12,7 @@ import (
 
 	"github.com/minuk-dev/opentelemetry-querier/dispatcher/prometheusdispatcher"
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
+	"github.com/minuk-dev/opentelemetry-querier/qerror"
 )
 
 func newServer(t *testing.T, status int, body string) *httptest.Server {
@@ -205,4 +206,65 @@ func TestDispatchRejectsUnrenderablePlan(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
+}
+
+// TestDispatchRejectsInjectedIdentifiers covers issue #64: plan identifiers are
+// interpolated into the PromQL text with no quoting delimiter, so one carrying
+// PromQL syntax used to close its construct and append a second selector — one
+// the enforced tenant matchers never reach. Every identifier site must now fail
+// closed before the upstream is contacted.
+func TestDispatchRejectsInjectedIdentifiers(t *testing.T) {
+	t.Parallel()
+
+	// A selector that escapes its own braces: the enforced tenant matcher sorts
+	// into the left side, leaving `or secret_metric{...}` completely unscoped.
+	escaping := metricSelect(eq("tenant", "acme"), eq(`zz="1"} or secret_metric{x`, "1"))
+	upSelect := metricSelect(eq("__name__", "up"))
+
+	cases := map[string]*qdata.QueryPlan{
+		"label name escapes the selector": qdata.Plan(escaping),
+		"label name with whitespace":      qdata.Plan(metricSelect(eq("job name", "api"))),
+		"empty label name":                qdata.Plan(metricSelect(eq("", "api"))),
+		"dotted attribute name":           qdata.Plan(metricSelect(eq("http.status_code", "200"))),
+		"grouping label escapes by()": qdata.Plan(
+			qdata.AggregateNode(qdata.AggSum, []string{`a) or secret_metric # `}, nil, 0, upSelect)),
+		"without label escapes": qdata.Plan(
+			qdata.AggregateNode(qdata.AggSum, nil, []string{`a) or secret_metric # `}, 0, upSelect)),
+		"function name is arbitrary promql": qdata.Plan(
+			qdata.FunctionNode(`abs(up) or secret_metric or abs`, nil)),
+		"on() label escapes": qdata.Plan(qdata.BinaryNode(qdata.BinDiv, upSelect, upSelect,
+			&qdata.VectorMatch{On: []string{`a) or secret_metric # `}})),
+		"ignoring() label escapes": qdata.Plan(qdata.BinaryNode(qdata.BinDiv, upSelect, upSelect,
+			&qdata.VectorMatch{Ignoring: []string{`a) or secret_metric # `}})),
+		"group_left() label escapes": qdata.Plan(qdata.BinaryNode(qdata.BinDiv, upSelect, upSelect,
+			&qdata.VectorMatch{Cardinality: qdata.CardinalityManyToOne, Include: []string{`a) or secret_metric # `}})),
+	}
+
+	for name, plan := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				t.Error("upstream must not be called for a plan with an invalid identifier")
+			}))
+			t.Cleanup(server.Close)
+
+			_, err := newDispatcher(server.URL).Dispatch(context.Background(), &qdata.Query{Plan: plan})
+			require.Error(t, err)
+			assert.Equal(t, qerror.CodeInvalidArgument, qerror.CodeOf(err),
+				"an unrenderable identifier is the caller's fault, not the upstream's")
+		})
+	}
+}
+
+// TestDispatchAcceptsOrdinaryIdentifiers guards the fix against over-blocking:
+// the identifiers real PromQL uses must keep rendering.
+func TestDispatchAcceptsOrdinaryIdentifiers(t *testing.T) {
+	t.Parallel()
+
+	plan := qdata.Plan(qdata.AggregateNode(qdata.AggSum, []string{"job", "_x", "a1"}, nil, 0,
+		metricSelect(eq("__name__", "up"), eq("job", "api"))))
+
+	assert.Equal(t, `sum by(job,_x,a1)({__name__="up",job="api"})`,
+		captureQuery(t, &qdata.Query{Plan: plan}))
 }
