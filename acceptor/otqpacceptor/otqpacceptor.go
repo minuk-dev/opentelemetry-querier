@@ -22,6 +22,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/minuk-dev/opentelemetry-querier/acceptor"
 	"github.com/minuk-dev/opentelemetry-querier/component"
 	otqpv1 "github.com/minuk-dev/opentelemetry-querier/gen/otqp/v1"
 	"github.com/minuk-dev/opentelemetry-querier/pipeline"
@@ -152,7 +153,7 @@ type grpcService struct {
 }
 
 func (s *grpcService) Query(ctx context.Context, req *otqpv1.QueryRequest) (*otqpv1.QueryResponse, error) {
-	injectMetadata(ctx, req.GetQuery())
+	prepareIngress(ctx, req.GetQuery())
 
 	result, err := s.handler.Handle(ctx, req.GetQuery())
 	if err != nil {
@@ -168,7 +169,7 @@ func (s *grpcService) QueryStream(
 	req *otqpv1.QueryRequest,
 	stream grpc.ServerStreamingServer[otqpv1.QueryResponse],
 ) error {
-	injectMetadata(stream.Context(), req.GetQuery())
+	prepareIngress(stream.Context(), req.GetQuery())
 
 	result, err := s.handler.Handle(stream.Context(), req.GetQuery())
 	if err != nil {
@@ -237,9 +238,11 @@ func (a *Acceptor) handleHTTPQuery(writer http.ResponseWriter, request *http.Req
 		return
 	}
 
-	// Carry inbound HTTP headers onto the query so downstream processors (auth,
-	// tenant) can read them. injectMetadata is the gRPC analogue.
-	injectHeaders(req.GetQuery(), request.Header)
+	// Admit the decoded query: drop the pipeline-owned fields the client may have
+	// set on it and carry the inbound HTTP headers onto it, so downstream
+	// processors (auth, tenant) read the transport's values. prepareIngress is
+	// the gRPC analogue.
+	acceptor.PrepareIngress(req.GetQuery(), request.Header)
 
 	result, err := a.handler.Handle(request.Context(), req.GetQuery())
 	if err != nil {
@@ -295,19 +298,25 @@ func isJSON(contentType string) bool {
 	return mediaType != "application/x-protobuf" && mediaType != "application/protobuf"
 }
 
-// injectMetadata carries inbound gRPC metadata onto the query as headers, the
-// gRPC analogue of injectHeaders on the HTTP path. Without this, header-based
-// processors (auth, tenant) would see nothing over gRPC, since a gRPC client
-// sends credentials as metadata rather than in the request body.
+// prepareIngress admits a query that arrived over gRPC, the analogue of the
+// acceptor.PrepareIngress call on the HTTP path: inbound gRPC metadata stands in
+// for the transport headers, since a gRPC client sends credentials as metadata
+// rather than in the request body. It runs even when the RPC carries no metadata
+// so the query is still sanitized.
+func prepareIngress(ctx context.Context, query *qdata.Query) {
+	acceptor.PrepareIngress(query, metadataHeaders(ctx))
+}
+
+// metadataHeaders renders the inbound gRPC metadata as transport headers.
 // metadata.MD and http.Header share the map[string][]string underlying type, so
-// the same injector applies; downstream lookups are case-insensitive, so gRPC's
-// lower-cased keys still match canonical header names. Reserved gRPC/HTTP2
-// metadata (content-type, user-agent, grpc-*, te, :pseudo) is dropped so only
-// application metadata reaches the query.
-func injectMetadata(ctx context.Context, query *qdata.Query) {
+// the header injector applies unchanged; downstream lookups are case-insensitive,
+// so gRPC's lower-cased keys still match canonical header names. Reserved
+// gRPC/HTTP2 metadata (content-type, user-agent, grpc-*, te, :pseudo) is dropped
+// so only application metadata reaches the query.
+func metadataHeaders(ctx context.Context) http.Header {
 	incoming, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return
+		return nil
 	}
 
 	app := make(http.Header, len(incoming))
@@ -320,7 +329,7 @@ func injectMetadata(ctx context.Context, query *qdata.Query) {
 		app[key] = values
 	}
 
-	injectHeaders(query, app)
+	return app
 }
 
 // isReservedMetadata reports whether a gRPC metadata key is transport-reserved
@@ -335,30 +344,4 @@ func isReservedMetadata(key string) bool {
 	// grpc- covers the reserved grpc-* family (grpc-timeout, grpc-encoding, …);
 	// : covers HTTP/2 pseudo-headers.
 	return strings.HasPrefix(key, "grpc-") || strings.HasPrefix(key, ":")
-}
-
-// injectHeaders copies header onto the query, with each source header taking
-// precedence over any value already on the query. It removes case-insensitive
-// duplicates so a header the client also set in the request body cannot shadow
-// (or be shadowed by) the injected transport value: downstream lookups match
-// case-insensitively, so two entries differing only in case would make the
-// winner depend on map iteration order.
-func injectHeaders(query *qdata.Query, header http.Header) {
-	if query == nil || len(header) == 0 {
-		return
-	}
-
-	if query.Header == nil {
-		query.Header = make(map[string]*qdata.HeaderValues, len(header))
-	}
-
-	for key, values := range header {
-		for existing := range query.Header {
-			if existing != key && strings.EqualFold(existing, key) {
-				delete(query.Header, existing)
-			}
-		}
-
-		query.Header[key] = &qdata.HeaderValues{Values: values}
-	}
 }

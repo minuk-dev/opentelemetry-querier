@@ -919,13 +919,22 @@ type Query struct {
 	Step     *durationpb.Duration `protobuf:"bytes,4,opt,name=step,proto3" json:"step,omitempty"`
 	Modifier *Modifier            `protobuf:"bytes,5,opt,name=modifier,proto3" json:"modifier,omitempty"`
 	// enforced_matchers are additional label matchers to enforce on the query,
-	// AND-ed into every Select of the plan by the query-rewrite processor.
+	// AND-ed into every Select of the plan by the query-rewrite processor. Like
+	// metadata below it is pipeline state, not client input, so acceptors clear it
+	// at ingress.
 	EnforcedMatchers []*LabelMatcher          `protobuf:"bytes,8,rep,name=enforced_matchers,json=enforcedMatchers,proto3" json:"enforced_matchers,omitempty"`
-	Header           map[string]*HeaderValues `protobuf:"bytes,9,rep,name=header,proto3" json:"header,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`      // inbound request headers.
-	Metadata         map[string]string        `protobuf:"bytes,10,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"` // processor-to-processor hints.
+	Header           map[string]*HeaderValues `protobuf:"bytes,9,rep,name=header,proto3" json:"header,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"` // inbound request headers.
+	// metadata carries processor-to-processor hints, among them the resolved
+	// tenant id (qdata.MetadataTenantID). It is a field of the request message, so
+	// a client can populate it, but it is pipeline state rather than client input:
+	// acceptors clear it at ingress, before the query reaches the first processor.
+	// Trusting an inbound value would let a client choose its own tenant and defeat
+	// the header-based tenancy an upstream gateway enforces.
+	Metadata map[string]string `protobuf:"bytes,10,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
 	// enforced_predicates is the optional richer form of enforced_matchers: a
 	// forest of predicate trees (implicitly AND-ed) that supports boolean
 	// composition, AND-ed into every Select of the plan. See design note #10.
+	// It is cleared at ingress for the same reason as enforced_matchers.
 	EnforcedPredicates []*Predicate `protobuf:"bytes,11,rep,name=enforced_predicates,json=enforcedPredicates,proto3" json:"enforced_predicates,omitempty"`
 	// plan is the structured, language-neutral query (design note #10, Phase 3 /
 	// §4.3 IR). It is the query: acceptors build it from their native query and

@@ -49,16 +49,24 @@ func New(cfg Config) *Processor {
 // ProcessQuery resolves the tenant and, if configured, registers the isolation
 // matcher.
 func (p *Processor) ProcessQuery(_ context.Context, query *qdata.Query) error {
-	tenantID := qdata.TenantID(query)
-	if tenantID == "" {
-		tenantID = headerValue(query, p.cfg.Header)
-	}
-
+	// The header (or the configured default) is the only tenant source an upstream
+	// gateway or authenticator controls, so it is the sole input here. A tenant id
+	// already sitting in the query's metadata is never read: metadata rides on the
+	// request message, so a client can set it over the wire (issue #65). The
+	// acceptors strip it at ingress; resolving from the transport again — and
+	// overwriting whatever was there — keeps an acceptor that forgets to sanitize
+	// from silently reopening the spoof.
+	tenantID := headerValue(query, p.cfg.Header)
 	if tenantID == "" {
 		tenantID = p.cfg.Default
 	}
 
 	if tenantID == "" {
+		// No tenant resolved: drop any client-supplied id so the downstream
+		// from_tenant consumers (query-rewrite, authz, rate limit) and the
+		// dispatchers see an unresolved tenant rather than the attacker's.
+		qdata.DeleteMetadata(query, qdata.MetadataTenantID)
+
 		if p.cfg.Required {
 			return qerror.New(qerror.CodeUnauthenticated, "tenant: missing %s header", p.cfg.Header)
 		}

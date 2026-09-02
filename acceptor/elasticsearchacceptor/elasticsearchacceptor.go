@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/minuk-dev/opentelemetry-querier/acceptor"
 	"github.com/minuk-dev/opentelemetry-querier/component"
 	"github.com/minuk-dev/opentelemetry-querier/pipeline"
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
@@ -189,7 +190,7 @@ func parseSearch(request *http.Request) (*qdata.Query, error) {
 		Context: qdata.ContextInstant,
 		Plan:    plan,
 	}
-	injectHeaders(query, request.Header)
+	acceptor.PrepareIngress(query, request.Header)
 
 	return query, nil
 }
@@ -241,20 +242,6 @@ func queryStringFromBody(reader io.Reader) (string, error) {
 	}
 
 	return text, nil
-}
-
-func injectHeaders(query *qdata.Query, header http.Header) {
-	if len(header) == 0 {
-		return
-	}
-
-	if query.Header == nil {
-		query.Header = make(map[string]*qdata.HeaderValues, len(header))
-	}
-
-	for key, values := range header {
-		query.Header[key] = &qdata.HeaderValues{Values: values}
-	}
 }
 
 // ---- response serialization ----
