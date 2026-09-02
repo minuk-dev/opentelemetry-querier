@@ -17,6 +17,11 @@ the gRPC path (metadata keys are lower-cased by gRPC, but the processors look
 them up case-insensitively). A gRPC client therefore sends `X-Scope-OrgID` etc.
 as request metadata, not in the query body.
 
+OTQP is the one acceptor whose client hands over a whole `qdata.Query`, so the
+[ingress trust boundary](../README.md#the-trust-boundary) matters most here: the query's
+`metadata` (notably `tenant.id`), `enforced_matchers` and `enforced_predicates`
+are pipeline state and are cleared before the query reaches the first processor.
+
 ## Config
 
 | Key | Default | Description |

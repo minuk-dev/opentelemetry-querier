@@ -19,6 +19,7 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/minuk-dev/opentelemetry-querier/acceptor"
 	"github.com/minuk-dev/opentelemetry-querier/component"
 	"github.com/minuk-dev/opentelemetry-querier/pipeline"
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
@@ -190,7 +191,7 @@ func parseInstant(request *http.Request) (*qdata.Query, error) {
 
 	query := &qdata.Query{Signal: qdata.SignalMetrics, Context: qdata.ContextInstant, Plan: plan}
 	query.Range = &qdata.TimeRange{Start: nil, End: timestamppb.New(evalAt), StartExclusive: false, EndExclusive: false}
-	injectHeaders(query, request.Header)
+	acceptor.PrepareIngress(query, request.Header)
 
 	return query, nil
 }
@@ -234,7 +235,7 @@ func parseRange(request *http.Request) (*qdata.Query, error) {
 		EndExclusive:   false,
 	}
 	query.Step = durationpb.New(step)
-	injectHeaders(query, request.Header)
+	acceptor.PrepareIngress(query, request.Header)
 
 	return query, nil
 }
@@ -273,20 +274,6 @@ func parseStep(raw string) (time.Duration, error) {
 	}
 
 	return parsed, nil
-}
-
-func injectHeaders(query *qdata.Query, header http.Header) {
-	if len(header) == 0 {
-		return
-	}
-
-	if query.Header == nil {
-		query.Header = make(map[string]*qdata.HeaderValues, len(header))
-	}
-
-	for key, values := range header {
-		query.Header[key] = &qdata.HeaderValues{Values: values}
-	}
 }
 
 // ---- response serialization ----

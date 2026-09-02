@@ -405,6 +405,17 @@ func SetMetadata(q *Query, key, value string) {
 // string when absent.
 func Metadata(q *Query, key string) string { return q.GetMetadata()[key] }
 
+// DeleteMetadata removes a processor-to-processor hint from a Query. A processor
+// that resolves a hint from a trusted source uses it to drop an untrusted value
+// when it resolves to nothing, rather than leaving the stale one behind.
+func DeleteMetadata(q *Query, key string) {
+	if q == nil {
+		return
+	}
+
+	delete(q.Metadata, key)
+}
+
 // MetadataTenantID is the metadata key holding the resolved tenant id. Tenancy
 // is request-context/transport metadata (Cortex/Mimir/Thanos/Loki X-Scope-OrgID)
 // rather than a query-language field, so it lives here instead of on Query.

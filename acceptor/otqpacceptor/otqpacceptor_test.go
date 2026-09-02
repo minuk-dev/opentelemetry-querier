@@ -1,7 +1,9 @@
 package otqpacceptor_test
 
 import (
+	"bytes"
 	"context"
+	"net/http"
 	"testing"
 	"time"
 
@@ -40,6 +42,25 @@ func startGRPC(t *testing.T, seen chan<- *qdata.Query) *grpc.ClientConn {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	return conn
+}
+
+// startHTTP boots an OTQP HTTP acceptor on an ephemeral port and returns the
+// base URL of its query endpoint. The query seen by the handler is delivered on
+// the provided channel. Cleanup is registered on t.
+func startHTTP(t *testing.T, seen chan<- *qdata.Query) string {
+	t.Helper()
+
+	handler := pipeline.HandlerFunc(func(_ context.Context, query *qdata.Query) (*qdata.Result, error) {
+		seen <- query
+
+		return &qdata.Result{}, nil
+	})
+
+	acceptor := otqpacceptor.New(otqpacceptor.Config{GRPCEndpoint: "", HTTPEndpoint: "127.0.0.1:0"}, handler)
+	require.NoError(t, acceptor.Start(context.Background(), nil))
+	t.Cleanup(func() { _ = acceptor.Shutdown(context.Background()) })
+
+	return "http://" + acceptor.HTTPListenAddr() + otqpacceptor.HTTPQueryPath
 }
 
 // waitForQuery returns the query the handler saw, failing if it never arrived.
@@ -187,4 +208,69 @@ func TestGRPCMetadataIsPerRPC(t *testing.T) {
 	assert.Equal(t, []string{"alice"}, callUser("alice"), "first RPC")
 	assert.Equal(t, []string{"bob"}, callUser("bob"), "second RPC on the same connection is not the first's cached value")
 	assert.Empty(t, callUser(""), "an RPC the client sends without metadata carries none")
+}
+
+// spoofedQueryJSON is the issue #65 exploit body: the client picks its own
+// tenant.id and enforcement in the request message, next to a header an upstream
+// gateway set to the tenant it actually authenticated.
+const spoofedQueryJSON = `{"query":{` +
+	`"metadata":{"tenant.id":"victim-corp"},` +
+	`"enforcedMatchers":[{"name":"tenant","op":"MATCH_OP_EQUAL","value":"victim-corp"}],` +
+	`"enforcedPredicates":[{"leaf":{"name":"tenant","op":"MATCH_OP_EQUAL","value":"victim-corp"}}]}}`
+
+// TestHTTPStripsClientPipelineState is the end-to-end regression for issue #65
+// on the OTQP/HTTP path: metadata and enforcement ride on the request message,
+// so they must not survive the trust boundary. Before the fix the tenant
+// processor read tenant.id straight out of the body and the header — the only
+// thing an upstream authenticator controls — never got a say.
+func TestHTTPStripsClientPipelineState(t *testing.T) {
+	t.Parallel()
+
+	seen := make(chan *qdata.Query, 1)
+	url := startHTTP(t, seen)
+
+	req, err := http.NewRequestWithContext(
+		context.Background(), http.MethodPost, url, bytes.NewBufferString(spoofedQueryJSON))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Scope-OrgID", "acme")
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	query := waitForQuery(t, seen)
+
+	assert.Empty(t, query.GetMetadata(), "client-supplied metadata must not reach the pipeline")
+	assert.Empty(t, query.GetEnforcedMatchers())
+	assert.Empty(t, query.GetEnforcedPredicates())
+	require.Contains(t, query.GetHeader(), "X-Scope-Orgid")
+	assert.Equal(t, []string{"acme"}, query.GetHeader()["X-Scope-Orgid"].GetValues(),
+		"the transport header is what a tenancy processor gets to resolve from")
+}
+
+// TestGRPCStripsClientPipelineState is the same regression on the gRPC path,
+// where the sanitization must also run for an RPC that carries no metadata at
+// all — that call still carries a request body.
+func TestGRPCStripsClientPipelineState(t *testing.T) {
+	t.Parallel()
+
+	seen := make(chan *qdata.Query, 1)
+	client := otqpv1.NewQueryServiceClient(startGRPC(t, seen))
+
+	req := &otqpv1.QueryRequest{Query: &qdata.Query{
+		Metadata: map[string]string{qdata.MetadataTenantID: "victim-corp"},
+		EnforcedMatchers: []*qdata.LabelMatcher{
+			{Name: "tenant", Op: qdata.MatchEqual, Value: "victim-corp"},
+		},
+	}}
+
+	_, err := client.Query(context.Background(), req)
+	require.NoError(t, err)
+
+	query := waitForQuery(t, seen)
+
+	assert.Empty(t, query.GetMetadata(), "an RPC without metadata is still sanitized")
+	assert.Empty(t, query.GetEnforcedMatchers())
 }

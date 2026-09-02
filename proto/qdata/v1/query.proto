@@ -116,15 +116,25 @@ message Query {
   // under qdata.MetadataTenantID rather than as a dedicated field here.
 
   // enforced_matchers are additional label matchers to enforce on the query,
-  // AND-ed into every Select of the plan by the query-rewrite processor.
+  // AND-ed into every Select of the plan by the query-rewrite processor. Like
+  // metadata below it is pipeline state, not client input, so acceptors clear it
+  // at ingress.
   repeated LabelMatcher enforced_matchers = 8;
 
   map<string, HeaderValues> header = 9; // inbound request headers.
-  map<string, string> metadata = 10;    // processor-to-processor hints.
+
+  // metadata carries processor-to-processor hints, among them the resolved
+  // tenant id (qdata.MetadataTenantID). It is a field of the request message, so
+  // a client can populate it, but it is pipeline state rather than client input:
+  // acceptors clear it at ingress, before the query reaches the first processor.
+  // Trusting an inbound value would let a client choose its own tenant and defeat
+  // the header-based tenancy an upstream gateway enforces.
+  map<string, string> metadata = 10;
 
   // enforced_predicates is the optional richer form of enforced_matchers: a
   // forest of predicate trees (implicitly AND-ed) that supports boolean
   // composition, AND-ed into every Select of the plan. See design note #10.
+  // It is cleared at ingress for the same reason as enforced_matchers.
   repeated Predicate enforced_predicates = 11;
 
   // plan is the structured, language-neutral query (design note #10, Phase 3 /
