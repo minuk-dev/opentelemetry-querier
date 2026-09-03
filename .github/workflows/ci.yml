@@ -94,5 +94,11 @@ jobs:
         run: |
           buf generate
           go run ./cmd/builder --config builder.yaml
+      # go.work.sum is excluded: it is the workspace lock file, which the go
+      # command rewrites on its own whenever a build needs a hash it does not yet
+      # carry — not an artifact of the two generators above. Dependabot updates
+      # the per-module go.mod/go.sum files but cannot update it, so `go run` here
+      # rewrote it and failed every dependency PR (#74). Each module's own go.sum
+      # still pins that module's dependencies.
       - name: verify no diff
-        run: git diff --exit-code
+        run: git diff --exit-code -- . ':(exclude)go.work.sum'
