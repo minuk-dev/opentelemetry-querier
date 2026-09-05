@@ -15,6 +15,14 @@ import (
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
 )
 
+// The labels the response filter is configured to scrub in these tests, and the
+// replacement the masked one carries.
+const (
+	dropLabel = "__internal__"
+	maskLabel = "user_email"
+	maskValue = "***"
+)
+
 // TestResponseFilter adds the response-filter processor and asserts its effect
 // on the response path end to end: dropped labels vanish from the returned
 // series, masked labels are replaced, and a raw cumulative counter returned
@@ -26,9 +34,9 @@ func TestResponseFilter(t *testing.T) {
 		t.Parallel()
 
 		filter := responsefilterprocessor.New(responsefilterprocessor.Config{
-			DropLabels:             []string{"__internal__"},
-			MaskLabels:             []string{"user_email"},
-			MaskWith:               "***",
+			DropLabels:             []string{dropLabel},
+			MaskLabels:             []string{maskLabel},
+			MaskWith:               maskValue,
 			WarnCounterWithoutRate: false,
 		})
 
@@ -42,9 +50,9 @@ func TestResponseFilter(t *testing.T) {
 		code, body := getWith(t, base, nil)
 
 		assert.Equal(t, http.StatusOK, code, "body: %s", body)
-		assert.NotContains(t, body, "__internal__", "the dropped label is gone")
+		assert.NotContains(t, body, dropLabel, "the dropped label is gone")
 		assert.NotContains(t, body, "a@b.com", "the masked value is not leaked")
-		assert.Contains(t, body, `"user_email":"***"`, "the masked label carries the replacement value")
+		assert.Contains(t, body, `"`+maskLabel+`":"`+maskValue+`"`, "the masked label carries the replacement value")
 		assert.Contains(t, body, `"job":"api"`, "untouched labels survive")
 	})
 
@@ -71,6 +79,31 @@ func TestResponseFilter(t *testing.T) {
 		assert.Contains(t, body, "rate()", "the warning tells the client to apply rate()")
 		assert.Contains(t, body, "http_requests_total", "the warning names the offending series")
 	})
+}
+
+// TestResponseFilterCrossSignalTable pins the cross-signal path (issue #66): a
+// join returns a relational Table whose rows carry both sides' attributes, so
+// the response filter must scrub them there too or the join launders the labels
+// the operator dropped or masked on the single-signal path.
+func TestResponseFilterCrossSignalTable(t *testing.T) {
+	t.Parallel()
+
+	filter := responsefilterprocessor.New(responsefilterprocessor.Config{
+		DropLabels:             []string{dropLabel},
+		MaskLabels:             []string{maskLabel},
+		MaskWith:               maskValue,
+		WarnCounterWithoutRate: false,
+	})
+
+	base := frontWith(t, tableDispatcher{Base: dispatcher.Base{}}, filter)
+
+	code, body := getWith(t, base, nil)
+
+	assert.Equal(t, http.StatusOK, code, "body: %s", body)
+	assert.NotContains(t, body, dropLabel, "the dropped column is gone from the table")
+	assert.NotContains(t, body, "a@b.com", "the masked value is not leaked")
+	assert.Contains(t, body, `"`+maskValue+`"`, "the masked column carries the replacement value")
+	assert.Contains(t, body, `"job"`, "untouched columns survive")
 }
 
 // TestResponseFilterNoWarningThroughRealDispatcher pins the limitation the fake
@@ -116,4 +149,20 @@ func (counterDispatcher) Dispatch(_ context.Context, _ *qdata.Query) (*qdata.Res
 			Points:     []*qdata.MetricPoint{{Start: now, End: now, Value: qdata.Double(42)}},
 		}}}},
 	}, nil
+}
+
+// tableDispatcher is a fake dispatcher that returns the relational Table a
+// cross-signal join produces, standing in for the connector on the response path.
+type tableDispatcher struct {
+	dispatcher.Base
+}
+
+func (tableDispatcher) Dispatch(_ context.Context, _ *qdata.Query) (*qdata.Result, error) {
+	row := qdata.NewRow(
+		"job", qdata.Str("api"),
+		dropLabel, qdata.Str("secret"),
+		maskLabel, qdata.Str("a@b.com"),
+	)
+
+	return qdata.TableResult(qdata.NewTable([]string{"job", dropLabel, maskLabel}, row)), nil
 }
