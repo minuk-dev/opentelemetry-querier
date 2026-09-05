@@ -9,16 +9,14 @@ require (
 	github.com/minuk-dev/opentelemetry-querier/pipeline v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/qdata v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/qerror v0.0.0
-	github.com/stretchr/testify v1.11.1
-	google.golang.org/protobuf v1.36.11
+	github.com/stretchr/testify v1.12.1
+	google.golang.org/protobuf v1.36.12
 )
 
 require (
-	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
-	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/samber/lo v1.53.0 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/text v0.38.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
 require (
