@@ -7,6 +7,7 @@ require (
 	github.com/minuk-dev/opentelemetry-querier/dispatcher v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/processor v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/qdata v0.0.0
+	github.com/minuk-dev/opentelemetry-querier/qerror v0.0.0
 	github.com/stretchr/testify v1.12.1
 )
 
@@ -27,3 +28,5 @@ replace github.com/minuk-dev/opentelemetry-querier/gen => ../gen
 replace github.com/minuk-dev/opentelemetry-querier/processor => ../processor
 
 replace github.com/minuk-dev/opentelemetry-querier/qdata => ../qdata
+
+replace github.com/minuk-dev/opentelemetry-querier/qerror => ../qerror
