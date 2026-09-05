@@ -107,7 +107,11 @@ func (p *Processor) scrubTable(table *qdata.Table) {
 		return
 	}
 
-	table.Columns = slices.DeleteFunc(table.GetColumns(), func(column string) bool {
+	// Clone before deleting: qdata.NewTable stores the caller's column slice by
+	// reference, and slices.DeleteFunc rewrites the backing array in place — a
+	// dispatcher that builds tables from a reused schema slice would have it
+	// corrupted for every later query.
+	table.Columns = slices.DeleteFunc(slices.Clone(table.GetColumns()), func(column string) bool {
 		return slices.Contains(p.cfg.DropLabels, column)
 	})
 }

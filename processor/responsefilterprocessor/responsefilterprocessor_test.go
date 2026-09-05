@@ -80,6 +80,24 @@ func TestProcessResultTable(t *testing.T) {
 	assert.Equal(t, [][]any{{maskValue, "api"}}, wire.Rows)
 }
 
+// TestProcessResultTableKeepsCallerSchema pins that scrubbing does not write
+// through the column slice the caller handed to qdata.NewTable: that slice is
+// stored by reference, so an in-place delete would corrupt a schema a dispatcher
+// reuses across queries.
+func TestProcessResultTableKeepsCallerSchema(t *testing.T) {
+	t.Parallel()
+
+	columns := []string{dropKey, maskKey, keepKey}
+	result := qdata.TableResult(qdata.NewTable(columns, &qdata.Row{Values: sensitiveAttrs()}))
+
+	require.NoError(t, scrubber().ProcessResult(context.Background(), &qdata.Query{}, result))
+
+	assert.Equal(t, []string{dropKey, maskKey, keepKey}, columns,
+		"the caller's schema slice is untouched")
+	assert.Equal(t, []string{maskKey, keepKey}, result.GetTable().GetColumns(),
+		"the table's own schema still loses the dropped column")
+}
+
 // TestProcessResultEmptyTable pins that a Table payload without rows or schema
 // is handled rather than panicking.
 func TestProcessResultEmptyTable(t *testing.T) {
