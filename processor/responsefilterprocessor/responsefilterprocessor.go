@@ -7,9 +7,12 @@ package responsefilterprocessor
 
 import (
 	"context"
+	"slices"
 
+	qdatav1 "github.com/minuk-dev/opentelemetry-querier/gen/qdata/v1"
 	"github.com/minuk-dev/opentelemetry-querier/processor"
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
+	"github.com/minuk-dev/opentelemetry-querier/qerror"
 )
 
 // Config configures response reshaping.
@@ -45,30 +48,68 @@ func New(cfg Config) *Processor {
 }
 
 // ProcessResult applies drop/mask to every signal's attributes and emits
-// feedback where configured.
+// feedback where configured. The switch is a type switch over the Result.data
+// oneof rather than a chain of nil checks so a payload this processor does not
+// know how to scrub fails closed instead of being returned unfiltered.
 func (p *Processor) ProcessResult(_ context.Context, _ *qdata.Query, result *qdata.Result) error {
-	switch {
-	case result.GetMetrics() != nil:
-		for _, series := range result.GetMetrics().GetSeries() {
-			p.scrub(series.GetAttributes())
-
-			if p.cfg.WarnCounterWithoutRate && series.GetType() == qdata.MetricCumulativeCounter {
-				qdata.Warn(result, "counter_without_rate",
-					"series '"+series.GetName()+"' is a raw cumulative counter; apply rate() for per-second values",
-					typeStr)
-			}
-		}
-	case result.GetLogs() != nil:
-		for _, record := range result.GetLogs().GetRecords() {
+	switch data := result.GetData().(type) {
+	case *qdatav1.Result_Metrics:
+		p.processMetrics(result, data.Metrics)
+	case *qdatav1.Result_Logs:
+		for _, record := range data.Logs.GetRecords() {
 			p.scrub(record.GetAttributes())
 		}
-	case result.GetSpans() != nil:
-		for _, span := range result.GetSpans().GetSpans() {
+	case *qdatav1.Result_Spans:
+		for _, span := range data.Spans.GetSpans() {
 			p.scrub(span.GetAttributes())
 		}
+	case *qdatav1.Result_Table:
+		p.scrubTable(data.Table)
+	case nil:
+		// A payload-less Result (feedback only) carries no attributes to scrub.
+	default:
+		return qerror.New(qerror.CodeInternal,
+			"responsefilterprocessor: unhandled result payload %T; refusing to return unfiltered data", data)
 	}
 
 	return nil
+}
+
+// processMetrics scrubs each series and warns about raw cumulative counters.
+func (p *Processor) processMetrics(result *qdata.Result, metrics *qdata.Metrics) {
+	for _, series := range metrics.GetSeries() {
+		p.scrub(series.GetAttributes())
+
+		if p.cfg.WarnCounterWithoutRate && series.GetType() == qdata.MetricCumulativeCounter {
+			qdata.Warn(result, "counter_without_rate",
+				"series '"+series.GetName()+"' is a raw cumulative counter; apply rate() for per-second values",
+				typeStr)
+		}
+	}
+}
+
+// scrubTable applies drop/mask to every row of a relational cross-signal Table
+// (issue #66). A cross-signal join copies each side's attributes into its rows,
+// so without this the join launders labels the operator dropped or masked on the
+// single-signal path. Dropped keys also leave the declared column schema, so the
+// schema keeps describing the rows it actually has; a masked key keeps its
+// column and only loses its value.
+func (p *Processor) scrubTable(table *qdata.Table) {
+	if table == nil {
+		return
+	}
+
+	for _, row := range table.GetRows() {
+		p.scrub(row.GetValues())
+	}
+
+	if len(p.cfg.DropLabels) == 0 {
+		return
+	}
+
+	table.Columns = slices.DeleteFunc(table.GetColumns(), func(column string) bool {
+		return slices.Contains(p.cfg.DropLabels, column)
+	})
 }
 
 func (p *Processor) scrub(attrs *qdata.KeyValueList) {
