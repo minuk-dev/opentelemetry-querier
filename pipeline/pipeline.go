@@ -12,6 +12,7 @@ import (
 	"github.com/minuk-dev/opentelemetry-querier/dispatcher"
 	"github.com/minuk-dev/opentelemetry-querier/processor"
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
+	"github.com/minuk-dev/opentelemetry-querier/qerror"
 )
 
 // Handler evaluates a query end to end. Acceptors depend on this interface
@@ -40,16 +41,22 @@ func New(name string, processors []processor.Processor, disp dispatcher.Dispatch
 	return &Pipeline{Name: name, Processors: processors, Dispatcher: disp}
 }
 
-// Handle runs the request path (processors in order), dispatches to storage,
-// then runs the response path (processors in reverse order). A processor error
-// on the request path short-circuits before the dispatcher is reached.
+// Handle validates the client's plan, runs the request path (processors in
+// order), dispatches to storage, then runs the response path (processors in
+// reverse order). A validation or processor error on the request path
+// short-circuits before the dispatcher is reached.
 func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (*qdata.Result, error) {
+	err := p.validatePlan(query)
+	if err != nil {
+		return nil, err
+	}
+
 	// Mirror the plan's signal set onto Query.signals for downstream readers
 	// (no-op without a plan).
 	qdata.SyncPlanSignals(query)
 
 	for _, proc := range p.Processors {
-		err := proc.ProcessQuery(ctx, query)
+		err = proc.ProcessQuery(ctx, query)
 		if err != nil {
 			return nil, fmt.Errorf("pipeline %q: %w", p.Name, err)
 		}
@@ -68,7 +75,7 @@ func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (*qdata.Resul
 	}
 
 	for i := len(p.Processors) - 1; i >= 0; i-- {
-		err := p.Processors[i].ProcessResult(ctx, query, result)
+		err = p.Processors[i].ProcessResult(ctx, query, result)
 		if err != nil {
 			return nil, fmt.Errorf("pipeline %q: %w", p.Name, err)
 		}
@@ -105,6 +112,32 @@ func (p *Pipeline) Shutdown(ctx context.Context) error {
 	err := p.Dispatcher.Shutdown(ctx)
 	if err != nil {
 		return fmt.Errorf("pipeline %q: shutdown dispatcher: %w", p.Name, err)
+	}
+
+	return nil
+}
+
+// validatePlan checks the client-supplied plan for structural well-formedness
+// before any processor or dispatcher sees it (issue #67). The pipeline is the
+// one place every acceptor funnels through, so validating here means a
+// malformed plan is rejected once, as CodeInvalidArgument, instead of each
+// dispatcher re-deriving well-formedness while rendering — where a zero
+// time_agg window became an upstream error, an aggregate setting both by and
+// without silently lost its without, and an empty function name rendered as
+// "(...)".
+//
+// A query that carries no plan at all is left alone: that is still a shape the
+// pipeline itself handles (see SyncPlanSignals), and every dispatcher already
+// fails closed on it with its own message.
+func (p *Pipeline) validatePlan(query *qdata.Query) error {
+	plan := query.GetPlan()
+	if plan == nil {
+		return nil
+	}
+
+	err := qdata.ValidatePlan(plan)
+	if err != nil {
+		return qerror.New(qerror.CodeInvalidArgument, "pipeline %q: invalid query plan: %v", p.Name, err)
 	}
 
 	return nil

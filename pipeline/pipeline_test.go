@@ -3,6 +3,7 @@ package pipeline_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -11,6 +12,7 @@ import (
 	"github.com/minuk-dev/opentelemetry-querier/pipeline"
 	"github.com/minuk-dev/opentelemetry-querier/processor"
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
+	"github.com/minuk-dev/opentelemetry-querier/qerror"
 )
 
 // recordingProc records the order in which its hooks run.
@@ -114,4 +116,83 @@ func TestHandleLeavesSignalsEmptyWithoutPlan(t *testing.T) {
 	_, err := pipe.Handle(context.Background(), query)
 	require.NoError(t, err)
 	assert.Empty(t, query.GetSignals(), "no plan means no signal set to mirror")
+}
+
+// TestHandleRejectsMalformedPlan is the regression test for issue #67: the
+// pipeline is the one place every acceptor funnels through, so it runs
+// qdata.ValidatePlan on the client's plan and rejects a malformed one as
+// CodeInvalidArgument before any processor or dispatcher sees it. Without it a
+// zero time_agg window surfaced as an upstream failure, an aggregate setting
+// both by and without silently lost its without, and an empty function name
+// rendered as "(...)".
+func TestHandleRejectsMalformedPlan(t *testing.T) {
+	t.Parallel()
+
+	metrics := qdata.SelectNode(qdata.SignalMetrics, nil)
+
+	cases := []struct {
+		name string
+		plan *qdata.QueryPlan
+	}{
+		{
+			name: "time_agg zero window",
+			plan: qdata.Plan(qdata.TimeAggNode(qdata.TimeAggRate, 0, metrics)),
+		},
+		{
+			name: "aggregate by and without",
+			plan: qdata.Plan(qdata.AggregateNode(qdata.AggSum, []string{"job"}, []string{"instance"}, 0, metrics)),
+		},
+		{
+			name: "function empty name",
+			plan: qdata.Plan(qdata.FunctionNode("", []*qdata.Node{metrics})),
+		},
+		{
+			name: "empty node",
+			plan: qdata.Plan(&qdata.Node{}),
+		},
+		{
+			name: "nil root",
+			plan: qdata.Plan(nil),
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			var trace []string
+
+			proc := &recordingProc{Base: processor.Base{}, name: "a", trace: &trace}
+			pipe := pipeline.New("test",
+				[]processor.Processor{proc},
+				&stubDispatcher{Base: dispatcher.Base{}, result: &qdata.Result{}},
+			)
+
+			_, err := pipe.Handle(context.Background(), &qdata.Query{Plan: testCase.plan})
+			require.Error(t, err)
+			assert.Equal(t, qerror.CodeInvalidArgument, qerror.CodeOf(err))
+			assert.Empty(t, trace, "a malformed plan must not reach the processors or the dispatcher")
+		})
+	}
+}
+
+// TestHandleAcceptsWellFormedPlan pins the other side of the check: a plan that
+// ValidatePlan accepts still runs the full chain.
+func TestHandleAcceptsWellFormedPlan(t *testing.T) {
+	t.Parallel()
+
+	var trace []string
+
+	proc := &recordingProc{Base: processor.Base{}, name: "a", trace: &trace}
+	plan := qdata.Plan(qdata.AggregateNode(qdata.AggSum, []string{"job"}, nil, 0,
+		qdata.TimeAggNode(qdata.TimeAggRate, time.Minute,
+			qdata.SelectNode(qdata.SignalMetrics, nil))))
+	pipe := pipeline.New("test",
+		[]processor.Processor{proc},
+		&stubDispatcher{Base: dispatcher.Base{}, result: &qdata.Result{}},
+	)
+
+	_, err := pipe.Handle(context.Background(), &qdata.Query{Plan: plan})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"query:a", "result:a"}, trace)
 }
