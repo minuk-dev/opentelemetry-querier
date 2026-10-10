@@ -31,6 +31,10 @@ processors:
     requests_per_second: 50
     burst: 100
     per_tenant: true
+    # Cap on the number of tenants holding their own bucket. Past the cap an
+    # unseen id must win a token from a shared admission bucket, so a caller
+    # cycling tenant ids can neither grow the map nor exceed the rate above.
+    max_keys: 10000
 
   # Tenant control: resolve X-Scope-OrgID and register an isolation matcher.
   tenant:
