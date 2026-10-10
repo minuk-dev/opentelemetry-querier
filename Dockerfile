@@ -3,7 +3,7 @@
 # Build stage: compile the querier distribution from the Go workspace. It runs
 # on the build platform and cross-compiles to the target arch, so multi-arch
 # builds don't emulate the compiler.
-FROM --platform=$BUILDPLATFORM golang:1.25.4-bookworm AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.2-bookworm AS build
 WORKDIR /src
 
 # ./cmd/querier depends on sibling modules via go.work replace directives, so
