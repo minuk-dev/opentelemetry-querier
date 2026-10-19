@@ -7,12 +7,14 @@ require (
 	github.com/minuk-dev/opentelemetry-querier/processor v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/qdata v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/qerror v0.0.0
+	github.com/stretchr/testify v1.12.1
 )
 
 require (
 	github.com/minuk-dev/opentelemetry-querier/gen v0.0.0 // indirect
 	github.com/samber/lo v1.53.0 // indirect
-	golang.org/x/text v0.38.0 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
+	golang.org/x/text v0.41.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )
 
