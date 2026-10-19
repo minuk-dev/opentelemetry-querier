@@ -19,6 +19,8 @@ import (
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
 )
 
+const subjectHeader = "X-Scope-User"
+
 // startGRPC boots an OTQP gRPC acceptor on an ephemeral port with the given
 // handler and returns a connected client conn. The query seen by the handler is
 // delivered on the provided channel. Cleanup is registered on t.
@@ -121,13 +123,13 @@ func TestGRPCInjectsMetadataAsHeaders(t *testing.T) {
 			client := otqpv1.NewQueryServiceClient(startGRPC(t, seen))
 
 			// gRPC lower-cases metadata keys; the acceptor must still surface them
-			// so a case-insensitive lookup on "X-Scope-User" finds the value.
+			// so a case-insensitive lookup on subjectHeader finds the value.
 			ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs(
 				"x-scope-user", "alice",
 				"x-scope-orgid", "acme",
 			))
 
-			invoker.call(t, ctx, client, &otqpv1.QueryRequest{Query: &qdata.Query{}})
+			invoker.call(t, ctx, client, &otqpv1.QueryRequest{Query: bodyHeaderQuery()})
 
 			query := waitForQuery(t, seen)
 
@@ -140,6 +142,8 @@ func TestGRPCInjectsMetadataAsHeaders(t *testing.T) {
 			// is always sent by the gRPC transport, so its absence proves filtering.
 			assert.NotContains(t, query.GetHeader(), "content-type")
 			assert.NotContains(t, query.GetHeader(), "user-agent")
+			invoker.call(t, context.Background(), client, &otqpv1.QueryRequest{Query: bodyHeaderQuery()})
+			assert.Empty(t, waitForQuery(t, seen).GetHeader())
 		})
 	}
 }
@@ -156,7 +160,7 @@ func TestGRPCMetadataOverridesBodyHeader(t *testing.T) {
 	// Body carries a canonical-cased value; metadata carries the lower-cased
 	// transport value. Only the metadata value must survive.
 	req := &otqpv1.QueryRequest{Query: &qdata.Query{
-		Header: map[string]*qdata.HeaderValues{"X-Scope-User": {Values: []string{"from-body"}}},
+		Header: map[string]*qdata.HeaderValues{subjectHeader: {Values: []string{"from-body"}}},
 	}}
 	ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("x-scope-user", "alice"))
 
@@ -170,7 +174,7 @@ func TestGRPCMetadataOverridesBodyHeader(t *testing.T) {
 	matches := 0
 
 	for key, values := range query.GetHeader() {
-		if key == "x-scope-user" || key == "X-Scope-User" {
+		if key == "x-scope-user" || key == subjectHeader {
 			matches++
 
 			assert.Equal(t, []string{"alice"}, values.GetValues())
@@ -273,4 +277,35 @@ func TestGRPCStripsClientPipelineState(t *testing.T) {
 
 	assert.Empty(t, query.GetMetadata(), "an RPC without metadata is still sanitized")
 	assert.Empty(t, query.GetEnforcedMatchers())
+}
+
+func TestHTTPDiscardsBodyHeaders(t *testing.T) {
+	t.Parallel()
+
+	seen := make(chan *qdata.Query, 1)
+	url := startHTTP(t, seen)
+	body := `{"query":{"header":{` +
+		`"Authorization":{"values":["Bearer body-token"]},` +
+		`"X-Scope-OrgID":{"values":["victim"]},"X-Scope-User":{"values":["admin"]}}}}`
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, url, bytes.NewBufferString(body))
+	require.NoError(t, err)
+	request.Header.Set("Content-Type", "application/json")
+
+	response, err := http.DefaultClient.Do(request)
+	require.NoError(t, err)
+	require.NoError(t, response.Body.Close())
+	require.Equal(t, http.StatusOK, response.StatusCode)
+
+	query := waitForQuery(t, seen)
+	for _, key := range []string{"Authorization", "X-Scope-OrgID", subjectHeader} {
+		assert.NotContains(t, query.GetHeader(), key)
+	}
+}
+
+func bodyHeaderQuery() *qdata.Query {
+	return &qdata.Query{Header: map[string]*qdata.HeaderValues{
+		"Authorization": {Values: []string{"Bearer body-token"}},
+		"X-Scope-OrgID": {Values: []string{"victim"}},
+		subjectHeader:   {Values: []string{"admin"}},
+	}}
 }
