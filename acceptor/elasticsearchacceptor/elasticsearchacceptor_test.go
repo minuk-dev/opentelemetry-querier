@@ -138,7 +138,7 @@ func TestSearchRendersHits(t *testing.T) {
 
 	server := serve(t, &captureHandler{result: logsResult(), err: nil, seen: nil})
 
-	status, body := do(t, http.MethodGet, server.URL+"/logs-*/_search?q=level:info", "")
+	status, body := do(t, http.MethodGet, server.URL+"/_search?q=level:info", "")
 	require.Equal(t, http.StatusOK, status)
 
 	source := firstHitSource(t, body)
@@ -151,7 +151,7 @@ func TestTableResultRendersGenericTable(t *testing.T) {
 
 	server := serve(t, &captureHandler{result: tableResult(), err: nil, seen: nil})
 
-	status, body := do(t, http.MethodGet, server.URL+"/logs-*/_search?q=*", "")
+	status, body := do(t, http.MethodGet, server.URL+"/_search?q=*", "")
 	require.Equal(t, http.StatusOK, status)
 
 	// A join has no native _search shape, so the response is a generic table
@@ -170,7 +170,7 @@ func TestQueryParamBecomesLucenePlan(t *testing.T) {
 	handler := &captureHandler{result: logsResult(), err: nil, seen: nil}
 	server := serve(t, handler)
 
-	_, _ = do(t, http.MethodGet, server.URL+"/logs-*/_search?q=status:500", "")
+	_, _ = do(t, http.MethodGet, server.URL+"/_search?q=status:500", "")
 
 	require.NotNil(t, handler.seen, "handler was called")
 	assert.Equal(t, "500", planMatchers(t, handler.seen)["status"])
@@ -184,7 +184,7 @@ func TestPostBodyQueryString(t *testing.T) {
 
 	body := `{"query":{"query_string":{"query":"level:error"}}}`
 
-	status, _ := do(t, http.MethodPost, server.URL+"/logs-*/_search", body)
+	status, _ := do(t, http.MethodPost, server.URL+"/_search", body)
 	require.Equal(t, http.StatusOK, status)
 	assert.Equal(t, "error", planMatchers(t, handler.seen)["level"])
 }
@@ -197,7 +197,7 @@ func TestLuceneBooleanComposition(t *testing.T) {
 
 	// level:error AND (job:api OR job:web) NOT env:dev
 	query := `level:error AND (job:api OR job:web) AND NOT env:dev`
-	_, _ = do(t, http.MethodGet, server.URL+"/logs-*/_search?q="+urlEscape(query), "")
+	_, _ = do(t, http.MethodGet, server.URL+"/_search?q="+urlEscape(query), "")
 
 	require.NotNil(t, handler.seen)
 
@@ -217,7 +217,7 @@ func TestEmptyQueryDefaultsToMatchAll(t *testing.T) {
 	server := serve(t, handler)
 
 	// No q param and an empty body: a valid match-all search, not an error.
-	status, _ := do(t, http.MethodPost, server.URL+"/logs-*/_search", "")
+	status, _ := do(t, http.MethodPost, server.URL+"/_search", "")
 	require.Equal(t, http.StatusOK, status)
 	assert.Nil(t, planFilter(t, handler.seen), "match-all is a Select with no filter")
 }
@@ -227,7 +227,7 @@ func TestHandlerErrorMapsStatus(t *testing.T) {
 
 	server := serve(t, &captureHandler{result: nil, err: qerror.New(qerror.CodeUnauthenticated, "nope"), seen: nil})
 
-	status, _ := do(t, http.MethodGet, server.URL+"/logs-*/_search?q=level:info", "")
+	status, _ := do(t, http.MethodGet, server.URL+"/_search?q=level:info", "")
 	assert.Equal(t, http.StatusUnauthorized, status)
 }
 
@@ -241,7 +241,7 @@ func TestUnsupportedQueryDSLIsRejected(t *testing.T) {
 
 	body := `{"query":{"match":{"message":"error"}}}`
 
-	status, _ := do(t, http.MethodPost, server.URL+"/logs-*/_search", body)
+	status, _ := do(t, http.MethodPost, server.URL+"/_search", body)
 	assert.Equal(t, http.StatusBadRequest, status)
 	assert.Nil(t, handler.seen, "pipeline must not be invoked for a rejected query")
 }
@@ -252,7 +252,7 @@ func TestMatchAllBodyIsAccepted(t *testing.T) {
 	handler := &captureHandler{result: logsResult(), err: nil, seen: nil}
 	server := serve(t, handler)
 
-	status, _ := do(t, http.MethodPost, server.URL+"/logs-*/_search", `{"query":{"match_all":{}}}`)
+	status, _ := do(t, http.MethodPost, server.URL+"/_search", `{"query":{"match_all":{}}}`)
 	require.Equal(t, http.StatusOK, status)
 	assert.Nil(t, planFilter(t, handler.seen), "match_all maps to a Select with no filter")
 }
@@ -266,7 +266,7 @@ func TestOversizedBodyIsRejected(t *testing.T) {
 	// A body beyond the 1 MiB cap must be rejected, not buffered.
 	huge := `{"query":{"query_string":{"query":"` + strings.Repeat("a", 2<<20) + `"}}}`
 
-	status, _ := do(t, http.MethodPost, server.URL+"/logs-*/_search", huge)
+	status, _ := do(t, http.MethodPost, server.URL+"/_search", huge)
 	assert.Equal(t, http.StatusBadRequest, status)
 	assert.Nil(t, handler.seen, "pipeline must not be invoked for an oversized body")
 }
@@ -276,4 +276,31 @@ func urlEscape(raw string) string {
 	replacer := strings.NewReplacer(" ", "%20", "(", "%28", ")", "%29")
 
 	return replacer.Replace(raw)
+}
+
+func TestRejectsDiscardedSearchConstraints(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name, path, body string
+	}{
+		{name: "index", path: "/payments-prod/_search", body: `{"query":{"match_all":{}}}`},
+		{name: "size", path: "/_search", body: `{"size":1}`},
+		{name: "offset", path: "/_search", body: `{"from":20}`},
+		{name: "sort", path: "/_search", body: `{"sort":[{"@timestamp":"asc"}]}`},
+		{name: "query override", path: "/_search?q=*", body: `{"size":1}`},
+		{name: "URL size", path: "/_search?size=1", body: ""},
+		{name: "URL offset", path: "/_search?from=20", body: ""},
+		{name: "URL sort", path: "/_search?sort=@timestamp:asc", body: ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			handler := &captureHandler{result: logsResult(), err: nil, seen: nil}
+			server := serve(t, handler)
+			status, _ := do(t, http.MethodPost, server.URL+test.path, test.body)
+			assert.Equal(t, http.StatusBadRequest, status)
+			assert.Nil(t, handler.seen, "unsupported constraints must not reach storage")
+		})
+	}
 }
