@@ -425,3 +425,56 @@ func TestRejectsMissingCommaBetweenMatchers(t *testing.T) {
 	status, _ := get(t, server.URL+"/loki/api/v1/query?query="+url.QueryEscape(`{job="api" level="error"}`))
 	assert.Equal(t, http.StatusBadRequest, status)
 }
+
+func TestStringLiterals(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name    string
+		literal string
+		want    string
+		valid   bool
+	}{
+		{name: "newline", literal: `"hello\nworld"`, want: "hello\nworld", valid: true},
+		{name: "tab", literal: `"hello\tworld"`, want: "hello\tworld", valid: true},
+		{name: "quote", literal: `"a\"b"`, want: "a\"b", valid: true},
+		{name: "backslash", literal: `"a\\b"`, want: `a\b`, valid: true},
+		{name: "unicode", literal: `"\u0041"`, want: "A", valid: true},
+		{name: "raw", literal: "`hello\\nworld`", want: `hello\nworld`, valid: true},
+		{name: "invalid escape", literal: `"\q"`, want: "", valid: false},
+		{name: "unterminated", literal: `"hello`, want: "", valid: false},
+		{name: "dangling escape", literal: `"hello\`, want: "", valid: false},
+		{name: "unterminated raw", literal: "`hello", want: "", valid: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			var seen *qdata.Query
+
+			handler := pipeline.HandlerFunc(func(_ context.Context, query *qdata.Query) (*qdata.Result, error) {
+				seen = query
+
+				return logsResult(), nil
+			})
+			acc := lokiacceptor.New(lokiacceptor.Config{Endpoint: ""}, handler)
+			expression := `{app="api"} |= ` + test.literal
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+				"/loki/api/v1/query?query="+url.QueryEscape(expression), nil)
+			response := httptest.NewRecorder()
+			acc.Handler().ServeHTTP(response, request)
+
+			if !test.valid {
+				assert.Equal(t, http.StatusBadRequest, response.Code)
+				assert.Nil(t, seen)
+
+				return
+			}
+
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+
+			filters := seen.GetPlan().GetRoot().GetSelect().GetLine()
+			require.Len(t, filters, 1)
+			assert.Equal(t, test.want, filters[0].GetValue())
+		})
+	}
+}
