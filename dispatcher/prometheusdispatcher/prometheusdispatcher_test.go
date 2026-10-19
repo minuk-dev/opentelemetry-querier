@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/minuk-dev/opentelemetry-querier/dispatcher/prometheusdispatcher"
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
@@ -267,4 +268,37 @@ func TestDispatchAcceptsOrdinaryIdentifiers(t *testing.T) {
 
 	assert.Equal(t, `sum by(job,_x,a1)({__name__="up",job="api"})`,
 		captureQuery(t, &qdata.Query{Plan: plan}))
+}
+
+func TestExplicitEvaluationTime(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name    string
+		seconds int64
+		want    string
+	}{
+		{name: "epoch", seconds: 0, want: "0"},
+		{name: "pre epoch", seconds: -1, want: "-1"},
+		{name: "outside UnixNano", seconds: 253402300799, want: "253402300799"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			var captured string
+
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				request.Body = http.MaxBytesReader(writer, request.Body, 1<<20)
+				captured = request.FormValue("time")
+				_, _ = writer.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
+			}))
+			t.Cleanup(server.Close)
+
+			query := metricQuery("up")
+			query.Range = &qdata.TimeRange{End: timestamppb.New(time.Unix(test.seconds, 0))}
+			_, err := newDispatcher(server.URL).Dispatch(t.Context(), query)
+			require.NoError(t, err)
+			assert.Equal(t, test.want, captured)
+		})
+	}
 }

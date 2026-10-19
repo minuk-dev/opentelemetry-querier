@@ -26,3 +26,5 @@ acceptors:
   prometheus:
     endpoint: "0.0.0.0:9090"
 ```
+
+Numeric time inputs must be finite and within protobuf timestamp bounds (years 1–9999). Explicit epoch/pre-epoch timestamps are retained. Range bounds must be ordered; steps must be positive, finite, and representable as a Go duration. Prometheus duration units including `d`, `w`, and `y` are accepted. OTQP queries receive the same context/bounds/step validation in the pipeline.

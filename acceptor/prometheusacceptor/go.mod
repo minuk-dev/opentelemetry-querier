@@ -9,6 +9,7 @@ require (
 	github.com/minuk-dev/opentelemetry-querier/pipeline v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/qdata v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/qerror v0.0.0
+	github.com/prometheus/common v0.69.0
 	github.com/prometheus/prometheus v0.313.1
 	github.com/stretchr/testify v1.11.1
 	google.golang.org/protobuf v1.36.11
@@ -27,7 +28,6 @@ require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_golang v1.23.2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
-	github.com/prometheus/common v0.69.0 // indirect
 	github.com/prometheus/procfs v0.16.1 // indirect
 	github.com/samber/lo v1.53.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
