@@ -22,7 +22,8 @@ import (
 // acceptor -> IR -> dispatcher path. It guards against coverage regressions; the
 // remainder use PromQL features the IR does not yet model (changes/deriv/
 // last_over_time/round, some group_right()+bool matching) and fail closed.
-const minStableQueries = 1090
+// Issue #93 rejects previously lossy offset/bool expressions; supported baseline is 1071.
+const minStableQueries = 1071
 
 // loadCorpus reads the embedded PromQL corpus, skipping comments and blanks.
 func loadCorpus(t *testing.T) []string {
