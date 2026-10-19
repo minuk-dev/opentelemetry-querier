@@ -61,7 +61,7 @@ func (p *Processor) ProcessResult(_ context.Context, _ *qdata.Query, result *qda
 		}
 	case *qdatav1.Result_Spans:
 		for _, span := range data.Spans.GetSpans() {
-			p.scrub(span.GetAttributes())
+			p.processSpan(span)
 		}
 	case *qdatav1.Result_Table:
 		p.scrubTable(data.Table)
@@ -79,6 +79,12 @@ func (p *Processor) ProcessResult(_ context.Context, _ *qdata.Query, result *qda
 func (p *Processor) processMetrics(result *qdata.Result, metrics *qdata.Metrics) {
 	for _, series := range metrics.GetSeries() {
 		p.scrub(series.GetAttributes())
+
+		for _, point := range series.GetPoints() {
+			for _, exemplar := range point.GetExemplars() {
+				p.scrub(exemplar.GetAttributes())
+			}
+		}
 
 		if p.cfg.WarnCounterWithoutRate && series.GetType() == qdata.MetricCumulativeCounter {
 			qdata.Warn(result, "counter_without_rate",
@@ -129,5 +135,17 @@ func (p *Processor) scrub(attrs *qdata.KeyValueList) {
 		if _, ok := qdata.AttrGet(attrs, key); ok {
 			qdata.AttrPutString(attrs, key, p.cfg.MaskWith)
 		}
+	}
+}
+
+func (p *Processor) processSpan(span *qdata.Span) {
+	p.scrub(span.GetAttributes())
+
+	for _, event := range span.GetEvents() {
+		p.scrub(event.GetAttributes())
+	}
+
+	for _, link := range span.GetLinks() {
+		p.scrub(link.GetAttributes())
 	}
 }
