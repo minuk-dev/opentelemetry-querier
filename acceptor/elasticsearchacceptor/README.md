@@ -28,3 +28,5 @@ acceptors:
   elasticsearch:
     endpoint: "0.0.0.0:9200"
 ```
+
+Upstream hit totals and their `eq`/`gte` relation, timeout state, and shard completion counts are preserved independently of the returned page size. Feedback is exposed in a `warnings` extension. Missing upstream metadata is omitted rather than synthesized. Label masking does not change the upstream match total.

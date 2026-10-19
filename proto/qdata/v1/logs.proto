@@ -43,4 +43,26 @@ message LogRecord {
 // Logs is a collection of records (a query result payload).
 message Logs {
   repeated LogRecord records = 1;
+  SearchMetadata search_metadata = 2;
+}
+
+// SearchMetadata preserves upstream completeness and match counts independently of page size.
+message SearchMetadata {
+  SearchTotal total = 1;
+  optional bool timed_out = 2;
+  SearchShards shards = 3;
+}
+
+// SearchTotal distinguishes exact match counts from lower bounds.
+message SearchTotal {
+  optional int64 value = 1;
+  string relation = 2; // eq or gte.
+}
+
+// SearchShards preserves upstream shard completion counts.
+message SearchShards {
+  int64 total = 1;
+  int64 successful = 2;
+  int64 failed = 3;
+  int64 skipped = 4;
 }

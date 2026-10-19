@@ -268,14 +268,35 @@ func resultToResponse(result *qdata.Result) any {
 		hits = append(hits, recordToHit(record))
 	}
 
-	return map[string]any{
-		"took":      0,
-		"timed_out": false,
-		"hits": map[string]any{
-			"total": map[string]any{"value": len(hits), "relation": "eq"},
-			"hits":  hits,
-		},
+	hitsBlock := map[string]any{"hits": hits}
+	response := map[string]any{"hits": hitsBlock}
+
+	metadata := result.GetLogs().GetSearchMetadata()
+	if total := metadata.GetTotal(); total != nil {
+		hitsBlock["total"] = map[string]any{"value": total.GetValue(), "relation": total.GetRelation()}
 	}
+
+	if metadata != nil && metadata.TimedOut != nil {
+		response["timed_out"] = metadata.GetTimedOut()
+	}
+
+	if shards := metadata.GetShards(); shards != nil {
+		response["_shards"] = map[string]any{
+			"total": shards.GetTotal(), "successful": shards.GetSuccessful(),
+			"failed": shards.GetFailed(), "skipped": shards.GetSkipped(),
+		}
+	}
+
+	if notes := result.GetFeedback().GetNotifications(); len(notes) > 0 {
+		warnings := make([]string, 0, len(notes))
+		for _, note := range notes {
+			warnings = append(warnings, note.GetMessage())
+		}
+
+		response["warnings"] = warnings
+	}
+
+	return response
 }
 
 // recordToHit renders one log record as an Elasticsearch hit.
