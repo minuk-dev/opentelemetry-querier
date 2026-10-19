@@ -48,8 +48,8 @@ func TestEndToEndLogQLThroughPipeline(t *testing.T) {
 
 	escaped := url.QueryEscape(`{job="api"}`)
 
-	endpoint := front.URL + "/loki/api/v1/query?limit=1&direction=forward&query=" + escaped
-	resp, err := http.Get(endpoint) //nolint:noctx // test client
+	resp, err := http.Get( //nolint:noctx // test client
+		front.URL + "/loki/api/v1/query?limit=1&direction=forward&query=" + escaped)
 	require.NoError(t, err)
 
 	defer func() { _ = resp.Body.Close() }()
