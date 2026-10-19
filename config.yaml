@@ -23,7 +23,7 @@ acceptors:
   #   endpoint: "0.0.0.0:9095"
 
 processors:
-  # Gateway: bearer auth + per-tenant rate limiting. Runs first.
+  # Gateway: bearer auth + per-tenant rate limiting. Runs after tenant resolution.
   authratelimit:
     require_bearer: true
     tokens:
@@ -92,5 +92,5 @@ service:
     # (metrics/logs/traces/profiles), mirroring the opentelemetry-collector.
     metrics/default:
       acceptors: [otqp]
-      processors: [authratelimit, tenant, simpleauthz, queryrewrite, responsefilter]
+      processors: [tenant, authratelimit, simpleauthz, queryrewrite, responsefilter]
       dispatchers: [prometheus]

@@ -1,5 +1,5 @@
 // Package authratelimitprocessor implements the gateway processor: bearer-token
-// authentication and per-tenant rate limiting. It runs first on the request
+// authentication and per-tenant rate limiting. It runs after tenant resolution on the request
 // path and short-circuits with a coded error (Unauthenticated / Resource
 // Exhausted) so no unauthenticated or over-quota query reaches storage.
 package authratelimitprocessor
@@ -72,6 +72,9 @@ func (p *Processor) ProcessQuery(_ context.Context, query *qdata.Query) error {
 		key := "global"
 		if p.cfg.PerTenant {
 			key = qdata.TenantID(query)
+			if key == "" {
+				return qerror.New(qerror.CodeUnauthenticated, "authratelimit: per-tenant limiting requires a resolved tenant")
+			}
 		}
 
 		if !p.limiter.allow(key) {

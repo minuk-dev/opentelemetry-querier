@@ -15,21 +15,21 @@ import (
 )
 
 // defaultChain builds the full default processor chain from config.yaml:
-// authratelimit -> tenant -> simpleauthz -> queryrewrite -> responsefilter.
+// tenant -> authratelimit -> simpleauthz -> queryrewrite -> responsefilter.
 func defaultChain() []processor.Processor {
 	return []processor.Processor{
+		tenantprocessor.New(tenantprocessor.Config{
+			Header:       tenantHeader,
+			Default:      "anonymous",
+			Required:     false,
+			EnforceLabel: "tenant_id",
+		}),
 		authratelimitprocessor.New(authratelimitprocessor.Config{
 			RequireBearer:     true,
 			Tokens:            []string{"dev-token"},
 			RequestsPerSecond: 1000,
 			Burst:             1000,
 			PerTenant:         true,
-		}),
-		tenantprocessor.New(tenantprocessor.Config{
-			Header:       tenantHeader,
-			Default:      "anonymous",
-			Required:     false,
-			EnforceLabel: "tenant_id",
 		}),
 		simpleauthzprocessor.New(simpleauthzprocessor.Config{
 			SubjectHeader:  "X-Scope-User",
@@ -98,7 +98,7 @@ func TestFullChain(t *testing.T) {
 		assert.Contains(t, body, `"user_email":"***"`, "the masked label carries the replacement")
 	})
 
-	t.Run("missing bearer is rejected before any stage runs", func(t *testing.T) {
+	t.Run("missing bearer is rejected before dispatch", func(t *testing.T) {
 		t.Parallel()
 
 		upstream := newUpstream(t)
