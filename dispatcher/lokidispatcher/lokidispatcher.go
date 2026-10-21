@@ -130,21 +130,18 @@ func (d *Dispatcher) Dispatch(ctx context.Context, query *qdata.Query) (*qdata.R
 
 	resp, err := d.client.Do(req)
 	if err != nil {
-		return nil, qerror.New(qerror.CodeUnavailable, "lokidispatcher: upstream request: %v", err)
+		return nil, qerror.UpstreamTransportError(err)
 	}
 
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, qerror.New(qerror.CodeUnavailable, "lokidispatcher: read upstream: %v", err)
+		return nil, qerror.UpstreamTransportError(err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, qerror.New(
-			qerror.CodeUnavailable,
-			"lokidispatcher: upstream status %d: %s", resp.StatusCode, string(body),
-		)
+		return nil, qerror.UpstreamHTTPError(resp.StatusCode, body)
 	}
 
 	return parseResponse(body)
@@ -256,7 +253,7 @@ func parseResponse(body []byte) (*qdata.Result, error) {
 	}
 
 	if resp.Status != "success" {
-		return nil, qerror.New(qerror.CodeInvalidArgument, "lokidispatcher: upstream status %q", resp.Status)
+		return nil, qerror.UpstreamHTTPError(http.StatusOK, body)
 	}
 
 	switch resp.Data.ResultType {

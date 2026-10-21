@@ -185,24 +185,22 @@ func (s *grpcService) QueryStream(
 }
 
 func grpcCode(err error) codes.Code {
-	switch qerror.CodeOf(err) {
-	case qerror.CodeInternal:
-		return codes.Internal
-	case qerror.CodeInvalidArgument:
-		return codes.InvalidArgument
-	case qerror.CodeUnauthenticated:
-		return codes.Unauthenticated
-	case qerror.CodePermissionDenied:
-		return codes.PermissionDenied
-	case qerror.CodeResourceExhausted:
-		return codes.ResourceExhausted
-	case qerror.CodeUnavailable:
-		return codes.Unavailable
-	case qerror.CodeDeadlineExceeded:
-		return codes.DeadlineExceeded
-	default:
+	code, ok := map[qerror.Code]codes.Code{
+		qerror.CodeInternal:          codes.Internal,
+		qerror.CodeInvalidArgument:   codes.InvalidArgument,
+		qerror.CodeUnauthenticated:   codes.Unauthenticated,
+		qerror.CodePermissionDenied:  codes.PermissionDenied,
+		qerror.CodeResourceExhausted: codes.ResourceExhausted,
+		qerror.CodeUnavailable:       codes.Unavailable,
+		qerror.CodeDeadlineExceeded:  codes.DeadlineExceeded,
+		qerror.CodeCanceled:          codes.Canceled,
+		qerror.CodeQueryExecution:    codes.FailedPrecondition,
+	}[qerror.CodeOf(err)]
+	if !ok {
 		return codes.Internal
 	}
+
+	return code
 }
 
 // ---- HTTP transport ----

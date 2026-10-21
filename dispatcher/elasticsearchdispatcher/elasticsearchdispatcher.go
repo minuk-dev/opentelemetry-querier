@@ -116,21 +116,18 @@ func (d *Dispatcher) Dispatch(ctx context.Context, query *qdata.Query) (*qdata.R
 
 	resp, err := d.client.Do(req)
 	if err != nil {
-		return nil, qerror.New(qerror.CodeUnavailable, "elasticsearchdispatcher: upstream request: %v", err)
+		return nil, qerror.UpstreamTransportError(err)
 	}
 
 	defer func() { _ = resp.Body.Close() }()
 
 	payload, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, qerror.New(qerror.CodeUnavailable, "elasticsearchdispatcher: read upstream: %v", err)
+		return nil, qerror.UpstreamTransportError(err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, qerror.New(
-			qerror.CodeUnavailable,
-			"elasticsearchdispatcher: upstream status %d: %s", resp.StatusCode, string(payload),
-		)
+		return nil, qerror.UpstreamHTTPError(resp.StatusCode, payload)
 	}
 
 	return d.parseResponse(payload)

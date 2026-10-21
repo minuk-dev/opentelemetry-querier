@@ -95,21 +95,18 @@ func (d *Dispatcher) Dispatch(ctx context.Context, query *qdata.Query) (*qdata.R
 
 	resp, err := d.client.Do(req)
 	if err != nil {
-		return nil, qerror.New(qerror.CodeUnavailable, "promdispatcher: upstream request: %v", err)
+		return nil, qerror.UpstreamTransportError(err)
 	}
 
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, qerror.New(qerror.CodeUnavailable, "promdispatcher: read upstream: %v", err)
+		return nil, qerror.UpstreamTransportError(err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, qerror.New(
-			qerror.CodeUnavailable,
-			"promdispatcher: upstream status %d: %s", resp.StatusCode, string(body),
-		)
+		return nil, qerror.UpstreamHTTPError(resp.StatusCode, body)
 	}
 
 	return parseResponse(body)
@@ -194,10 +191,7 @@ func parseResponse(body []byte) (*qdata.Result, error) {
 	}
 
 	if resp.Status != "success" {
-		return nil, qerror.New(
-			qerror.CodeInvalidArgument,
-			"promdispatcher: upstream error (%s): %s", resp.ErrorType, resp.Error,
-		)
+		return nil, qerror.UpstreamHTTPError(http.StatusOK, body)
 	}
 
 	result := &qdata.Result{Signal: qdata.SignalMetrics}
