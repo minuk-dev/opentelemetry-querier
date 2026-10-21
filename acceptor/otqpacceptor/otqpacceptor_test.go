@@ -10,13 +10,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	"github.com/minuk-dev/opentelemetry-querier/acceptor/otqpacceptor"
 	otqpv1 "github.com/minuk-dev/opentelemetry-querier/gen/otqp/v1"
 	"github.com/minuk-dev/opentelemetry-querier/pipeline"
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
+	"github.com/minuk-dev/opentelemetry-querier/qerror"
 )
 
 // startGRPC boots an OTQP gRPC acceptor on an ephemeral port with the given
@@ -273,4 +276,36 @@ func TestGRPCStripsClientPipelineState(t *testing.T) {
 
 	assert.Empty(t, query.GetMetadata(), "an RPC without metadata is still sanitized")
 	assert.Empty(t, query.GetEnforcedMatchers())
+}
+
+func TestGRPCErrorClassification(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name string
+		code qerror.Code
+		want codes.Code
+	}{
+		{name: "canceled", code: qerror.CodeCanceled, want: codes.Canceled},
+		{name: "deadline", code: qerror.CodeDeadlineExceeded, want: codes.DeadlineExceeded},
+		{name: "execution", code: qerror.CodeQueryExecution, want: codes.FailedPrecondition},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			handler := pipeline.HandlerFunc(func(context.Context, *qdata.Query) (*qdata.Result, error) {
+				return nil, qerror.New(test.code, "upstream failure")
+			})
+			acc := otqpacceptor.New(otqpacceptor.Config{GRPCEndpoint: "127.0.0.1:0", HTTPEndpoint: ""}, handler)
+			require.NoError(t, acc.Start(t.Context(), nil))
+			t.Cleanup(func() { _ = acc.Shutdown(context.Background()) })
+
+			conn, err := grpc.NewClient(acc.GRPCListenAddr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = conn.Close() })
+
+			_, err = otqpv1.NewQueryServiceClient(conn).Query(t.Context(), &otqpv1.QueryRequest{Query: &qdata.Query{}})
+			assert.Equal(t, test.want, status.Code(err))
+		})
+	}
 }

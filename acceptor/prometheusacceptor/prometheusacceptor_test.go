@@ -284,3 +284,27 @@ func TestRejectsInvalidPromQL(t *testing.T) {
 		t.Fatalf("status = %d %q, want 400 error for unparseable PromQL", status, body.Status)
 	}
 }
+
+func TestNativeErrorClassification(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name      string
+		code      qerror.Code
+		errorType string
+	}{
+		{name: "execution", code: qerror.CodeQueryExecution, errorType: "execution"},
+		{name: "deadline", code: qerror.CodeDeadlineExceeded, errorType: "timeout"},
+		{name: "canceled", code: qerror.CodeCanceled, errorType: "canceled"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			failure := qerror.New(test.code, "backend failure")
+			server := serve(t, stubHandler{result: nil, err: failure})
+			code, body := getJSON(t, server.URL+"/api/v1/query?query=up")
+			assert.Equal(t, failure.HTTPStatus(), code)
+			assert.Equal(t, test.errorType, body.ErrorType)
+		})
+	}
+}

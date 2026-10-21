@@ -268,3 +268,55 @@ func TestDispatchAcceptsOrdinaryIdentifiers(t *testing.T) {
 	assert.Equal(t, `sum by(job,_x,a1)({__name__="up",job="api"})`,
 		captureQuery(t, &qdata.Query{Plan: plan}))
 }
+
+func TestUpstreamErrorClassification(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name   string
+		status int
+		code   qerror.Code
+	}{
+		{name: "bad query", status: http.StatusBadRequest, code: qerror.CodeInvalidArgument},
+		{name: "execution", status: http.StatusUnprocessableEntity, code: qerror.CodeQueryExecution},
+		{name: "quota", status: http.StatusTooManyRequests, code: qerror.CodeResourceExhausted},
+		{name: "unauthorized backend", status: http.StatusUnauthorized, code: qerror.CodeUnavailable},
+		{name: "forbidden backend", status: http.StatusForbidden, code: qerror.CodeUnavailable},
+		{name: "backend failure", status: http.StatusServiceUnavailable, code: qerror.CodeUnavailable},
+		{name: "timeout", status: http.StatusGatewayTimeout, code: qerror.CodeDeadlineExceeded},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := newServer(t, test.status, "upstream error")
+			_, err := newDispatcher(server.URL).Dispatch(t.Context(), metricQuery("up"))
+			require.Error(t, err)
+			assert.Equal(t, test.code, qerror.CodeOf(err))
+		})
+	}
+}
+
+func TestCanceledRequest(t *testing.T) {
+	t.Parallel()
+
+	server := newServer(t, http.StatusOK, "")
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err := newDispatcher(server.URL).Dispatch(ctx, metricQuery("up"))
+	require.Error(t, err)
+	assert.Equal(t, qerror.CodeCanceled, qerror.CodeOf(err))
+}
+
+func TestExpiredDeadline(t *testing.T) {
+	t.Parallel()
+
+	server := newServer(t, http.StatusOK, "")
+
+	ctx, cancel := context.WithDeadline(t.Context(), time.Time{})
+	defer cancel()
+
+	_, err := newDispatcher(server.URL).Dispatch(ctx, metricQuery("up"))
+	require.Error(t, err)
+	assert.Equal(t, qerror.CodeDeadlineExceeded, qerror.CodeOf(err))
+}
