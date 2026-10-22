@@ -30,6 +30,7 @@ func defaultChain() []processor.Processor {
 			RequestsPerSecond: 1000,
 			Burst:             1000,
 			PerTenant:         true,
+			MaxKeys:           0,
 		}),
 		simpleauthzprocessor.New(simpleauthzprocessor.Config{
 			SubjectHeader:  "X-Scope-User",

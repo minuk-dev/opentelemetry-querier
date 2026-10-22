@@ -27,6 +27,7 @@ func createDefaultConfig() component.Config {
 		RequestsPerSecond: 0,
 		Burst:             0,
 		PerTenant:         false,
+		MaxKeys:           0,
 	}
 }
 

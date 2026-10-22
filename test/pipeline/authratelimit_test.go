@@ -2,6 +2,7 @@ package pipeline_test
 
 import (
 	"net/http"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -75,6 +76,47 @@ func TestAuthRateLimit(t *testing.T) {
 	})
 }
 
+// TestAuthRateLimitTenantChurn is issue #68 end to end: with per_tenant keying, a
+// caller that varies the tenant id used to get a brand-new full bucket on every
+// request — never limited, and every id retained for the process lifetime. The
+// key space is now capped, so the churn runs out of buckets and lands on the
+// shared overflow one.
+func TestAuthRateLimitTenantChurn(t *testing.T) {
+	t.Parallel()
+
+	const (
+		maxKeys  = 4
+		requests = 50
+	)
+
+	upstream := newUpstream(t)
+	// The limiter reads the tenant id the tenant processor resolves, so it
+	// only keys per tenant when it runs after that processor.
+	base := front(t, upstream,
+		tenantprocessor.New(tenantprocessor.Config{
+			Header: tenantHeader, Default: "", Required: false, EnforceLabel: "",
+		}),
+		perTenantProc(maxKeys),
+	)
+
+	okCount := 0
+
+	for i := range requests {
+		code, body := getWith(t, base, map[string]string{tenantHeader: "tenant-" + strconv.Itoa(i)})
+		if code == http.StatusOK {
+			okCount++
+
+			continue
+		}
+
+		assert.Equal(t, http.StatusTooManyRequests, code, "body: %s", body)
+	}
+
+	// maxKeys buckets of one token each, plus the single token in the shared
+	// overflow bucket the remaining ids drain together.
+	assert.Equal(t, maxKeys+1, okCount, "a fresh tenant id must not buy a fresh full burst")
+}
+
 // authProc builds the gateway processor requiring the "dev-token" bearer and
 // limiting to rps requests per second with a burst of 1. A fractional rps starves
 // the refill so over-limit tests stay independent of wall-clock timing.
@@ -85,6 +127,21 @@ func authProc(rps float64) processor.Processor {
 		RequestsPerSecond: rps,
 		Burst:             1,
 		PerTenant:         false,
+		MaxKeys:           0,
+	})
+}
+
+// perTenantProc builds an unauthenticated, per-tenant limiter with a burst of 1
+// and a starved refill rate, so every allowed request is a bucket that existed
+// rather than one the elapsed wall-clock refilled.
+func perTenantProc(maxKeys int) processor.Processor {
+	return authratelimitprocessor.New(authratelimitprocessor.Config{
+		RequireBearer:     false,
+		Tokens:            nil,
+		RequestsPerSecond: 0.001,
+		Burst:             1,
+		PerTenant:         true,
+		MaxKeys:           maxKeys,
 	})
 }
 
