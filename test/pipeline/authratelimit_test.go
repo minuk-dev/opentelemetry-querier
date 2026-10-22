@@ -154,6 +154,7 @@ func TestPerTenantRateLimit(t *testing.T) {
 	})
 	limiter := authratelimitprocessor.New(authratelimitprocessor.Config{
 		RequireBearer: true, Tokens: []string{"dev-token"}, RequestsPerSecond: 0.001, Burst: 1, PerTenant: true,
+		MaxKeys: 0,
 	})
 	base := front(t, upstream, tenant, limiter)
 	headers := map[string]string{"Authorization": "Bearer dev-token"}
