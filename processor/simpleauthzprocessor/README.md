@@ -40,12 +40,11 @@ Each **rule**:
 | Key | Default | Description |
 | --- | --- | --- |
 | `subjects` | `[]` | Subject ids this rule applies to. Empty is a catch-all (any subject). |
-| `effect` | `allow` | `allow` or `deny`. |
+| `effect` | `deny` | `allow` or `deny`. |
 | `enforce_labels` | `[]` | Matchers injected when the rule allows (see below). |
 
 Each **enforce_label**: `name` (required), `value` (static), `from_tenant`
-(use the resolved tenant id as the value). A label whose resolved value is empty
-is skipped rather than enforcing `name=""`.
+(use the resolved tenant id as the value). An unresolved `from_tenant` value rejects the query. A static empty value is preserved as an equality constraint; it is never silently omitted.
 
 ```yaml
 processors:
