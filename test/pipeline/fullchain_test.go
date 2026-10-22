@@ -24,6 +24,7 @@ func defaultChain() []processor.Processor {
 			RequestsPerSecond: 1000,
 			Burst:             1000,
 			PerTenant:         true,
+			MaxKeys:           0,
 		}),
 		tenantprocessor.New(tenantprocessor.Config{
 			Header:       tenantHeader,
