@@ -210,7 +210,8 @@ func timeRange(query *qdata.Query, timeField string) map[string]any {
 
 // esHits mirrors the "hits" object of an _search response.
 type esHits struct {
-	Hits []map[string]json.RawMessage `json:"hits"`
+	Total json.RawMessage              `json:"total"`
+	Hits  []map[string]json.RawMessage `json:"hits"`
 }
 
 // parseResponse converts an Elasticsearch _search body into a qdata logs Result.
@@ -237,45 +238,91 @@ func (d *Dispatcher) parseResponse(body []byte) (*qdata.Result, error) {
 
 	var hits esHits
 
-	_ = json.Unmarshal(envelope["hits"], &hits)
+	err = json.Unmarshal(envelope["hits"], &hits)
+	if err != nil {
+		return nil, qerror.New(qerror.CodeUnavailable, "elasticsearchdispatcher: decode hits: %v", err)
+	}
 
-	logs := &qdata.Logs{}
+	metadata, err := parseSearchMetadata(envelope, hits.Total)
+	if err != nil {
+		return nil, err
+	}
+
+	logs := &qdata.Logs{SearchMetadata: metadata}
 	for _, hit := range hits.Hits {
 		logs.Records = append(logs.Records, d.hitToRecord(hit))
 	}
 
 	result := &qdata.Result{Signal: qdata.SignalLogs, Data: &qdatav1.Result_Logs{Logs: logs}}
-	surfacePartialResults(result, envelope)
+	surfacePartialResults(result, metadata)
 
 	return result, nil
 }
 
 // surfacePartialResults emits feedback warnings for the _search partial-result
 // signals (timed_out, _shards.failed), which a 200 response can still carry.
-func surfacePartialResults(result *qdata.Result, envelope map[string]json.RawMessage) {
-	var timedOut bool
-
-	_ = json.Unmarshal(envelope["timed_out"], &timedOut)
-
-	if timedOut {
+func surfacePartialResults(result *qdata.Result, metadata *qdata.SearchMetadata) {
+	if metadata.GetTimedOut() {
 		qdata.Warn(result, "upstream_timeout",
 			"elasticsearch reported the search timed out; results may be partial", "elasticsearch")
 	}
 
-	// _shards inner fields are camelCase-safe, so a small tagged struct is fine.
-	var shards struct {
-		Total  int `json:"total"`
-		Failed int `json:"failed"`
-	}
-
-	_ = json.Unmarshal(envelope["_shards"], &shards)
-
-	if shards.Failed > 0 {
+	shards := metadata.GetShards()
+	if shards.GetFailed() > 0 {
 		qdata.Warn(result, "shard_failure",
 			fmt.Sprintf("elasticsearch reported %d of %d shards failed; results may be partial",
-				shards.Failed, shards.Total),
-			"elasticsearch")
+				shards.GetFailed(), shards.GetTotal()), "elasticsearch")
 	}
+}
+
+func parseSearchMetadata(envelope map[string]json.RawMessage, total json.RawMessage) (*qdata.SearchMetadata, error) {
+	metadata := &qdata.SearchMetadata{}
+	for key, target := range map[string]any{"timed_out": &metadata.TimedOut, "_shards": &metadata.Shards} {
+		if raw := envelope[key]; len(raw) > 0 {
+			err := json.Unmarshal(raw, target)
+			if err != nil {
+				return nil, qerror.New(qerror.CodeUnavailable, "elasticsearchdispatcher: decode %s: %v", key, err)
+			}
+		}
+	}
+
+	total = bytes.TrimSpace(total)
+	if len(total) == 0 || bytes.Equal(total, []byte("null")) {
+		return metadata, nil
+	}
+
+	decoded, err := parseSearchTotal(total)
+	if err != nil {
+		return nil, err
+	}
+
+	metadata.Total = decoded
+
+	return metadata, nil
+}
+
+func parseSearchTotal(total json.RawMessage) (*qdata.SearchTotal, error) {
+	decoded := &qdata.SearchTotal{}
+
+	var err error
+	if total[0] == '{' {
+		err = json.Unmarshal(total, decoded)
+	} else {
+		decoded.Relation = "eq"
+		err = json.Unmarshal(total, &decoded.Value)
+	}
+
+	if err != nil || decoded.Value == nil || decoded.GetValue() < 0 {
+		return nil, qerror.New(qerror.CodeUnavailable, "elasticsearchdispatcher: invalid hit total")
+	}
+
+	switch decoded.GetRelation() {
+	case "eq", "gte":
+	default:
+		return nil, qerror.New(qerror.CodeUnavailable, "elasticsearchdispatcher: invalid total relation")
+	}
+
+	return decoded, nil
 }
 
 // hitToRecord maps one search hit to a LogRecord: the timestamp comes from the
