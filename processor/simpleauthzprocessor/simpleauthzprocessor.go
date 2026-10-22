@@ -54,7 +54,7 @@ type Rule struct {
 	// Subjects lists the subject ids this rule applies to. Empty matches any
 	// subject (catch-all), letting a trailing rule express a per-policy default.
 	Subjects []string `mapstructure:"subjects"`
-	// Effect is "allow" or "deny"; empty defaults to "allow".
+	// Effect is "allow" or "deny"; empty defaults to "deny".
 	Effect string `mapstructure:"effect"`
 	// EnforceLabels are injected when the rule allows the query.
 	EnforceLabels []EnforceLabel `mapstructure:"enforce_labels"`
@@ -126,7 +126,7 @@ func (p *Processor) ProcessQuery(_ context.Context, query *qdata.Query) error {
 	}
 
 	if matched {
-		enforce(query, rule.EnforceLabels)
+		return enforce(query, rule.EnforceLabels)
 	}
 
 	return nil
@@ -163,17 +163,15 @@ func (p *Processor) match(subject string) (Rule, bool) {
 }
 
 // enforce registers the rule's scoping matchers on the query for queryrewrite to
-// weave in. Matchers with an empty resolved value are skipped rather than
-// enforcing an empty string (which would over-restrict the query).
-func enforce(query *qdata.Query, labels []EnforceLabel) {
+// weave in. A missing required tenant must never widen an allow rule.
+func enforce(query *qdata.Query, labels []EnforceLabel) error {
 	for _, label := range labels {
 		value := label.Value
 		if label.FromTenant {
 			value = qdata.TenantID(query)
-		}
-
-		if value == "" {
-			continue
+			if value == "" {
+				return qerror.New(qerror.CodePermissionDenied, "simpleauthz: unresolved tenant for %q", label.Name)
+			}
 		}
 
 		query.EnforcedMatchers = append(query.EnforcedMatchers, &qdata.LabelMatcher{
@@ -182,12 +180,12 @@ func enforce(query *qdata.Query, labels []EnforceLabel) {
 			Value: value,
 		})
 	}
+
+	return nil
 }
 
-// denies reports whether an effect string rejects the query. Only "deny" denies;
-// "allow" and the empty default allow. Validate rejects any other value, so an
-// unrecognized effect never silently allows at runtime.
-func denies(effect string) bool { return effect == EffectDeny }
+// denies permits only an explicit allow; omitted or unrecognized effects deny.
+func denies(effect string) bool { return effect != EffectAllow }
 
 // headerValue does a case-insensitive lookup of the first value of a header.
 func headerValue(query *qdata.Query, name string) string {

@@ -26,6 +26,8 @@ import (
 type (
 	// Query is the standardized, DSL-agnostic query request.
 	Query = qdatav1.Query
+	// LogOptions controls native log retrieval.
+	LogOptions = qdatav1.LogOptions
 	// Result is the standardized query response.
 	Result = qdatav1.Result
 	// TimeRange is a query time window.

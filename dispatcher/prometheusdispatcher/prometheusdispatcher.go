@@ -179,9 +179,11 @@ type promData struct {
 }
 
 type promSample struct {
-	Metric map[string]string `json:"metric"`
-	Value  []any             `json:"value"`
-	Values [][]any           `json:"values"`
+	Metric     map[string]string `json:"metric"`
+	Value      []any             `json:"value"`
+	Values     [][]any           `json:"values"`
+	Histogram  json.RawMessage   `json:"histogram"`
+	Histograms json.RawMessage   `json:"histograms"`
 }
 
 // parseResponse converts a Prometheus JSON body into a qdata metrics Result.
@@ -211,10 +213,15 @@ func parseResponse(body []byte) (*qdata.Result, error) {
 			return nil, qerror.New(qerror.CodeUnavailable, "promdispatcher: decode %s: %v", resp.Data.ResultType, err)
 		}
 
+		for _, sample := range samples {
+			if len(sample.Histogram) > 0 || len(sample.Histograms) > 0 {
+				return nil, qerror.New(qerror.CodeUnavailable, "promdispatcher: native histogram results are unsupported")
+			}
+		}
+
 		result.Data = &qdatav1.Result_Metrics{Metrics: samplesToMetrics(samples)}
 	default:
-		// scalar/string results carry no series; return an empty metrics payload.
-		result.Data = &qdatav1.Result_Metrics{Metrics: &qdata.Metrics{}}
+		return nil, qerror.New(qerror.CodeUnavailable, "promdispatcher: unsupported result type %q", resp.Data.ResultType)
 	}
 
 	for _, warning := range resp.Warnings {
