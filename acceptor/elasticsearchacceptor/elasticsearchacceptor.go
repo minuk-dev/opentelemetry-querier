@@ -73,7 +73,7 @@ func New(cfg Config, handler pipeline.Handler) *Acceptor {
 // acceptor can be embedded or tested with httptest.
 func (a *Acceptor) Handler() http.Handler {
 	mux := http.NewServeMux()
-	// _search under any index (or index pattern) path prefix, plus the bare form.
+	// Only the fixed-backend /_search API accepts searches.
 	mux.HandleFunc("/_search", a.handleSearch)
 	mux.HandleFunc("/", a.route)
 
@@ -114,11 +114,11 @@ func (a *Acceptor) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-// route dispatches _search requests under an index path (e.g. /logs-*/_search)
-// and answers the ping endpoint ("/"); anything else is a 404.
+// route rejects index-specific searches and serves the ping endpoint.
 func (a *Acceptor) route(writer http.ResponseWriter, request *http.Request) {
 	if strings.HasSuffix(request.URL.Path, "/_search") {
-		a.handleSearch(writer, request)
+		writeError(writer, http.StatusBadRequest,
+			qerror.New(qerror.CodeInvalidArgument, "index selection is unsupported; use /_search with the configured backend"))
 
 		return
 	}
@@ -165,15 +165,23 @@ func parseSearch(request *http.Request) (*qdata.Query, error) {
 		return nil, fmt.Errorf("elasticsearchacceptor: parse form: %w", err)
 	}
 
+	for key := range request.Form {
+		if key != "q" {
+			return nil, qerror.New(qerror.CodeInvalidArgument, "unsupported search parameter %q", key)
+		}
+	}
+
 	expr := request.Form.Get("q")
 
-	if expr == "" && request.Body != nil {
+	if request.Body != nil {
 		bodyExpr, bodyErr := queryStringFromBody(request.Body)
 		if bodyErr != nil {
 			return nil, bodyErr
 		}
 
-		expr = bodyExpr
+		if expr == "" {
+			expr = bodyExpr
+		}
 	}
 
 	if expr == "" {
@@ -214,6 +222,12 @@ func queryStringFromBody(reader io.Reader) (string, error) {
 		}
 
 		return "", fmt.Errorf("%w: %w", errBadBody, err)
+	}
+
+	for key := range body {
+		if key != "query" {
+			return "", fmt.Errorf("%w: unsupported search option %q", errBadBody, key)
+		}
 	}
 
 	rawQuery, present := body["query"]
