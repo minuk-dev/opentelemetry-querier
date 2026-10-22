@@ -46,3 +46,5 @@ dispatchers:
     limit: 500
     direction: "backward"
 ```
+
+Request `limit` and `direction` are preserved through the pipeline. The dispatcher configured `limit` is both the default and maximum; larger requests are rejected, not silently truncated. Omitted direction uses the configured default; explicit direction must be `forward` or `backward`.

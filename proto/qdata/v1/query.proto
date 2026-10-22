@@ -149,6 +149,9 @@ message Query {
   // qdata.PlanSignals(plan) is the ground truth and this field mirrors it so a
   // consumer need not walk the tree. signal (1) is kept for back-compat.
   repeated Signal signals = 13;
+
+  // Optional native log retrieval controls, validated against backend limits.
+  LogOptions log_options = 14;
 }
 
 // ---- Structured query IR (design note #10, Phase 3 / §4.3) ----
@@ -289,4 +292,12 @@ enum MatchCardinality {
 // Literal is a scalar constant.
 message Literal {
   double value = 1;
+}
+
+// LogOptions controls native log retrieval without changing the query plan.
+message LogOptions {
+  // Zero uses the server default; positive values must not exceed its maximum.
+  int64 limit = 1;
+  // Empty uses the server default; otherwise forward or backward.
+  string direction = 2;
 }
