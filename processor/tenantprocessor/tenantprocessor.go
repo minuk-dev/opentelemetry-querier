@@ -67,7 +67,7 @@ func (p *Processor) ProcessQuery(_ context.Context, query *qdata.Query) error {
 		// dispatchers see an unresolved tenant rather than the attacker's.
 		qdata.DeleteMetadata(query, qdata.MetadataTenantID)
 
-		if p.cfg.Required {
+		if p.cfg.Required || p.cfg.EnforceLabel != "" {
 			return qerror.New(qerror.CodeUnauthenticated, "tenant: missing %s header", p.cfg.Header)
 		}
 
