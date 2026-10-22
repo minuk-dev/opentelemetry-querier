@@ -28,3 +28,13 @@ processors:
     mask_labels: ["user_email"]
     warn_counter_without_rate: true
 ```
+
+## Counter warning limits
+
+`warn_counter_without_rate` checks the result's metric type: it emits a warning
+for `MetricCumulativeCounter` series. It does not infer counter types from metric
+names or inspect PromQL text. The Prometheus query API does not provide metric
+type metadata, so the current Prometheus dispatcher sets `MetricUnknown` and
+this option produces no counter warnings on that path. Reliable warnings require
+a dispatcher or processor that supplies trustworthy metric types; a future
+metadata lookup would be needed for the default Prometheus path.
