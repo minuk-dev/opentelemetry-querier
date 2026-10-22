@@ -67,14 +67,15 @@ processors:
           - name: "tenant_id"
             from_tenant: true
 
-  # Query transformation: inject enforced label matchers into the PromQL AST.
+  # Query transformation: AND enforced constraints into every Select in the query plan.
   queryrewrite:
     enforce_labels:
       - name: "tenant_id"
         from_tenant: true
 
   # Response transformation: drop internal labels, mask secrets, warn on raw
-  # cumulative counters returned without rate().
+  # cumulative counters when result types are known. The Prometheus dispatcher
+  # currently sets MetricUnknown, so counter warnings are inactive on this path.
   responsefilter:
     drop_labels:
       - "__internal__"

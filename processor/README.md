@@ -20,5 +20,5 @@ dispatcher is reached; return a `*qerror.Error` to control the transport status.
 | [authratelimitprocessor](./authratelimitprocessor) | `authratelimit` | Bearer-token auth + per-tenant rate limiting. |
 | [tenantprocessor](./tenantprocessor) | `tenant` | Resolve the tenant and register an isolation label matcher. |
 | [simpleauthzprocessor](./simpleauthzprocessor) | `simpleauthz` | Per-subject authorization: reject or scope a user's query. |
-| [queryrewriteprocessor](./queryrewriteprocessor) | `queryrewrite` | Inject enforced label matchers into the PromQL AST. |
+| [queryrewriteprocessor](./queryrewriteprocessor) | `queryrewrite` | AND enforced constraints into every Select in the query plan. |
 | [responsefilterprocessor](./responsefilterprocessor) | `responsefilter` | Drop/mask result attributes; emit feedback warnings. |
