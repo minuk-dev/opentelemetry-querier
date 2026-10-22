@@ -23,7 +23,7 @@ acceptors:
   #   endpoint: "0.0.0.0:9095"
 
 processors:
-  # Gateway: bearer auth + per-tenant rate limiting. Runs first.
+  # Gateway: bearer auth + per-tenant rate limiting. Runs after tenant resolution.
   authratelimit:
     require_bearer: true
     tokens:
@@ -31,6 +31,10 @@ processors:
     requests_per_second: 50
     burst: 100
     per_tenant: true
+    # Cap on the number of tenants holding their own bucket. Past the cap an
+    # unseen id must win a token from a shared admission bucket, so a caller
+    # cycling tenant ids can neither grow the map nor exceed the rate above.
+    max_keys: 10000
 
   # Tenant control: resolve X-Scope-OrgID and register an isolation matcher.
   tenant:
@@ -92,5 +96,5 @@ service:
     # (metrics/logs/traces/profiles), mirroring the opentelemetry-collector.
     metrics/default:
       acceptors: [otqp]
-      processors: [authratelimit, tenant, simpleauthz, queryrewrite, responsefilter]
+      processors: [tenant, authratelimit, simpleauthz, queryrewrite, responsefilter]
       dispatchers: [prometheus]
