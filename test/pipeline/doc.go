@@ -7,7 +7,7 @@
 // pipeline with a real Prometheus dispatcher pointed at an httptest upstream
 // that records the rendered query and returns canned responses. Each test adds
 // one more processor to the chain and asserts the incremental behavior, so the
-// full default chain (authratelimit -> tenant -> simpleauthz -> queryrewrite ->
+// full default chain (tenant -> authratelimit -> simpleauthz -> queryrewrite ->
 // responsefilter, as in config.yaml) is validated cumulatively.
 //
 // They run by default:
