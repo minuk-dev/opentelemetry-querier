@@ -69,6 +69,10 @@ func convertExpr(expr parser.Expr) (*qdata.Node, error) {
 // convertVectorSelector builds a metrics Select from a selector's label matchers
 // (which already include the __name__ matcher when a metric name is given).
 func convertVectorSelector(sel *parser.VectorSelector) (*qdata.Node, error) {
+	if sel.OriginalOffset != 0 || sel.OriginalOffsetExpr != nil || sel.Timestamp != nil || sel.StartOrEnd != 0 {
+		return nil, fmt.Errorf("%w: selector offset or @ modifier", errUnsupportedExpr)
+	}
+
 	filter, err := matchersToPredicate(sel.LabelMatchers)
 	if err != nil {
 		return nil, err
@@ -153,6 +157,16 @@ func singleMatrixArg(args parser.Expressions) (*parser.MatrixSelector, bool) {
 }
 
 func convertAggregate(agg *parser.AggregateExpr) (*qdata.Node, error) {
+	if agg.Without && len(agg.Grouping) == 0 {
+		return nil, fmt.Errorf("%w: empty without grouping", errUnsupportedExpr)
+	}
+
+	if agg.Param != nil {
+		if _, ok := agg.Param.(*parser.NumberLiteral); !ok {
+			return nil, fmt.Errorf("%w: nonliteral aggregation parameter", errUnsupportedExpr)
+		}
+	}
+
 	operator, err := convertAggOp(agg.Op)
 	if err != nil {
 		return nil, err
@@ -179,6 +193,14 @@ func convertAggregate(agg *parser.AggregateExpr) (*qdata.Node, error) {
 }
 
 func convertBinary(bin *parser.BinaryExpr) (*qdata.Node, error) {
+	if bin.ReturnBool {
+		return nil, fmt.Errorf("%w: bool comparison", errUnsupportedExpr)
+	}
+
+	if matching := bin.VectorMatching; matching != nil && matching.On && len(matching.MatchingLabels) == 0 {
+		return nil, fmt.Errorf("%w: empty on matching", errUnsupportedExpr)
+	}
+
 	operator, err := convertBinOp(bin.Op)
 	if err != nil {
 		return nil, err

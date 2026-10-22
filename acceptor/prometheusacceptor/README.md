@@ -28,3 +28,5 @@ acceptors:
 ```
 
 Numeric time inputs must be finite and within protobuf timestamp bounds (years 1–9999). Explicit epoch/pre-epoch timestamps are retained. Range bounds must be ordered; steps must be positive, finite, and representable as a Go duration. Prometheus duration units including `d`, `w`, and `y` are accepted. OTQP queries receive the same context/bounds/step validation in the pipeline.
+
+PromQL features not represented by the query plan are rejected with HTTP 400: selector offsets and `@`, `bool` comparisons, empty `on()` matching, empty `without()` grouping, and nonliteral aggregation parameters. They are never silently dropped or replaced with zero.

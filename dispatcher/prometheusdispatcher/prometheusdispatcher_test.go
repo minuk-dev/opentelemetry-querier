@@ -302,3 +302,32 @@ func TestExplicitEvaluationTime(t *testing.T) {
 		})
 	}
 }
+
+func TestRejectsUnsupportedResults(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name string
+		data string
+	}{
+		{name: "scalar", data: `{"resultType":"scalar","result":[1700000000,"2"]}`},
+		{name: "string", data: `{"resultType":"string","result":[1700000000,"hello"]}`},
+		{name: "unknown", data: `{"resultType":"unknown","result":[]}`},
+		{name: "histogram vector", data: `{"resultType":"vector","result":[{"metric":{},` +
+			`"histogram":[1700000000,{"count":"1","sum":"2","buckets":[]}]}]}`},
+		{name: "histogram matrix", data: `{"resultType":"matrix","result":[{"metric":{},` +
+			`"histograms":[[1700000000,{"count":"1","sum":"2","buckets":[]}]]}]}`},
+		{name: "mixed matrix", data: `{"resultType":"matrix","result":[{"metric":{},"values":[[1700000001,"3"]],` +
+			`"histograms":[[1700000000,{"count":"1","sum":"2","buckets":[]}]]}]}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := newServer(t, http.StatusOK, `{"status":"success","data":`+test.data+`}`)
+			result, err := newDispatcher(server.URL).Dispatch(t.Context(), metricQuery("up"))
+			require.Error(t, err)
+			assert.Equal(t, qerror.CodeUnavailable, qerror.CodeOf(err))
+			assert.Nil(t, result, "unsupported measurements must never become empty successful results")
+		})
+	}
+}

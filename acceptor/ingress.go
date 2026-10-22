@@ -30,7 +30,7 @@ func PrepareIngress(query *qdata.Query, header http.Header) {
 //     processors decided on. They are only ever AND-ed in, so a client cannot
 //     widen a query through them today, but they are equally not client input.
 //
-// Both are cleared rather than merged: a processor that wants a hint on the
+// These fields and body-supplied headers are cleared rather than merged: a processor that wants a hint on the
 // query puts it there itself.
 func sanitize(query *qdata.Query) {
 	if query == nil {
@@ -38,6 +38,8 @@ func sanitize(query *qdata.Query) {
 	}
 
 	query.Metadata = nil
+	// Identity headers are transport input, never a fallback from the body.
+	query.Header = nil
 	query.EnforcedMatchers = nil
 	query.EnforcedPredicates = nil
 }

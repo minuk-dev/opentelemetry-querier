@@ -319,3 +319,31 @@ func TestTimeParameters(t *testing.T) {
 		})
 	}
 }
+
+func TestRejectsLossyPromQL(t *testing.T) {
+	t.Parallel()
+
+	for _, expression := range []string{
+		"up offset 5m", "up offset -5m", "up @ 1700000000", "up @ start()", "up @ end()",
+		"rate(up[5m] offset 1h)", "rate(up[5m] @ 1700000000)", "up > bool 0",
+		"up / on() group_left() up", "sum without() (up)", "topk(1+1, up)", "quantile(1/2, up)",
+	} {
+		t.Run(expression, func(t *testing.T) {
+			t.Parallel()
+
+			called := false
+			handler := pipeline.HandlerFunc(func(context.Context, *qdata.Query) (*qdata.Result, error) {
+				called = true
+
+				return metricsResult(), nil
+			})
+			acc := prometheusacceptor.New(prometheusacceptor.Config{Endpoint: ""}, handler)
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+				"/api/v1/query?query="+url.QueryEscape(expression), nil)
+			response := httptest.NewRecorder()
+			acc.Handler().ServeHTTP(response, request)
+			assert.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+			assert.False(t, called, "unsupported semantics must not reach the pipeline")
+		})
+	}
+}

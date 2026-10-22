@@ -117,6 +117,11 @@ func (d *Dispatcher) Dispatch(ctx context.Context, query *qdata.Query) (*qdata.R
 
 	endpoint, form := d.buildRequest(query, logQL)
 
+	err = d.applyLogOptions(query.GetLogOptions(), form)
+	if err != nil {
+		return nil, err
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, qerror.New(qerror.CodeInternal, "lokidispatcher: build request: %v", err)
@@ -430,4 +435,25 @@ func sampleToPoint(pair []any) *qdata.MetricPoint {
 	stamp := timestamppb.New(time.Unix(0, int64(seconds*nanosPerSecond)))
 
 	return &qdata.MetricPoint{Start: stamp, End: stamp, Value: qdata.Double(parsed), Exemplars: nil}
+}
+
+func (d *Dispatcher) applyLogOptions(options *qdata.LogOptions, form url.Values) error {
+	limit := options.GetLimit()
+	if limit < 0 || limit > int64(d.cfg.Limit) {
+		return qerror.New(qerror.CodeInvalidArgument, "lokidispatcher: limit must be between 1 and %d", d.cfg.Limit)
+	}
+
+	if limit > 0 {
+		form.Set("limit", strconv.FormatInt(limit, 10))
+	}
+
+	switch direction := options.GetDirection(); direction {
+	case "":
+	case directionForward, directionBackward:
+		form.Set("direction", direction)
+	default:
+		return qerror.New(qerror.CodeInvalidArgument, "lokidispatcher: invalid direction %q", direction)
+	}
+
+	return nil
 }
