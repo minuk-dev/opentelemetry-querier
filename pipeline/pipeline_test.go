@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/minuk-dev/opentelemetry-querier/dispatcher"
 	"github.com/minuk-dev/opentelemetry-querier/pipeline"
@@ -195,4 +197,35 @@ func TestHandleAcceptsWellFormedPlan(t *testing.T) {
 	_, err := pipe.Handle(context.Background(), &qdata.Query{Plan: plan})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"query:a", "result:a"}, trace)
+}
+
+func TestInvalidQueryTime(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name  string
+		query *qdata.Query
+	}{
+		{name: "unknown context", query: &qdata.Query{Context: -1}},
+		{name: "missing bounds", query: &qdata.Query{Context: qdata.ContextRange}},
+		{name: "invalid timestamp",
+			query: &qdata.Query{Range: &qdata.TimeRange{End: &timestamppb.Timestamp{Seconds: 0, Nanos: -1}}}},
+		{name: "reversed", query: &qdata.Query{Range: &qdata.TimeRange{
+			Start: timestamppb.New(time.Unix(2, 0)), End: timestamppb.New(time.Unix(1, 0)),
+		}}},
+		{name: "negative step", query: &qdata.Query{Step: durationpb.New(-time.Second)}},
+		{name: "zero step", query: &qdata.Query{Step: durationpb.New(0)}},
+		{name: "overflow step", query: &qdata.Query{Step: &durationpb.Duration{Seconds: 315576000000, Nanos: 0}}},
+		{name: "missing metric step", query: &qdata.Query{Signal: qdata.SignalMetrics, Context: qdata.ContextRange,
+			Range: &qdata.TimeRange{Start: timestamppb.New(time.Unix(0, 0)), End: timestamppb.New(time.Unix(1, 0))}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			pipe := pipeline.New("test", nil, &stubDispatcher{Base: dispatcher.Base{}, result: &qdata.Result{}})
+			_, err := pipe.Handle(t.Context(), test.query)
+			require.Error(t, err)
+			assert.Equal(t, qerror.CodeInvalidArgument, qerror.CodeOf(err))
+		})
+	}
 }

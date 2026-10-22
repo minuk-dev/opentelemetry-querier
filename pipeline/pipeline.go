@@ -46,7 +46,12 @@ func New(name string, processors []processor.Processor, disp dispatcher.Dispatch
 // reverse order). A validation or processor error on the request path
 // short-circuits before the dispatcher is reached.
 func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (*qdata.Result, error) {
-	err := p.validatePlan(query)
+	err := qdata.ValidateQueryTime(query)
+	if err != nil {
+		return nil, qerror.New(qerror.CodeInvalidArgument, "pipeline %q: %v", p.Name, err)
+	}
+
+	err = p.validatePlan(query)
 	if err != nil {
 		return nil, err
 	}
