@@ -26,3 +26,5 @@ acceptors:
   prometheus:
     endpoint: "0.0.0.0:9090"
 ```
+
+PromQL features not represented by the query plan are rejected with HTTP 400: selector offsets and `@`, `bool` comparisons, empty `on()` matching, empty `without()` grouping, and nonliteral aggregation parameters. They are never silently dropped or replaced with zero.
