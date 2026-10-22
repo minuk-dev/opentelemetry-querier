@@ -1,11 +1,13 @@
 # authratelimit processor
 
 The gateway processor: **bearer-token authentication** and **per-tenant rate
-limiting**. It runs first on the request path and short-circuits with a coded
+limiting**. With per-tenant limiting enabled, it runs after the tenant processor and short-circuits with a coded
 error (`Unauthenticated` / `ResourceExhausted`) so no unauthenticated or
 over-quota query reaches storage.
 
-Rate limiting uses a token-bucket keyed globally or per tenant.
+Rate limiting uses a token-bucket keyed globally or per tenant. Per-tenant limiting rejects unresolved tenants before consuming quota. Authentication still runs before quota consumption and storage access.
+
+Use `processors: [tenant, authratelimit, simpleauthz, queryrewrite, responsefilter]` when combining these processors.
 
 ## Bounded key space
 

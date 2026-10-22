@@ -144,3 +144,32 @@ func perTenantProc(maxKeys int) processor.Processor {
 		MaxKeys:           maxKeys,
 	})
 }
+
+func TestPerTenantRateLimit(t *testing.T) {
+	t.Parallel()
+
+	upstream := newUpstream(t)
+	tenant := tenantprocessor.New(tenantprocessor.Config{
+		Header: tenantHeader, Default: "", Required: false, EnforceLabel: "",
+	})
+	limiter := authratelimitprocessor.New(authratelimitprocessor.Config{
+		RequireBearer: true, Tokens: []string{"dev-token"}, RequestsPerSecond: 0.001, Burst: 1, PerTenant: true,
+		MaxKeys: 0,
+	})
+	base := front(t, upstream, tenant, limiter)
+	headers := map[string]string{"Authorization": "Bearer dev-token"}
+	code, body := getWith(t, base, headers)
+	assert.Equal(t, http.StatusUnauthorized, code, "unresolved tenant: %s", body)
+
+	headers[tenantHeader] = "a"
+	code, body = getWith(t, base, headers)
+	assert.Equal(t, http.StatusOK, code, "first request from A: %s", body)
+
+	headers[tenantHeader] = "b"
+	code, body = getWith(t, base, headers)
+	assert.Equal(t, http.StatusOK, code, "first request from B: %s", body)
+
+	headers[tenantHeader] = "a"
+	code, body = getWith(t, base, headers)
+	assert.Equal(t, http.StatusTooManyRequests, code, "second request from A: %s", body)
+}
