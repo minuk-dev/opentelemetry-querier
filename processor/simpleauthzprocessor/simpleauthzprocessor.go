@@ -84,6 +84,27 @@ type Processor struct {
 	cfg Config
 }
 
+// SecurityRequirements declares dependencies of subject resolution and allow rules.
+func (p *Processor) SecurityRequirements() processor.SecurityRequirements {
+	var requirements processor.SecurityRequirements
+
+	requirements.NeedsTenant = p.cfg.FromTenant
+
+	for _, rule := range p.cfg.Rules {
+		if denies(rule.Effect) {
+			continue
+		}
+
+		requirements.RegistersEnforcement = requirements.RegistersEnforcement || len(rule.EnforceLabels) > 0
+
+		for _, label := range rule.EnforceLabels {
+			requirements.NeedsTenant = requirements.NeedsTenant || label.FromTenant
+		}
+	}
+
+	return requirements
+}
+
 // New builds the processor, applying defaults. Callers should Validate the
 // config first (the factory does); New assumes a valid effect set.
 func New(cfg Config) *Processor {

@@ -41,6 +41,14 @@ type Processor struct {
 	limiter *limiter
 }
 
+// SecurityRequirements declares the tenant dependency of an enabled quota.
+func (p *Processor) SecurityRequirements() processor.SecurityRequirements {
+	return processor.SecurityRequirements{
+		ResolvesTenant: false, NeedsTenant: p.cfg.PerTenant && p.limiter != nil,
+		RegistersEnforcement: false, AppliesEnforcement: false,
+	}
+}
+
 // New builds the processor.
 func New(cfg Config) *Processor {
 	tokens := make(map[string]struct{}, len(cfg.Tokens))

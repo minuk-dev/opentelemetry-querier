@@ -12,6 +12,7 @@ import (
 	"github.com/minuk-dev/opentelemetry-querier/connector"
 	"github.com/minuk-dev/opentelemetry-querier/dispatcher"
 	"github.com/minuk-dev/opentelemetry-querier/pipeline"
+	"github.com/minuk-dev/opentelemetry-querier/processor"
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
 	"github.com/minuk-dev/opentelemetry-querier/querier"
 )
@@ -141,4 +142,44 @@ func TestBuildRejectsNestedConnectorTarget(t *testing.T) {
 
 	_, err = querier.Build(factories, cfg, buildInfo())
 	require.ErrorContains(t, err, "leaf pipeline")
+}
+
+type tenantConsumer struct {
+	processor.Base
+}
+
+func (tenantConsumer) SecurityRequirements() processor.SecurityRequirements {
+	return processor.SecurityRequirements{
+		ResolvesTenant: false, NeedsTenant: true, RegistersEnforcement: false, AppliesEnforcement: false,
+	}
+}
+
+func TestBuildRejectsNamedSecurityDependency(t *testing.T) {
+	t.Parallel()
+
+	proc := processor.NewFactory(component.MustNewType("consumer"), emptyDefault,
+		func(context.Context, component.Settings, component.Config) (processor.Processor, error) {
+			return tenantConsumer{Base: processor.Base{}}, nil
+		})
+	factories := querier.Factories{
+		Acceptors:  map[component.Type]acceptor.Factory{component.MustNewType("otqp"): acceptorFactory("otqp")},
+		Processors: map[component.Type]processor.Factory{component.MustNewType("consumer"): proc},
+		Dispatchers: map[component.Type]dispatcher.Factory{
+			component.MustNewType("prometheus"): dispatcherFactory("prometheus"),
+		},
+		Connectors: nil,
+	}
+	cfg := &querier.Config{
+		Acceptors:   map[string]map[string]any{"otqp": {}},
+		Processors:  map[string]map[string]any{"consumer/tenant-quota": {}},
+		Dispatchers: map[string]map[string]any{"prometheus": {}}, Connectors: nil,
+		Service: querier.ServiceConfig{Pipelines: map[string]querier.PipelineConfig{
+			"metrics/private": {Acceptors: []string{"otqp"}, Processors: []string{"consumer/tenant-quota"},
+				Dispatchers: []string{"prometheus"}},
+		}},
+	}
+	_, err := querier.Build(factories, cfg, buildInfo())
+	require.ErrorContains(t, err, "tenant resolver")
+	assert.Contains(t, err.Error(), "metrics/private")
+	assert.Contains(t, err.Error(), "consumer/tenant-quota")
 }
