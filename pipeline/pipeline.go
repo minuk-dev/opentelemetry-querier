@@ -46,20 +46,9 @@ func New(name string, processors []processor.Processor, disp dispatcher.Dispatch
 // reverse order). A validation or processor error on the request path
 // short-circuits before the dispatcher is reached.
 func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (*qdata.Result, error) {
-	err := p.validatePlan(query)
+	err := p.processQuery(ctx, query)
 	if err != nil {
 		return nil, err
-	}
-
-	// Mirror the plan's signal set onto Query.signals for downstream readers
-	// (no-op without a plan).
-	qdata.SyncPlanSignals(query)
-
-	for _, proc := range p.Processors {
-		err = proc.ProcessQuery(ctx, query)
-		if err != nil {
-			return nil, fmt.Errorf("pipeline %q: %w", p.Name, err)
-		}
 	}
 
 	result, err := p.Dispatcher.Dispatch(ctx, query)
@@ -88,7 +77,12 @@ func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (*qdata.Resul
 // separately since they call back into Handle). Components are started in
 // dispatcher-to-front order so downstream is ready before upstream.
 func (p *Pipeline) Start(ctx context.Context, host component.Host) error {
-	err := p.Dispatcher.Start(ctx, host)
+	err := processor.ValidateOrder(p.Processors)
+	if err != nil {
+		return fmt.Errorf("pipeline %q: %w", p.Name, err)
+	}
+
+	err = p.Dispatcher.Start(ctx, host)
 	if err != nil {
 		return fmt.Errorf("pipeline %q: start dispatcher: %w", p.Name, err)
 	}
@@ -112,6 +106,37 @@ func (p *Pipeline) Shutdown(ctx context.Context) error {
 	err := p.Dispatcher.Shutdown(ctx)
 	if err != nil {
 		return fmt.Errorf("pipeline %q: shutdown dispatcher: %w", p.Name, err)
+	}
+
+	return nil
+}
+
+// processQuery validates configuration and executes the request path, rejecting
+// pending security constraints before the dispatcher can see the query.
+func (p *Pipeline) processQuery(ctx context.Context, query *qdata.Query) error {
+	err := processor.ValidateOrder(p.Processors)
+	if err != nil {
+		return fmt.Errorf("pipeline %q: %w", p.Name, err)
+	}
+
+	err = p.validatePlan(query)
+	if err != nil {
+		return err
+	}
+
+	// Mirror the plan's signal set onto Query.signals for downstream readers
+	// (no-op without a plan).
+	qdata.SyncPlanSignals(query)
+
+	for _, proc := range p.Processors {
+		err = proc.ProcessQuery(ctx, query)
+		if err != nil {
+			return fmt.Errorf("pipeline %q: %w", p.Name, err)
+		}
+	}
+
+	if len(query.GetEnforcedMatchers()) > 0 || len(query.GetEnforcedPredicates()) > 0 {
+		return qerror.New(qerror.CodeInternal, "pipeline %q: unapplied security constraints", p.Name)
 	}
 
 	return nil
