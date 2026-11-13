@@ -303,3 +303,22 @@ func TestFullResultsHaveNoWarnings(t *testing.T) {
 
 	assert.Empty(t, result.GetFeedback().GetNotifications(), "a complete response must not warn")
 }
+
+func TestMalformedSearchMetadataRejected(t *testing.T) {
+	t.Parallel()
+
+	for _, body := range []string{
+		`{"timed_out":"yes","hits":{"hits":[]}}`,
+		`{"hits":{"total":{"relation":"eq"},"hits":[]}}`,
+		`{"hits":{"total":{"value":-1,"relation":"eq"},"hits":[]}}`,
+		`{"hits":{"total":{"value":1,"relation":"unknown"},"hits":[]}}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			t.Parallel()
+
+			server := newServer(t, http.StatusOK, body)
+			_, err := newDispatcher(server.URL).Dispatch(t.Context(), luceneQuery())
+			require.Error(t, err)
+		})
+	}
+}

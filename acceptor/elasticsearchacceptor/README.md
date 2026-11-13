@@ -29,3 +29,5 @@ acceptors:
 ```
 
 This is a fixed-index API. Only `q` in the URL and `query` in the JSON body are supported. Explicit pagination, size, sort, and other unimplemented search options return HTTP 400; they are never silently discarded. Configure the backend index, size limit, and sorting policy on the dispatcher. Dynamic index authorization is not implemented.
+
+Upstream hit totals and their `eq`/`gte` relation, timeout state, and shard completion counts are preserved independently of the returned page size. Feedback is exposed in a `warnings` extension. Missing upstream metadata is omitted rather than synthesized. Label masking does not change the upstream match total.
