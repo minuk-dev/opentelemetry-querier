@@ -11,10 +11,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/prometheus/common/model"
 
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -191,6 +194,12 @@ func parseInstant(request *http.Request) (*qdata.Query, error) {
 
 	query := &qdata.Query{Signal: qdata.SignalMetrics, Context: qdata.ContextInstant, Plan: plan}
 	query.Range = &qdata.TimeRange{Start: nil, End: timestamppb.New(evalAt), StartExclusive: false, EndExclusive: false}
+
+	err = qdata.ValidateQueryTime(query)
+	if err != nil {
+		return nil, fmt.Errorf("prometheusacceptor: %w", err)
+	}
+
 	acceptor.PrepareIngress(query, request.Header)
 
 	return query, nil
@@ -235,6 +244,12 @@ func parseRange(request *http.Request) (*qdata.Query, error) {
 		EndExclusive:   false,
 	}
 	query.Step = durationpb.New(step)
+
+	err = qdata.ValidateQueryTime(query)
+	if err != nil {
+		return nil, fmt.Errorf("prometheusacceptor: %w", err)
+	}
+
 	acceptor.PrepareIngress(query, request.Header)
 
 	return query, nil
@@ -247,10 +262,21 @@ func parseTime(raw string) (time.Time, error) {
 
 	seconds, err := strconv.ParseFloat(raw, floatBitSize)
 	if err == nil {
-		return time.Unix(0, int64(seconds*nanosPerSecond)), nil
+		if math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds < -62135596800 || seconds >= 253402300800 {
+			return time.Time{}, errBadTime
+		}
+
+		whole, fraction := math.Modf(seconds)
+
+		return time.Unix(int64(whole), int64(fraction*nanosPerSecond)), nil
 	}
 
 	parsed, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%w: %q", errBadTime, raw)
+	}
+
+	err = timestamppb.New(parsed).CheckValid()
 	if err != nil {
 		return time.Time{}, fmt.Errorf("%w: %q", errBadTime, raw)
 	}
@@ -265,15 +291,20 @@ func parseStep(raw string) (time.Duration, error) {
 
 	seconds, err := strconv.ParseFloat(raw, floatBitSize)
 	if err == nil {
-		return time.Duration(seconds * float64(time.Second)), nil
+		nanos := seconds * float64(time.Second)
+		if math.IsNaN(nanos) || math.IsInf(nanos, 0) || nanos < 1 || nanos >= float64(math.MaxInt64) {
+			return 0, errBadStep
+		}
+
+		return time.Duration(nanos), nil
 	}
 
-	parsed, err := time.ParseDuration(raw)
-	if err != nil {
+	parsed, err := model.ParseDuration(raw)
+	if err != nil || parsed <= 0 {
 		return 0, fmt.Errorf("%w: %q", errBadStep, raw)
 	}
 
-	return parsed, nil
+	return time.Duration(parsed), nil
 }
 
 // ---- response serialization ----
