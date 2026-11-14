@@ -9,11 +9,7 @@ import (
 	"github.com/minuk-dev/opentelemetry-querier/processor/tenantprocessor"
 )
 
-// TestTenant adds the tenant processor to the chain and asserts that the
-// X-Scope-OrgID header resolves the tenant end to end: the resolved id is
-// forwarded to the upstream by the dispatcher, and the isolation matcher is
-// registered but — with no queryrewrite yet — not yet woven into the rendered
-// query (that is the query-rewrite step's job).
+// TestTenant forwards a resolved tenant without configuring label isolation.
 func TestTenant(t *testing.T) {
 	t.Parallel()
 
@@ -21,7 +17,7 @@ func TestTenant(t *testing.T) {
 		Header:       tenantHeader,
 		Default:      "",
 		Required:     false,
-		EnforceLabel: "tenant_id",
+		EnforceLabel: "",
 	})
 
 	t.Run("X-Scope-OrgID resolves the tenant and is forwarded upstream", func(t *testing.T) {
@@ -35,7 +31,7 @@ func TestTenant(t *testing.T) {
 		assert.Equal(t, http.StatusOK, code, "body: %s", body)
 		assert.Equal(t, "acme", upstream.gotTenant(), "the dispatcher forwards the resolved tenant id")
 		assert.Equal(t, `{__name__="up"}`, upstream.gotQuery(),
-			"the isolation matcher is registered but not enforced into the query without queryrewrite")
+			"tenant forwarding without label isolation does not require queryrewrite")
 	})
 
 	t.Run("no header leaves the tenant unset", func(t *testing.T) {

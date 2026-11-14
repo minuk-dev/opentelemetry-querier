@@ -13,6 +13,7 @@ import (
 	qdatav1 "github.com/minuk-dev/opentelemetry-querier/gen/qdata/v1"
 	"github.com/minuk-dev/opentelemetry-querier/processor"
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
+	"github.com/minuk-dev/opentelemetry-querier/qerror"
 )
 
 // EnforceLabel is a statically-configured matcher to inject into every query.
@@ -36,29 +37,46 @@ type Processor struct {
 	cfg Config
 }
 
+// SecurityRequirements declares tenant-dependent static labels and enforcement.
+func (p *Processor) SecurityRequirements() processor.SecurityRequirements {
+	var requirements processor.SecurityRequirements
+
+	requirements.AppliesEnforcement = true
+
+	for _, label := range p.cfg.EnforceLabels {
+		requirements.NeedsTenant = requirements.NeedsTenant || label.FromTenant
+	}
+
+	return requirements
+}
+
 // New builds the query-rewrite processor.
 func New(cfg Config) *Processor {
 	return &Processor{Base: processor.Base{}, cfg: cfg}
 }
 
 // ProcessQuery AND-s the enforced predicates into every Select node of the
-// query plan. When there is no plan, or nothing to enforce, the query is left
-// untouched. Because enforcement composes into the predicate tree (which
+// query plan and consumes the pending constraints. Enforcement without a plan
+// is rejected. With nothing to enforce, the query is left untouched.
+// Because enforcement composes into the predicate tree (which
 // supports AND/OR/NOT natively), no dialect parsing is needed and boolean
 // enforcement is expressible; a dispatcher whose backend cannot render a given
 // predicate shape fails closed at render time.
 func (p *Processor) ProcessQuery(_ context.Context, query *qdata.Query) error {
-	plan := query.GetPlan()
-	if plan == nil {
-		return nil
-	}
-
 	enforcement := p.enforcement(query)
 	if enforcement == nil {
 		return nil
 	}
 
+	plan := query.GetPlan()
+	if plan == nil {
+		return qerror.New(qerror.CodeInvalidArgument, "queryrewrite: enforcement requires a query plan")
+	}
+
 	composeEnforcement(plan.GetRoot(), enforcement)
+
+	query.EnforcedMatchers = nil
+	query.EnforcedPredicates = nil
 	qdata.SetMetadata(query, "queryrewrite.rewritten", "true")
 
 	return nil
