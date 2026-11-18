@@ -3,7 +3,8 @@ set -euo pipefail
 
 repo=$(git rev-parse --show-toplevel)
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
+# Go stores downloaded modules in read-only directories.
+trap 'find "$tmp" -type d -exec chmod u+w {} +; rm -rf "$tmp"' EXIT
 tmp=$(cd "$tmp" && pwd -P)
 
 core=github.com/minuk-dev/opentelemetry-querier

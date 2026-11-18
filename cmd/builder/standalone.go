@@ -141,8 +141,10 @@ func standaloneRequirements(manifest *Manifest, data tmplData) ([]string, error)
 
 func checkOutput(outDir, header string, files []string) error {
 	owned := false
+
 	for _, name := range files {
 		path := filepath.Join(outDir, name)
+
 		info, err := os.Lstat(path)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
@@ -187,7 +189,8 @@ func checkModuleHeader(path, header string) error {
 }
 
 func runGo(dir, step string, args ...string) error {
-	cmd := exec.CommandContext(context.Background(), "go", args...) //nolint:gosec // Validated Go subcommand and module arguments.
+	//nolint:gosec // Arguments are fixed Go subcommands and validated module specs.
+	cmd := exec.CommandContext(context.Background(), "go", args...)
 	cmd.Dir = dir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

@@ -71,6 +71,19 @@ jobs:
           refs=$(scripts/tag-go-modules.sh "$VERSION")
           git push --atomic origin $refs
 
+      - name: verify published standalone build
+        env:
+          VERSION: ${{ github.ref_name }}
+          GOWORK: "off"
+          GONOPROXY: github.com/minuk-dev/opentelemetry-querier
+        run: |
+          set -euo pipefail
+          consumer=$(mktemp -d)
+          cp examples/standalone/builder.yaml "$consumer/"
+          cd "$consumer"
+          GOBIN="$consumer/bin" go install "github.com/minuk-dev/opentelemetry-querier/cmd/builder@$VERSION"
+          ./bin/builder --build --config builder.yaml
+
       - name: publish release
         env:
           GH_TOKEN: ${{ github.token }}
