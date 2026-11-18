@@ -36,7 +36,8 @@ following the CNCF Observability TAG QLSWG draft. The default acceptor speaks
 | Acceptor | [`prometheus`](./acceptor/prometheusacceptor) | Prometheus HTTP query API ingress. |
 | Processor | [`authratelimit`](./processor/authratelimitprocessor) | Bearer auth + per-tenant rate limiting. |
 | Processor | [`tenant`](./processor/tenantprocessor) | Tenant resolution + series isolation. |
-| Processor | [`queryrewrite`](./processor/queryrewriteprocessor) | PromQL AST label injection. |
+| Processor | [`simpleauthz`](./processor/simpleauthzprocessor) | Per-subject authorization and query scoping. |
+| Processor | [`queryrewrite`](./processor/queryrewriteprocessor) | Language-neutral plan constraint conjunction. |
 | Processor | [`responsefilter`](./processor/responsefilterprocessor) | Drop/mask result attributes; feedback warnings. |
 | Dispatcher | [`prometheus`](./dispatcher/prometheusdispatcher) | Upstream Prometheus HTTP query API. |
 
@@ -53,7 +54,7 @@ component's README for its config.
 
 ## Quick start
 
-Prerequisites: Go 1.25+, [`buf`](https://buf.build/docs/installation),
+Prerequisites: Go 1.25.4+, [`buf`](https://buf.build/docs/installation),
 `protoc-gen-go`, `protoc-gen-go-grpc`.
 
 ```console
@@ -70,8 +71,15 @@ $ curl -X POST http://localhost:4328/v1/query \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer dev-token" \
     -H "X-Scope-OrgID: acme" \
-    -d '{"query":{"expr":"up","dialect":"promql"}}'
+    -H "X-Scope-User: alice" \
+    -d '{"query":{"plan":{"root":{"select":{"signal":"SIGNAL_METRICS","filter":{"leaf":{"name":"__name__","op":"MATCH_OP_EQUAL","value":"up"}}}}}}}'
 ```
+
+This example uses the structured OTQP query plan; `expr` and `dialect` are no
+longer query fields. The default configuration sends the query to Prometheus at
+`http://localhost:9090` and adds `tenant_id="acme"` and `namespace="team-a"`
+constraints for Alice. A running backend with matching labels is needed for
+non-empty results. Identity headers belong on the HTTP request.
 
 ## Layout
 
@@ -97,9 +105,10 @@ golangci-lint set (see [`.golangci.yml`](./.golangci.yml)).
 
 ## Status
 
-Early scaffold. The metrics signal is wired end to end against Prometheus; logs,
-spans and profiles exist in `qdata` but are not yet dispatched. Streaming context
-returns a single window for now.
+Early-stage implementation. Prometheus metrics and Loki/Elasticsearch logs have
+native acceptors and dispatchers. Spans and profiles exist in `qdata` but have no
+native dispatcher. Backend language and response support is partial; consult
+each component README for its supported subset.
 
 ## License
 

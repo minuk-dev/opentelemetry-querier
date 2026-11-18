@@ -1,12 +1,19 @@
 # queryrewrite processor
 
-Query transformation for the **PromQL** dialect. It weaves enforced label
-matchers — from the [tenant](../tenantprocessor) processor and from static config — into
-every vector/matrix selector of the PromQL AST, matching the prom-label-proxy
-technique, so a query cannot escape its tenant or scope. Enforcement always wins:
-a matching user matcher on the same label is replaced.
+Language-neutral query enforcement on the structured `qdata.QueryPlan`. It
+ANDs registered matchers and predicates from the [tenant](../tenantprocessor)
+and [simpleauthz](../simpleauthzprocessor) processors, plus static configuration,
+into every `Select` node's filter. Each dispatcher renders the constrained plan
+into its backend language; there is no PromQL-only parsing or dialect bypass.
 
-Non-PromQL dialects pass through untouched.
+User filters are preserved. For example, a user filter `tenant_id="other"` and
+an enforced `tenant_id="acme"` both remain in the conjunction. The conflicting
+conditions match no data; enforcement does not replace the user's matcher.
+
+Run tenant resolution before consumers of `from_tenant`, and run queryrewrite
+after every processor that registers constraints. Tenant and authorization
+processors register constraints; queryrewrite is the stage that applies them to
+the plan. Configure tenant resolution as required when it is an isolation input.
 
 ## Config
 
