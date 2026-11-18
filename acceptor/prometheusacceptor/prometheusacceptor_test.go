@@ -286,6 +286,40 @@ func TestRejectsInvalidPromQL(t *testing.T) {
 	}
 }
 
+func TestTimeParameters(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name, path string
+		status     int
+	}{
+		{name: "epoch", path: "query?time=0", status: http.StatusOK},
+		{name: "pre epoch", path: "query?time=-1", status: http.StatusOK},
+		{name: "nan time", path: "query?time=NaN", status: http.StatusBadRequest},
+		{name: "infinite time", path: "query?time=" + url.QueryEscape("+Inf"), status: http.StatusBadRequest},
+		{name: "overflow time", path: "query?time=1e30", status: http.StatusBadRequest},
+		{name: "zero step", path: "query_range?start=0&end=1&step=0", status: http.StatusBadRequest},
+		{name: "negative step", path: "query_range?start=0&end=1&step=-1", status: http.StatusBadRequest},
+		{name: "nan step", path: "query_range?start=0&end=1&step=NaN", status: http.StatusBadRequest},
+		{name: "overflow step", path: "query_range?start=0&end=1&step=1e30", status: http.StatusBadRequest},
+		{name: "reversed", path: "query_range?start=2&end=1&step=1", status: http.StatusBadRequest},
+		{name: "day", path: "query_range?start=0&end=86400&step=1d", status: http.StatusOK},
+		{name: "week", path: "query_range?start=0&end=86400&step=1w", status: http.StatusOK},
+		{name: "year", path: "query_range?start=0&end=86400&step=1y", status: http.StatusOK},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			acc := prometheusacceptor.New(prometheusacceptor.Config{Endpoint: ""},
+				stubHandler{result: metricsResult(), err: nil})
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/"+test.path+"&query=up", nil)
+			response := httptest.NewRecorder()
+			acc.Handler().ServeHTTP(response, request)
+			assert.Equal(t, test.status, response.Code, response.Body.String())
+		})
+	}
+}
+
 func TestRejectsLossyPromQL(t *testing.T) {
 	t.Parallel()
 
