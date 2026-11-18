@@ -304,3 +304,15 @@ func TestRejectsDiscardedSearchConstraints(t *testing.T) {
 		})
 	}
 }
+
+func TestMissingSearchMetadataIsNotInvented(t *testing.T) {
+	t.Parallel()
+
+	server := serve(t, &captureHandler{result: logsResult(), err: nil, seen: nil})
+	status, body := do(t, http.MethodGet, server.URL+"/_search", "")
+	require.Equal(t, http.StatusOK, status)
+	assert.NotContains(t, body, "timed_out")
+	hits, ok := body["hits"].(map[string]any)
+	require.True(t, ok)
+	assert.NotContains(t, hits, "total")
+}

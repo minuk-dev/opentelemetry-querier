@@ -98,6 +98,12 @@ type (
 	Exemplar = qdatav1.Exemplar
 	// Logs is a collection of log records.
 	Logs = qdatav1.Logs
+	// SearchMetadata records upstream search completeness.
+	SearchMetadata = qdatav1.SearchMetadata
+	// SearchTotal is an exact or lower-bound upstream match count.
+	SearchTotal = qdatav1.SearchTotal
+	// SearchShards contains upstream shard completion counts.
+	SearchShards = qdatav1.SearchShards
 	// LogRecord unifies logs, events and wide events.
 	LogRecord = qdatav1.LogRecord
 	// Spans is a collection of spans.

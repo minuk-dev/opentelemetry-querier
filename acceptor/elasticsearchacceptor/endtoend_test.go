@@ -33,7 +33,7 @@ func TestEndToEndLuceneThroughPipeline(t *testing.T) {
 		gotBody = string(raw)
 
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"hits":{"total":{"value":1},"hits":[` +
+		_, _ = w.Write([]byte(`{"hits":{"total":{"value":1,"relation":"eq"},"hits":[` +
 			`{"_index":"logs","_id":"1","_source":{"level":"error","message":"boom"}}]}}`))
 	}))
 	defer upstream.Close()
@@ -68,4 +68,51 @@ func TestEndToEndLuceneThroughPipeline(t *testing.T) {
 	require.NoError(t, json.Unmarshal(body, &decoded))
 	require.Len(t, decoded.Hits.Hits, 1, "the upstream hit round-trips to the client")
 	assert.Contains(t, string(decoded.Hits.Hits[0]), "boom")
+}
+
+func TestSearchMetadataRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name, total, relation string
+		timedOut              bool
+		failed                int
+	}{
+		{name: "partial lower bound", total: `{"value":1000,"relation":"gte"}`, relation: "gte", timedOut: true, failed: 1},
+		{name: "complete page", total: `{"value":1000,"relation":"eq"}`, relation: "eq", timedOut: false, failed: 0},
+		{name: "legacy total", total: `1000`, relation: "eq", timedOut: false, failed: 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+				payload := map[string]any{
+					"timed_out": test.timedOut, "_shards": map[string]any{"total": 2, "failed": test.failed},
+					"hits": map[string]any{"total": json.RawMessage(test.total), "hits": []any{}},
+				}
+				_ = json.NewEncoder(writer).Encode(payload)
+			}))
+			t.Cleanup(upstream.Close)
+
+			dispatch := elasticsearchdispatcher.New(elasticsearchdispatcher.Config{
+				Endpoint: upstream.URL, Index: "logs", TimeField: "", Size: 0, Timeout: 0, Username: "", Password: "",
+			})
+			front := serve(t, pipeline.New("logs", nil, dispatch))
+			status, body := do(t, http.MethodPost, front.URL+"/_search", `{"query":{"match_all":{}}}`)
+			require.Equal(t, http.StatusOK, status)
+			assert.Equal(t, test.timedOut, body["timed_out"])
+			shards, ok := body["_shards"].(map[string]any)
+			require.True(t, ok)
+			assert.InDelta(t, test.failed, shards["failed"], 0)
+
+			hits, ok := body["hits"].(map[string]any)
+			require.True(t, ok)
+			assert.Equal(t, map[string]any{"value": float64(1000), "relation": test.relation}, hits["total"])
+			assert.Empty(t, hits["hits"])
+
+			if test.timedOut {
+				assert.Len(t, body["warnings"], 2)
+			}
+		})
+	}
 }
