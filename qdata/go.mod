@@ -3,7 +3,7 @@ module github.com/minuk-dev/opentelemetry-querier/qdata
 go 1.25.4
 
 require (
-	github.com/minuk-dev/opentelemetry-querier/gen v0.0.0-20261118130729-ccf10be9c110
+	github.com/minuk-dev/opentelemetry-querier/gen v0.1.0
 	github.com/samber/lo v1.53.0
 	github.com/stretchr/testify v1.12.1
 	google.golang.org/protobuf v1.36.12
