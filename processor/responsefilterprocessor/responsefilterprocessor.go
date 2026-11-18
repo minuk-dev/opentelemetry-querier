@@ -106,7 +106,20 @@ func (p *Processor) scrubTable(table *qdata.Table) {
 	}
 
 	for _, row := range table.GetRows() {
-		p.scrub(row.GetValues())
+		attrs := row.GetValues()
+		if attrs == nil {
+			continue
+		}
+
+		attrs.Values = slices.DeleteFunc(attrs.GetValues(), func(entry *qdata.KeyValue) bool {
+			return qdata.TableColumnMatches(entry.GetKey(), p.cfg.DropLabels)
+		})
+
+		for _, entry := range attrs.GetValues() {
+			if entry != nil && qdata.TableColumnMatches(entry.GetKey(), p.cfg.MaskLabels) {
+				entry.Value = qdata.Str(p.cfg.MaskWith)
+			}
+		}
 	}
 
 	if len(p.cfg.DropLabels) == 0 {
@@ -118,7 +131,7 @@ func (p *Processor) scrubTable(table *qdata.Table) {
 	// dispatcher that builds tables from a reused schema slice would have it
 	// corrupted for every later query.
 	table.Columns = slices.DeleteFunc(slices.Clone(table.GetColumns()), func(column string) bool {
-		return slices.Contains(p.cfg.DropLabels, column)
+		return qdata.TableColumnMatches(column, p.cfg.DropLabels)
 	})
 }
 

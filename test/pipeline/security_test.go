@@ -18,12 +18,13 @@ func TestInvalidSecurityOrderNeverStartsOrDispatches(t *testing.T) {
 	chain := defaultChain()
 
 	cases := map[string][]processor.Processor{
-		"missing rewrite":       {chain[0], chain[1], chain[2]},
-		"rewrite before authz":  {chain[0], chain[1], chain[3], chain[2]},
-		"limiter before tenant": {chain[1], chain[0], chain[2], chain[3]},
-		"rewrite before tenant": {chain[3], chain[0], chain[1], chain[2]},
-		"no tenant resolver":    {chain[1], chain[2], chain[3]},
-		"isolation only":        {chain[0]},
+		"missing rewrite":             {chain[0], chain[1], chain[2]},
+		"rewrite before authz":        {chain[0], chain[1], chain[3], chain[2]},
+		"limiter before tenant":       {chain[1], chain[0], chain[2], chain[3]},
+		"rewrite before tenant":       {chain[3], chain[0], chain[1], chain[2]},
+		"no tenant resolver":          {chain[1], chain[2], chain[3]},
+		"isolation only":              {chain[0]},
+		"second tenant after rewrite": {chain[0], chain[3], chain[0]},
 	}
 
 	for name, procs := range cases {
@@ -37,6 +38,8 @@ func TestInvalidSecurityOrderNeverStartsOrDispatches(t *testing.T) {
 			require.ErrorContains(t, err, "invalid security processor order")
 		})
 	}
+
+	require.NoError(t, processor.ValidateOrder([]processor.Processor{chain[0], chain[3], chain[0], chain[3]}))
 }
 
 func TestAuthorizationTenantDependencies(t *testing.T) {

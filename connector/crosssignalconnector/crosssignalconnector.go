@@ -11,6 +11,7 @@ package crosssignalconnector
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	"github.com/minuk-dev/opentelemetry-querier/connector"
 	"github.com/minuk-dev/opentelemetry-querier/dispatcher"
@@ -159,6 +160,7 @@ func (c *Connector) execSide(ctx context.Context, parent *qdata.Query, subtree *
 // subQuery wraps a join operand as its own single-signal query, carrying the
 // parent's evaluation context (time range, step, tenant headers/metadata) so both
 // sides are evaluated over the same window.
+// shortcut: header values remain shared; deep-copy if processors start mutating their contents.
 func subQuery(parent *qdata.Query, subtree *qdata.Node, signal qdata.Signal) *qdata.Query {
 	return &qdata.Query{
 		Signal:   signal,
@@ -166,8 +168,8 @@ func subQuery(parent *qdata.Query, subtree *qdata.Node, signal qdata.Signal) *qd
 		Range:    parent.GetRange(),
 		Step:     parent.GetStep(),
 		Modifier: parent.GetModifier(),
-		Header:   parent.GetHeader(),
-		Metadata: parent.GetMetadata(),
+		Header:   maps.Clone(parent.GetHeader()),
+		Metadata: maps.Clone(parent.GetMetadata()),
 		Plan:     qdata.Plan(subtree),
 	}
 }

@@ -98,6 +98,36 @@ func TestProcessResultTableKeepsCallerSchema(t *testing.T) {
 		"the table's own schema still loses the dropped column")
 }
 
+func TestProcessResultTableRenamedLabels(t *testing.T) {
+	t.Parallel()
+
+	columns := []string{dropKey, "right_" + dropKey, "right_right_" + dropKey,
+		maskKey, "right_" + maskKey, "right_label_" + maskKey, keepKey}
+	attrs := &qdata.KeyValueList{}
+
+	for _, column := range columns {
+		qdata.AttrPutString(attrs, column, "sensitive")
+	}
+
+	result := qdata.TableResult(qdata.NewTable(columns, &qdata.Row{Values: attrs}))
+	require.NoError(t, scrubber().ProcessResult(t.Context(), nil, result))
+
+	for _, column := range columns[:3] {
+		_, exists := qdata.AttrGet(attrs, column)
+		assert.False(t, exists)
+	}
+
+	for _, column := range columns[3:6] {
+		value, exists := qdata.AttrGet(attrs, column)
+		require.True(t, exists)
+		assert.Equal(t, maskValue, value.GetStringValue())
+	}
+
+	assert.Equal(t, columns[3:], result.GetTable().GetColumns())
+	require.NoError(t, qdata.ValidateTable(result.GetTable()))
+	assert.Equal(t, [][]any{{maskValue, maskValue, maskValue, "sensitive"}}, qdata.RenderTable(result.GetTable()).Rows)
+}
+
 // TestProcessResultEmptyTable pins that a Table payload without rows or schema
 // is handled rather than panicking.
 func TestProcessResultEmptyTable(t *testing.T) {

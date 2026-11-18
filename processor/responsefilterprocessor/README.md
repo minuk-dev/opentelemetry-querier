@@ -12,6 +12,12 @@ masked label from being laundered through a cross-signal query; a dropped key
 also leaves the table's declared `columns` schema. A payload this processor does
 not know how to scrub fails the query rather than being returned unfiltered.
 
+Table rules also match names before `right_` and `label_` renaming, including
+repeated prefixes. For example, masking `user_email` also masks
+`right_user_email`; dropping a label removes its aliases from rows and schema.
+Literal labels with these prefixes are conservatively treated as aliases too.
+Single-signal attributes continue to use exact key matching.
+
 ## Config
 
 | Key | Default | Description |

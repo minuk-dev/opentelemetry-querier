@@ -16,13 +16,6 @@ const (
 	metricNameColumn  = "__name__"
 	metricValueColumn = "value"
 	logBodyColumn     = "body"
-	// shadowedLabelPrefix renames a series label that collides with a synthetic
-	// column (e.g. a label literally named "value") so the label is preserved
-	// while the synthetic column keeps its stable name.
-	shadowedLabelPrefix = "label_"
-	// rightPrefix disambiguates a right-side column whose name also exists on the
-	// left and is not a join key.
-	rightPrefix = "right_"
 	// keyDelim separates a join key's column values into a tuple, chosen to not
 	// appear in label values.
 	keyDelim    = "\x00"
@@ -89,12 +82,12 @@ func metricRows(metrics *qdata.Metrics) []*qdata.Row {
 
 // putSample stores the metric sample under the reserved value column. A series
 // label literally named "value" would otherwise be clobbered, so it is moved to
-// a shadowedLabelPrefix column first — both survive and the value column keeps a
+// a prefixed column first — both survive and the value column keeps a
 // stable name for downstream readers.
 func putSample(kvl *qdata.KeyValueList, sample *qdata.Value) {
 	if label, ok := qdata.AttrGet(kvl, metricValueColumn); ok {
 		qdata.AttrDelete(kvl, metricValueColumn)
-		qdata.AttrPut(kvl, shadowedLabelPrefix+metricValueColumn, label)
+		qdata.AttrPut(kvl, qdata.ShadowedLabelPrefix+metricValueColumn, label)
 	}
 
 	qdata.AttrPut(kvl, metricValueColumn, sample)
@@ -293,7 +286,7 @@ func indexRows(rows []*qdata.Row, keys []string) map[string][]*qdata.Row {
 
 // mergeRow combines a matched left/right row pair: every left column, then every
 // right column that is neither a join key (already present from the left) nor a
-// name colliding with a left column (renamed with rightPrefix).
+// name colliding with a left column (renamed with qdata.RightColumnPrefix).
 func mergeRow(left, right *qdata.Row, leftColumns, keys []string) *qdata.Row {
 	out := cloneAttrs(left.GetValues())
 	leftSet := toSet(leftColumns)
@@ -306,7 +299,7 @@ func mergeRow(left, right *qdata.Row, leftColumns, keys []string) *qdata.Row {
 
 		name := entry.GetKey()
 		if _, clash := leftSet[name]; clash {
-			name = rightPrefix + name
+			name = qdata.RightColumnPrefix + name
 		}
 
 		qdata.AttrPut(out, name, entry.GetValue())
@@ -328,7 +321,7 @@ func mergedColumns(left, right *qdata.Table, keys []string) []string {
 		}
 
 		if _, clash := leftSet[column]; clash {
-			column = rightPrefix + column
+			column = qdata.RightColumnPrefix + column
 		}
 
 		out = append(out, column)

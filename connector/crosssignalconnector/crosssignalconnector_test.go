@@ -116,6 +116,41 @@ func TestJoinMetricsAndLogs(t *testing.T) {
 	assert.InDelta(t, 0.5, mustDouble(t, result, "value"), 1e-9)
 }
 
+func TestJoinQueryMapsAreIsolated(t *testing.T) {
+	t.Parallel()
+
+	parent := &qdata.Query{
+		Plan: joinPlan("job"), Metadata: map[string]string{"parent": "kept"},
+		Header: map[string]*qdata.HeaderValues{"X-Test": {Values: []string{"parent"}}},
+	}
+
+	var left *qdata.Query
+
+	sut := crosssignalconnector.New(map[qdata.Signal]pipeline.Handler{
+		qdata.SignalMetrics: pipeline.HandlerFunc(func(_ context.Context, query *qdata.Query) (*qdata.Result, error) {
+			left = query
+			qdata.SetTenantID(query, "metrics-tenant")
+			qdata.SetMetadata(query, "queryrewrite.rewritten", "true")
+			query.Header["X-Test"] = &qdata.HeaderValues{Values: []string{"metrics"}}
+
+			return metricResult(1), nil
+		}),
+		qdata.SignalLogs: pipeline.HandlerFunc(func(_ context.Context, query *qdata.Query) (*qdata.Result, error) {
+			assert.Equal(t, map[string]string{"parent": "kept"}, query.GetMetadata())
+			assert.Equal(t, []string{"parent"}, query.GetHeader()["X-Test"].GetValues())
+			qdata.SetTenantID(query, "logs-tenant")
+
+			return logResult("api"), nil
+		}),
+	})
+
+	_, err := sut.Dispatch(t.Context(), parent)
+	require.NoError(t, err)
+	assert.Equal(t, "metrics-tenant", qdata.TenantID(left))
+	assert.Equal(t, map[string]string{"parent": "kept"}, parent.GetMetadata())
+	assert.Equal(t, []string{"parent"}, parent.GetHeader()["X-Test"].GetValues())
+}
+
 func TestJoinOnSharedColumnsWhenNoOnGiven(t *testing.T) {
 	t.Parallel()
 
