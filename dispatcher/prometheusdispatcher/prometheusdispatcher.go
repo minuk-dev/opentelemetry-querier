@@ -75,6 +75,11 @@ func New(cfg Config) *Dispatcher {
 
 // Dispatch executes the query and returns a metrics result.
 func (d *Dispatcher) Dispatch(ctx context.Context, query *qdata.Query) (*qdata.Result, error) {
+	err := qdata.ValidateQueryTime(query)
+	if err != nil || query.GetContext() == qdata.ContextStreaming {
+		return nil, qerror.New(qerror.CodeInvalidArgument, "promdispatcher: invalid time context: %v", err)
+	}
+
 	promQL, err := queryText(query)
 	if err != nil {
 		return nil, err
@@ -95,21 +100,18 @@ func (d *Dispatcher) Dispatch(ctx context.Context, query *qdata.Query) (*qdata.R
 
 	resp, err := d.client.Do(req)
 	if err != nil {
-		return nil, qerror.New(qerror.CodeUnavailable, "promdispatcher: upstream request: %v", err)
+		return nil, qerror.UpstreamTransportError(err)
 	}
 
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, qerror.New(qerror.CodeUnavailable, "promdispatcher: read upstream: %v", err)
+		return nil, qerror.UpstreamTransportError(err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, qerror.New(
-			qerror.CodeUnavailable,
-			"promdispatcher: upstream status %d: %s", resp.StatusCode, string(body),
-		)
+		return nil, qerror.UpstreamHTTPError(resp.StatusCode, body)
 	}
 
 	return parseResponse(body)
@@ -142,7 +144,7 @@ func (d *Dispatcher) buildRequest(query *qdata.Query, promQL string) (string, ur
 
 	// Instant: evaluate at the range end, or now when unset.
 	evalAt := query.GetRange().GetEnd().AsTime()
-	if evalAt.IsZero() || evalAt.Unix() <= 0 {
+	if query.GetRange().GetEnd() == nil {
 		evalAt = time.Now()
 	}
 
@@ -152,14 +154,12 @@ func (d *Dispatcher) buildRequest(query *qdata.Query, promQL string) (string, ur
 }
 
 func formatTime(instant time.Time) string {
-	return strconv.FormatFloat(float64(instant.UnixNano())/nanosPerSecond, 'f', fullPrecision, floatBitSize)
+	seconds := float64(instant.Unix()) + float64(instant.Nanosecond())/nanosPerSecond
+
+	return strconv.FormatFloat(seconds, 'f', fullPrecision, floatBitSize)
 }
 
 func formatStep(step time.Duration) string {
-	if step <= 0 {
-		step = time.Minute
-	}
-
 	return strconv.FormatFloat(step.Seconds(), 'f', fullPrecision, floatBitSize)
 }
 
@@ -196,10 +196,7 @@ func parseResponse(body []byte) (*qdata.Result, error) {
 	}
 
 	if resp.Status != "success" {
-		return nil, qerror.New(
-			qerror.CodeInvalidArgument,
-			"promdispatcher: upstream error (%s): %s", resp.ErrorType, resp.Error,
-		)
+		return nil, qerror.UpstreamHTTPError(http.StatusOK, body)
 	}
 
 	result := &qdata.Result{Signal: qdata.SignalMetrics}

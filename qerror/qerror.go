@@ -22,6 +22,8 @@ const (
 	CodeResourceExhausted // rate limited
 	CodeUnavailable       // upstream/backend failure
 	CodeDeadlineExceeded
+	CodeCanceled
+	CodeQueryExecution
 )
 
 // Error carries a Code and a message. Processors return it to short-circuit the
@@ -40,24 +42,24 @@ func New(code Code, format string, args ...any) *Error {
 
 // HTTPStatus maps a Code onto an HTTP status code.
 func (e *Error) HTTPStatus() int {
-	switch e.Code {
-	case CodeInternal:
-		return http.StatusInternalServerError
-	case CodeInvalidArgument:
-		return http.StatusBadRequest
-	case CodeUnauthenticated:
-		return http.StatusUnauthorized
-	case CodePermissionDenied:
-		return http.StatusForbidden
-	case CodeResourceExhausted:
-		return http.StatusTooManyRequests
-	case CodeUnavailable:
-		return http.StatusBadGateway
-	case CodeDeadlineExceeded:
-		return http.StatusGatewayTimeout
-	default:
+	const clientClosedRequest = 499
+
+	status, ok := map[Code]int{
+		CodeInternal:          http.StatusInternalServerError,
+		CodeInvalidArgument:   http.StatusBadRequest,
+		CodeUnauthenticated:   http.StatusUnauthorized,
+		CodePermissionDenied:  http.StatusForbidden,
+		CodeResourceExhausted: http.StatusTooManyRequests,
+		CodeUnavailable:       http.StatusBadGateway,
+		CodeDeadlineExceeded:  http.StatusGatewayTimeout,
+		CodeCanceled:          clientClosedRequest,
+		CodeQueryExecution:    http.StatusUnprocessableEntity,
+	}[e.Code]
+	if !ok {
 		return http.StatusInternalServerError
 	}
+
+	return status
 }
 
 // CodeOf extracts the Code from an error, defaulting to CodeInternal.

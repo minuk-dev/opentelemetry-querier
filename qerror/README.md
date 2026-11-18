@@ -11,3 +11,5 @@ that acceptors map onto their transport:
 
 Keeping this type in its own module avoids import cycles between the pipeline,
 processors and acceptors.
+
+Upstream HTTP 400/422/429 map to invalid argument/query execution/resource exhausted, with HTTP 400/422/429 at native acceptors. Deadline/client timeout maps to 504; cancellation maps to 499 (gRPC Canceled). Prometheus/Loki error types refine the mapping. Backend 401/403 remain unavailable (502), because configured backend credentials are not caller credentials. Retry/backoff is separate from error classification.

@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/minuk-dev/opentelemetry-querier/dispatcher/prometheusdispatcher"
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
@@ -269,6 +270,39 @@ func TestDispatchAcceptsOrdinaryIdentifiers(t *testing.T) {
 		captureQuery(t, &qdata.Query{Plan: plan}))
 }
 
+func TestExplicitEvaluationTime(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name    string
+		seconds int64
+		want    string
+	}{
+		{name: "epoch", seconds: 0, want: "0"},
+		{name: "pre epoch", seconds: -1, want: "-1"},
+		{name: "outside UnixNano", seconds: 253402300799, want: "253402300799"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			var captured string
+
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				request.Body = http.MaxBytesReader(writer, request.Body, 1<<20)
+				captured = request.FormValue("time")
+				_, _ = writer.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
+			}))
+			t.Cleanup(server.Close)
+
+			query := metricQuery("up")
+			query.Range = &qdata.TimeRange{End: timestamppb.New(time.Unix(test.seconds, 0))}
+			_, err := newDispatcher(server.URL).Dispatch(t.Context(), query)
+			require.NoError(t, err)
+			assert.Equal(t, test.want, captured)
+		})
+	}
+}
+
 func TestRejectsUnsupportedResults(t *testing.T) {
 	t.Parallel()
 
@@ -296,4 +330,56 @@ func TestRejectsUnsupportedResults(t *testing.T) {
 			assert.Nil(t, result, "unsupported measurements must never become empty successful results")
 		})
 	}
+}
+
+func TestUpstreamErrorClassification(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name   string
+		status int
+		code   qerror.Code
+	}{
+		{name: "bad query", status: http.StatusBadRequest, code: qerror.CodeInvalidArgument},
+		{name: "execution", status: http.StatusUnprocessableEntity, code: qerror.CodeQueryExecution},
+		{name: "quota", status: http.StatusTooManyRequests, code: qerror.CodeResourceExhausted},
+		{name: "unauthorized backend", status: http.StatusUnauthorized, code: qerror.CodeUnavailable},
+		{name: "forbidden backend", status: http.StatusForbidden, code: qerror.CodeUnavailable},
+		{name: "backend failure", status: http.StatusServiceUnavailable, code: qerror.CodeUnavailable},
+		{name: "timeout", status: http.StatusGatewayTimeout, code: qerror.CodeDeadlineExceeded},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := newServer(t, test.status, "upstream error")
+			_, err := newDispatcher(server.URL).Dispatch(t.Context(), metricQuery("up"))
+			require.Error(t, err)
+			assert.Equal(t, test.code, qerror.CodeOf(err))
+		})
+	}
+}
+
+func TestCanceledRequest(t *testing.T) {
+	t.Parallel()
+
+	server := newServer(t, http.StatusOK, "")
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err := newDispatcher(server.URL).Dispatch(ctx, metricQuery("up"))
+	require.Error(t, err)
+	assert.Equal(t, qerror.CodeCanceled, qerror.CodeOf(err))
+}
+
+func TestExpiredDeadline(t *testing.T) {
+	t.Parallel()
+
+	server := newServer(t, http.StatusOK, "")
+
+	ctx, cancel := context.WithDeadline(t.Context(), time.Time{})
+	defer cancel()
+
+	_, err := newDispatcher(server.URL).Dispatch(ctx, metricQuery("up"))
+	require.Error(t, err)
+	assert.Equal(t, qerror.CodeDeadlineExceeded, qerror.CodeOf(err))
 }

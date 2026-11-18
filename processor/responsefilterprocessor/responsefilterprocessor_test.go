@@ -187,3 +187,38 @@ func TestProcessResultEmptyPayload(t *testing.T) {
 
 	require.NoError(t, scrubber().ProcessResult(context.Background(), &qdata.Query{}, &qdata.Result{}))
 }
+
+func TestNestedAttributes(t *testing.T) {
+	t.Parallel()
+
+	t.Run("metric exemplars", func(t *testing.T) {
+		t.Parallel()
+
+		attrs := sensitiveAttrs()
+		exemplar := &qdata.Exemplar{Attributes: attrs, Value: 42}
+		metrics := &qdata.Metrics{Series: []*qdata.MetricSeries{{Points: []*qdata.MetricPoint{
+			{Exemplars: []*qdata.Exemplar{exemplar, nil}}, nil,
+		}}}}
+		result := &qdata.Result{Data: &qdatav1.Result_Metrics{Metrics: metrics}}
+		require.NoError(t, scrubber().ProcessResult(t.Context(), &qdata.Query{}, result))
+		assertScrubbed(t, attrs)
+		assert.InDelta(t, 42, exemplar.GetValue(), 0)
+	})
+
+	t.Run("span events and links", func(t *testing.T) {
+		t.Parallel()
+
+		event := &qdatav1.SpanEvent{Name: "request", Attributes: sensitiveAttrs()}
+		link := &qdatav1.SpanLink{TraceId: "trace", SpanId: "span", Attributes: sensitiveAttrs()}
+		spans := &qdata.Spans{Spans: []*qdata.Span{{
+			Events: []*qdatav1.SpanEvent{event, nil}, Links: []*qdatav1.SpanLink{link, nil},
+		}}}
+		result := &qdata.Result{Data: &qdatav1.Result_Spans{Spans: spans}}
+		require.NoError(t, scrubber().ProcessResult(t.Context(), &qdata.Query{}, result))
+		assertScrubbed(t, event.GetAttributes())
+		assertScrubbed(t, link.GetAttributes())
+		assert.Equal(t, "request", event.GetName())
+		assert.Equal(t, "trace", link.GetTraceId())
+		assert.Equal(t, "span", link.GetSpanId())
+	})
+}

@@ -29,6 +29,8 @@ processors:
     warn_counter_without_rate: true
 ```
 
+Drop/mask rules also apply to metric exemplar and span event/link attribute lists. They do not recursively rewrite arbitrary log bodies or attribute values. Measurements, event names, and trace/span identifiers are retained.
+
 ## Counter warning limits
 
 `warn_counter_without_rate` checks the result's metric type: it emits a warning
