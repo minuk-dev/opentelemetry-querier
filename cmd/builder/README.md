@@ -27,3 +27,33 @@ The workspace still selects local modules for development. For an
 incompatible change spanning several modules, update the affected
 requirements together and publish their tags from the same commit.
 Check the candidate from outside the workspace before cutting its tag.
+
+## Standalone distribution
+
+Starting with the coordinated `v0.1.0` module release, install the builder at
+a specific version with Go 1.25.4 or newer. Run these commands in your own
+project, with the two files from [the standalone example](../../examples/standalone):
+
+```sh
+go install github.com/minuk-dev/opentelemetry-querier/cmd/builder@v0.1.0
+builder --build --config builder.yaml
+./dist/custom-querier --config config.yaml
+```
+
+The example routes Prometheus queries received on port 9095 to an upstream
+Prometheus on port 9090. Set the upstream endpoint in `config.yaml`.
+
+- `dist.module` names the generated application module. `dist.version` is the
+  application version. `dist.core_version` selects the Querier framework modules.
+- List each component by its module path and version, for example
+  `gomod: example.com/team/myprocessor@v0.1.0`. The older space-separated form
+  also works. The package at that module path must expose `NewFactory()`.
+- Go selects dependencies from the resulting requirements. Inspect the chosen
+  versions with `GOWORK=off go list -m all` in the output directory.
+- `dist.output_path` is relative to the directory where you run the builder,
+  unless it is absolute. Use a dedicated output directory. Rebuilds can update
+  the generated files for the same application module and binary name. A
+  dependency or compiler failure leaves the previous build in place.
+
+Omit `--build` for source generation in the repository workspace. Existing
+manifests can keep unversioned entries in that mode.
