@@ -151,6 +151,57 @@ func TestJoinQueryMapsAreIsolated(t *testing.T) {
 	assert.Equal(t, []string{"parent"}, parent.GetHeader()["X-Test"].GetValues())
 }
 
+func TestJoinAliasKeepsExistingColumns(t *testing.T) {
+	t.Parallel()
+
+	left := qdata.NewTable([]string{"job", "region", "right_region"}, qdata.NewRow(
+		"job", qdata.Str("api"), "region", qdata.Str("left"), "right_region", qdata.Str("left alias"),
+	))
+	right := qdata.NewTable([]string{"job", "region", "right_right_region"}, qdata.NewRow(
+		"job", qdata.Str("api"), "region", qdata.Str("right"), "right_right_region", qdata.Str("right alias"),
+	))
+	connector := crosssignalconnector.New(map[qdata.Signal]pipeline.Handler{
+		qdata.SignalMetrics: &fakeHandler{result: qdata.TableResult(left), err: nil, seen: nil},
+		qdata.SignalLogs:    &fakeHandler{result: qdata.TableResult(right), err: nil, seen: nil},
+	})
+
+	result, err := connector.Dispatch(t.Context(), &qdata.Query{Plan: joinPlan("job")})
+	require.NoError(t, err)
+
+	wire := qdata.RenderTable(result.GetTable())
+	assert.Equal(t,
+		[]string{"job", "region", "right_region", "right_right_right_region", "right_right_region"}, wire.Columns)
+	assert.Equal(t, [][]any{{"api", "left", "left alias", "right", "right alias"}}, wire.Rows)
+	assert.True(t, qdata.TableColumnMatches("right_right_right_region", []string{"region"}))
+}
+
+func TestJoinKeepsExistingMetricValueAlias(t *testing.T) {
+	t.Parallel()
+
+	metrics := metricResult(1)
+	attrs := metrics.GetMetrics().GetSeries()[0].GetAttributes()
+	qdata.AttrPutString(attrs, "value", "original label")
+	qdata.AttrPutString(attrs, "label_value", "existing alias")
+
+	connector := crosssignalconnector.New(map[qdata.Signal]pipeline.Handler{
+		qdata.SignalMetrics: &fakeHandler{result: metrics, err: nil, seen: nil},
+		qdata.SignalLogs:    &fakeHandler{result: logResult("api"), err: nil, seen: nil},
+	})
+
+	result, err := connector.Dispatch(t.Context(), &qdata.Query{Plan: joinPlan("job")})
+	require.NoError(t, err)
+	require.Len(t, result.GetTable().GetRows(), 1)
+
+	joined := result.GetTable().GetRows()[0].GetValues()
+	for key, want := range map[string]string{"label_value": "existing alias", "label_label_value": "original label"} {
+		value, ok := qdata.AttrGet(joined, key)
+		require.True(t, ok)
+		assert.Equal(t, want, value.GetStringValue(), key)
+	}
+
+	assert.True(t, qdata.TableColumnMatches("label_label_value", []string{"value"}))
+}
+
 func TestJoinOnSharedColumnsWhenNoOnGiven(t *testing.T) {
 	t.Parallel()
 
