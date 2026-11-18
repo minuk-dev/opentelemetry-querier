@@ -69,7 +69,8 @@ jobs:
         run: |
           set -euo pipefail
           refs=$(scripts/tag-go-modules.sh "$VERSION")
-          git push --atomic origin $refs
+          mapfile -t tags <<< "$refs"
+          git push --atomic origin "${tags[@]}"
 
       - name: verify published standalone build
         env:
