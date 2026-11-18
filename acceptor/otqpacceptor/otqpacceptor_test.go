@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -66,6 +67,39 @@ func startHTTP(t *testing.T, seen chan<- *qdata.Query) string {
 	t.Cleanup(func() { _ = acceptor.Shutdown(context.Background()) })
 
 	return "http://" + acceptor.HTTPListenAddr() + otqpacceptor.HTTPQueryPath
+}
+
+func TestHTTPQueryRequestBodyLimit(t *testing.T) {
+	t.Parallel()
+
+	const limit = 4 << 20
+
+	seen := make(chan *qdata.Query, 2)
+	endpoint := startHTTP(t, seen)
+
+	for _, test := range []struct {
+		contentType string
+		prefix      string
+		size        int
+		want        int
+	}{
+		{contentType: "application/json", prefix: `{"query":{}}`, size: limit, want: http.StatusOK},
+		{contentType: "application/json", prefix: `{"query":{}}`, size: limit + 1, want: http.StatusRequestEntityTooLarge},
+		{contentType: "application/x-protobuf", prefix: "", size: limit + 1, want: http.StatusRequestEntityTooLarge},
+	} {
+		body := test.prefix + strings.Repeat(" ", test.size-len(test.prefix))
+
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, endpoint, strings.NewReader(body))
+		require.NoError(t, err)
+		request.Header.Set("Content-Type", test.contentType)
+
+		response, err := http.DefaultClient.Do(request)
+		require.NoError(t, err)
+		assert.Equal(t, test.want, response.StatusCode, test.contentType)
+		require.NoError(t, response.Body.Close())
+	}
+
+	assert.Len(t, seen, 1, "only the request within the limit reaches the pipeline")
 }
 
 // waitForQuery returns the query the handler saw, failing if it never arrived.

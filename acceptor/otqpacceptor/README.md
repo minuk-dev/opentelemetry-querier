@@ -35,3 +35,7 @@ acceptors:
     grpc_endpoint: "0.0.0.0:4327"
     http_endpoint: "0.0.0.0:4328"
 ```
+
+OTQP HTTP requests are limited to 4 MiB. The server allows up to 10 seconds
+for headers and 20 seconds to read the full request. These limits end after
+request ingestion and do not set a query execution deadline.
