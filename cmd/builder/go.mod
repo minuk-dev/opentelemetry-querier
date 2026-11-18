@@ -4,6 +4,7 @@ go 1.25.4
 
 require (
 	github.com/go-viper/mapstructure/v2 v2.5.0
+	golang.org/x/mod v0.37.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
