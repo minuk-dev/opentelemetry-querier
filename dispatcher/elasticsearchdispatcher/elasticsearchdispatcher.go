@@ -326,8 +326,8 @@ func parseSearchTotal(total json.RawMessage) (*qdata.SearchTotal, error) {
 // configured time field, the body from a "message" field when present (else the
 // raw source), and every source field becomes an attribute.
 func (d *Dispatcher) hitToRecord(hit map[string]json.RawMessage) *qdata.LogRecord {
-	rawSource := hit["_source"]
-	source := decodeSource(rawSource)
+	source := decodeSource(hit["_source"])
+	message, _ := source["message"].(string)
 
 	attrs := &qdata.KeyValueList{}
 	for key, value := range source {
@@ -343,7 +343,7 @@ func (d *Dispatcher) hitToRecord(hit map[string]json.RawMessage) *qdata.LogRecor
 		Start:       stamp,
 		End:         stamp,
 		Severity:    qdatav1.Severity_SEVERITY_UNSPECIFIED,
-		Body:        qdata.Str(recordBody(source, rawSource)),
+		Body:        qdata.Str(message),
 		TraceId:     nestedString(source, "trace", "id"),
 		SpanId:      nestedString(source, "span", "id"),
 		Fingerprint: "",
@@ -427,16 +427,6 @@ func parseTimeValue(value any) (time.Time, bool) {
 	default:
 		return time.Time{}, false
 	}
-}
-
-// recordBody prefers a "message" field for the log line, falling back to the raw
-// JSON source so no information is lost.
-func recordBody(source map[string]any, raw json.RawMessage) string {
-	if message, ok := source["message"].(string); ok {
-		return message
-	}
-
-	return string(raw)
 }
 
 // stringify renders a JSON-decoded value as a string for use as an attribute or
