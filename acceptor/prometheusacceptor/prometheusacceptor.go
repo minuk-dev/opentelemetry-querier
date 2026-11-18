@@ -435,7 +435,13 @@ func promErrorType(code qerror.Code) string {
 		return "unauthorized"
 	case qerror.CodeResourceExhausted:
 		return "too_many_requests"
-	case qerror.CodeUnavailable, qerror.CodeDeadlineExceeded:
+	case qerror.CodeQueryExecution:
+		return "execution"
+	case qerror.CodeDeadlineExceeded:
+		return "timeout"
+	case qerror.CodeCanceled:
+		return "canceled"
+	case qerror.CodeUnavailable:
 		return "unavailable"
 	case qerror.CodeInternal:
 		return errorTypeInternal
