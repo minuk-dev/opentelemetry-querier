@@ -311,6 +311,11 @@ func (svc *Service) buildProcessors(
 		out = append(out, proc)
 	}
 
+	err := processor.ValidateOrder(out)
+	if err != nil {
+		return nil, fmt.Errorf("querier: pipeline %q processors %v: %w", pipelineName, ids, err)
+	}
+
 	return out, nil
 }
 

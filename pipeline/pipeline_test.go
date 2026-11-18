@@ -229,3 +229,30 @@ func TestInvalidQueryTime(t *testing.T) {
 		})
 	}
 }
+
+type constraintProc struct {
+	processor.Base
+}
+
+func (constraintProc) ProcessQuery(_ context.Context, query *qdata.Query) error {
+	query.EnforcedMatchers = append(query.EnforcedMatchers,
+		&qdata.LabelMatcher{Name: "tenant_id", Op: qdata.MatchEqual, Value: "acme"})
+
+	return nil
+}
+
+func TestHandleRejectsUnappliedConstraints(t *testing.T) {
+	t.Parallel()
+
+	pipe := pipeline.New("metrics", []processor.Processor{constraintProc{Base: processor.Base{}}}, nil)
+	_, err := pipe.Handle(t.Context(), &qdata.Query{})
+	require.ErrorContains(t, err, "unapplied security constraints")
+	assert.Equal(t, qerror.CodeInternal, qerror.CodeOf(err))
+
+	pipe.Processors = nil
+	_, err = pipe.Handle(t.Context(), &qdata.Query{
+		EnforcedPredicates: []*qdata.Predicate{qdata.LeafPredicate(
+			&qdata.LabelMatcher{Name: "tenant_id", Op: qdata.MatchEqual, Value: "acme"})},
+	})
+	require.ErrorContains(t, err, "unapplied security constraints")
+}
