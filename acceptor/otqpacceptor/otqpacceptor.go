@@ -131,17 +131,43 @@ func (a *Acceptor) Start(ctx context.Context, _ component.Host) error {
 	return nil
 }
 
-// Shutdown gracefully stops both transports.
+// Shutdown drains both transports until the context expires.
 func (a *Acceptor) Shutdown(ctx context.Context) error {
-	if a.httpServer != nil {
-		_ = a.httpServer.Shutdown(ctx)
-	}
+	var grpcDone <-chan struct{}
 
 	if a.grpcServer != nil {
-		a.grpcServer.GracefulStop()
+		done := make(chan struct{})
+		grpcDone = done
+
+		go func() {
+			defer close(done)
+
+			a.grpcServer.GracefulStop()
+		}()
 	}
 
-	return nil
+	var httpErr error
+
+	if a.httpServer != nil {
+		httpErr = a.httpServer.Shutdown(ctx)
+		if httpErr != nil {
+			httpErr = errors.Join(httpErr, a.httpServer.Close())
+		}
+	}
+
+	if grpcDone == nil {
+		return httpErr
+	}
+
+	select {
+	case <-grpcDone:
+		return httpErr
+	case <-ctx.Done():
+		// An RPC handler that ignores cancellation must not delay Shutdown.
+		go a.grpcServer.Stop()
+
+		return errors.Join(httpErr, ctx.Err())
+	}
 }
 
 // ---- gRPC transport ----

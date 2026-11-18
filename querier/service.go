@@ -112,15 +112,23 @@ func (svc *Service) Start(ctx context.Context) error {
 
 // Shutdown stops acceptors first, then pipelines.
 func (svc *Service) Shutdown(ctx context.Context) error {
+	var errs []error
+
 	for _, acc := range svc.acceptors {
-		_ = acc.Shutdown(ctx)
+		err := acc.Shutdown(ctx)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("querier: stop acceptor: %w", err))
+		}
 	}
 
 	for _, pipe := range svc.pipelines {
-		_ = pipe.Shutdown(ctx)
+		err := pipe.Shutdown(ctx)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("querier: stop pipeline %q: %w", pipe.Name, err))
+		}
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 // isConnectorID reports whether idStr names a connector (declared in the

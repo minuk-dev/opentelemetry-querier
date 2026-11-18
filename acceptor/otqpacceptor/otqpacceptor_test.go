@@ -344,3 +344,106 @@ func TestGRPCErrorClassification(t *testing.T) {
 		})
 	}
 }
+
+func TestGRPCShutdownDrainsOrStopsRPC(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name    string
+		timeout time.Duration
+		drain   bool
+	}{
+		{name: "RPC completes", timeout: 2 * time.Second, drain: true},
+		{name: "deadline expires", timeout: 50 * time.Millisecond, drain: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			acceptor, release, rpc := startPendingRPC(t)
+
+			shutdownCtx, cancelShutdown := context.WithTimeout(t.Context(), test.timeout)
+			defer cancelShutdown()
+
+			done := make(chan error, 1)
+
+			go func() { done <- acceptor.Shutdown(shutdownCtx) }()
+
+			if test.drain {
+				close(release)
+			}
+
+			err := waitForRPCOutcome(t, done, "shutdown blocked on the RPC")
+			if test.drain {
+				require.NoError(t, err)
+				require.NoError(t, waitForRPCOutcome(t, rpc, "RPC did not finish"))
+
+				return
+			}
+
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+			err = waitForRPCOutcome(t, rpc, "server did not cancel the in-flight RPC")
+			require.Error(t, err)
+			assert.NotEqual(t, codes.DeadlineExceeded, status.Code(err), "server stops before client deadline")
+		})
+	}
+}
+
+func startPendingRPC(t *testing.T) (*otqpacceptor.Acceptor, chan<- struct{}, <-chan error) {
+	t.Helper()
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	acceptor := otqpacceptor.New(otqpacceptor.Config{GRPCEndpoint: "127.0.0.1:0", HTTPEndpoint: ""},
+		pipeline.HandlerFunc(func(ctx context.Context, _ *qdata.Query) (*qdata.Result, error) {
+			close(started)
+
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-release:
+				return &qdata.Result{}, nil
+			}
+		}))
+	require.NoError(t, acceptor.Start(t.Context(), nil))
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+
+		_ = acceptor.Shutdown(ctx)
+	})
+
+	conn, err := grpc.NewClient(acceptor.GRPCListenAddr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	t.Cleanup(cancel)
+
+	rpc := make(chan error, 1)
+
+	go func() {
+		_, callErr := otqpv1.NewQueryServiceClient(conn).Query(ctx, &otqpv1.QueryRequest{Query: &qdata.Query{}})
+		rpc <- callErr
+	}()
+
+	select {
+	case <-started:
+	case <-ctx.Done():
+		t.Fatal("RPC did not start")
+	}
+
+	return acceptor, release, rpc
+}
+
+func waitForRPCOutcome(t *testing.T, done <-chan error, message string) error {
+	t.Helper()
+
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(3 * time.Second):
+		t.Fatal(message)
+
+		return nil
+	}
+}
