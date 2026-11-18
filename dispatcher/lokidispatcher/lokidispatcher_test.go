@@ -89,6 +89,18 @@ func TestDispatchMetrics(t *testing.T) {
 	assert.Len(t, series[0].GetPoints(), 2)
 }
 
+func TestDispatchRejectsUnsupportedResultType(t *testing.T) {
+	t.Parallel()
+
+	body := `{"status":"success","data":{"resultType":"scalar","result":[1700000000,"4"]}}`
+	server := newServer(t, http.StatusOK, body)
+
+	result, err := newDispatcher(server.URL).Dispatch(t.Context(), logQLQuery())
+	require.ErrorContains(t, err, "unsupported result type")
+	assert.Equal(t, qerror.CodeUnavailable, qerror.CodeOf(err))
+	assert.Nil(t, result)
+}
+
 // captureQuery runs a request against a server that records the `query` form
 // value and returns an empty streams body.
 func captureQuery(t *testing.T, query *qdata.Query) string {
