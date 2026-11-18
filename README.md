@@ -81,6 +81,10 @@ longer query fields. The default configuration sends the query to Prometheus at
 constraints for Alice. A running backend with matching labels is needed for
 non-empty results. Identity headers belong on the HTTP request.
 
+To build your own distribution outside this repository, see the
+[standalone builder guide](./cmd/builder/README.md#standalone-distribution)
+and [example configuration](./examples/standalone).
+
 ## Layout
 
 This is a **multi-module workspace**: every component is its own Go module, tied

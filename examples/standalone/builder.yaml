@@ -1,0 +1,12 @@
+dist:
+  name: custom-querier
+  module: example.com/acme/custom-querier
+  version: dev
+  core_version: v0.1.0
+  output_path: ./dist
+
+acceptors:
+  - gomod: github.com/minuk-dev/opentelemetry-querier/acceptor/prometheusacceptor@v0.1.0
+
+dispatchers:
+  - gomod: github.com/minuk-dev/opentelemetry-querier/dispatcher/prometheusdispatcher@v0.1.0
