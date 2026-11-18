@@ -49,11 +49,20 @@ func TestUnresolvedClearsMetadata(t *testing.T) {
 	cases := []struct {
 		name     string
 		required bool
+		enforce  string
 		assert   func(t *testing.T, err error)
 	}{
 		{
 			name:     "required rejects",
 			required: true,
+			enforce:  "tenant",
+			assert: func(t *testing.T, err error) {
+				t.Helper()
+				assert.Equal(t, qerror.CodeUnauthenticated, qerror.CodeOf(err))
+			},
+		},
+		{
+			name: "isolation requires tenant", required: false, enforce: "tenant",
 			assert: func(t *testing.T, err error) {
 				t.Helper()
 				assert.Equal(t, qerror.CodeUnauthenticated, qerror.CodeOf(err))
@@ -62,6 +71,7 @@ func TestUnresolvedClearsMetadata(t *testing.T) {
 		{
 			name:     "optional passes through",
 			required: false,
+			enforce:  "",
 			assert: func(t *testing.T, err error) {
 				t.Helper()
 				require.NoError(t, err)
@@ -74,7 +84,7 @@ func TestUnresolvedClearsMetadata(t *testing.T) {
 			t.Parallel()
 
 			proc := tenantprocessor.New(tenantprocessor.Config{
-				Header: tenantprocessor.DefaultHeader, Default: "", Required: testCase.required, EnforceLabel: "tenant",
+				Header: tenantprocessor.DefaultHeader, Default: "", Required: testCase.required, EnforceLabel: testCase.enforce,
 			})
 			query := &qdata.Query{Metadata: map[string]string{qdata.MetadataTenantID: "victim-corp"}}
 

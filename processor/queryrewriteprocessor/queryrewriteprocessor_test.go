@@ -182,3 +182,22 @@ func TestNoEnforcementLeavesFilterUntouched(t *testing.T) {
 	labels := matcherMap(t, selectFilter(t, query))
 	assert.Equal(t, map[string]string{"__name__": "up"}, labels)
 }
+
+func TestUnresolvedTenantRejected(t *testing.T) {
+	t.Parallel()
+
+	query := metricSelectQuery(leafPred("__name__", "up"))
+	require.Error(t, queryrewriteprocessor.New(tenantConfig()).ProcessQuery(t.Context(), query))
+	assert.Equal(t, "up", matcherMap(t, selectFilter(t, query))["__name__"])
+}
+
+func TestStaticEmptyMatcherPreserved(t *testing.T) {
+	t.Parallel()
+
+	query := metricSelectQuery(leafPred("__name__", "up"))
+	cfg := queryrewriteprocessor.Config{EnforceLabels: []queryrewriteprocessor.EnforceLabel{
+		{Name: "namespace", Value: "", FromTenant: false},
+	}}
+	require.NoError(t, queryrewriteprocessor.New(cfg).ProcessQuery(t.Context(), query))
+	assert.Contains(t, matcherMap(t, selectFilter(t, query)), "namespace")
+}

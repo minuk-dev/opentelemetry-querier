@@ -31,3 +31,5 @@ processors:
     default: "anonymous"
     enforce_label: "tenant_id"
 ```
+
+When `enforce_label` is set, unresolved tenants are rejected even if `required` is false. Configure a default tenant explicitly if anonymous queries should have a fixed scope.

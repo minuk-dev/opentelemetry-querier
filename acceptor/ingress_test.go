@@ -88,8 +88,7 @@ func TestPrepareIngressHeadersWin(t *testing.T) {
 
 	assert.Equal(t, map[string][]string{"x-scope-orgid": {realTenant}}, matches,
 		"the transport value must be the only x-scope-orgid entry, got header map %v", query.GetHeader())
-	assert.Equal(t, []string{"kept"}, query.GetHeader()["X-Other"].GetValues(),
-		"an unrelated body header is left alone")
+	assert.NotContains(t, query.GetHeader(), "X-Other", "body headers are never trusted")
 }
 
 // TestPrepareIngressNilQuery guards the decode path where the request carried no

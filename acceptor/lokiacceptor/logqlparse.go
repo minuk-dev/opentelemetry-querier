@@ -30,7 +30,12 @@ const (
 // outside the subset (label pipelines like `| json`, unwrap, parsers) return an
 // error so the acceptor rejects them with 400.
 func parseLogQL(input string) (*qdata.QueryPlan, error) {
-	parser := &logqlParser{tokens: tokenizeLogQL(input), pos: 0}
+	tokens, err := tokenizeLogQL(input)
+	if err != nil {
+		return nil, err
+	}
+
+	parser := &logqlParser{tokens: tokens, pos: 0}
 
 	node, err := parser.parseExpr()
 	if err != nil {
@@ -69,7 +74,7 @@ type logqlToken struct {
 	value string
 }
 
-func tokenizeLogQL(input string) []logqlToken {
+func tokenizeLogQL(input string) ([]logqlToken, error) {
 	var tokens []logqlToken
 
 	runes := []rune(input)
@@ -79,8 +84,12 @@ func tokenizeLogQL(input string) []logqlToken {
 		switch {
 		case unicode.IsSpace(char):
 			pos++
-		case char == '"' || char == '`':
-			value, next := scanString(runes, pos)
+		case strings.ContainsRune("\"`", char):
+			value, next, err := scanString(runes, pos)
+			if err != nil {
+				return nil, err
+			}
+
 			tokens = append(tokens, logqlToken{kind: logqlString, value: value})
 			pos = next
 		case strings.ContainsRune("{}()[],", char):
@@ -108,7 +117,7 @@ func tokenizeLogQL(input string) []logqlToken {
 		}
 	}
 
-	return append(tokens, logqlToken{kind: logqlEOF, value: ""})
+	return append(tokens, logqlToken{kind: logqlEOF, value: ""}), nil
 }
 
 func bracketKind(char rune) logqlKind {
@@ -153,29 +162,26 @@ func scanOperator(runes []rune, start int) (logqlToken, int) {
 	return logqlToken{kind: logqlIdent, value: string(runes[start])}, start + 1
 }
 
-func scanString(runes []rune, start int) (string, int) {
+func scanString(runes []rune, start int) (string, int, error) {
 	quote := runes[start]
-
-	var builder strings.Builder
-
-	pos := start + 1
-	for pos < len(runes) {
-		if runes[pos] == '\\' && pos+1 < len(runes) && quote == '"' {
-			builder.WriteRune(runes[pos+1])
-			pos += 2
+	for pos := start + 1; pos < len(runes); pos++ {
+		if runes[pos] == '\\' && quote == '"' {
+			pos++
 
 			continue
 		}
 
 		if runes[pos] == quote {
-			return builder.String(), pos + 1
-		}
+			value, err := strconv.Unquote(string(runes[start : pos+1]))
+			if err != nil {
+				return "", pos + 1, fmt.Errorf("%w: %w", errLogQLSyntax, err)
+			}
 
-		builder.WriteRune(runes[pos])
-		pos++
+			return value, pos + 1, nil
+		}
 	}
 
-	return builder.String(), pos
+	return "", len(runes), fmt.Errorf("%w: unterminated string", errLogQLSyntax)
 }
 
 // scanNumberOrDuration scans a bare number (topk param) or a range duration

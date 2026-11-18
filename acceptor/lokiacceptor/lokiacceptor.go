@@ -181,6 +181,13 @@ func parseInstant(request *http.Request) (*qdata.Query, error) {
 
 	query := &qdata.Query{Signal: qdata.SignalLogs, Context: qdata.ContextInstant, Plan: plan}
 	query.Range = &qdata.TimeRange{Start: nil, End: timestamppb.New(evalAt), StartExclusive: false, EndExclusive: false}
+
+	options, err := parseLogOptions(request)
+	if err != nil {
+		return nil, err
+	}
+
+	query.LogOptions = options
 	acceptor.PrepareIngress(query, request.Header)
 
 	return query, nil
@@ -230,6 +237,12 @@ func parseRange(request *http.Request) (*qdata.Query, error) {
 		query.Step = durationpb.New(step)
 	}
 
+	options, err := parseLogOptions(request)
+	if err != nil {
+		return nil, err
+	}
+
+	query.LogOptions = options
 	acceptor.PrepareIngress(query, request.Header)
 
 	return query, nil
@@ -475,4 +488,24 @@ func writeHandlerError(writer http.ResponseWriter, err error) {
 	}
 
 	writeError(writer, status, err)
+}
+
+func parseLogOptions(request *http.Request) (*qdata.LogOptions, error) {
+	options := &qdata.LogOptions{Direction: request.Form.Get("direction")}
+	if values, present := request.Form["direction"]; present {
+		if len(values) != 1 || (options.GetDirection() != "forward" && options.GetDirection() != "backward") {
+			return nil, qerror.New(qerror.CodeInvalidArgument, "lokiacceptor: invalid direction")
+		}
+	}
+
+	if values, present := request.Form["limit"]; present {
+		limit, err := strconv.ParseInt(request.Form.Get("limit"), 10, 64)
+		if err != nil || limit <= 0 || len(values) != 1 {
+			return nil, qerror.New(qerror.CodeInvalidArgument, "lokiacceptor: limit must be a positive integer")
+		}
+
+		options.Limit = limit
+	}
+
+	return options, nil
 }

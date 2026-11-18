@@ -28,3 +28,5 @@ processors:
     mask_labels: ["user_email"]
     warn_counter_without_rate: true
 ```
+
+Drop/mask rules also apply to metric exemplar and span event/link attribute lists. They do not recursively rewrite arbitrary log bodies or attribute values. Measurements, event names, and trace/span identifiers are retained.

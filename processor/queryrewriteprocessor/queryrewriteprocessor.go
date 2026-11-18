@@ -13,6 +13,7 @@ import (
 	qdatav1 "github.com/minuk-dev/opentelemetry-querier/gen/qdata/v1"
 	"github.com/minuk-dev/opentelemetry-querier/processor"
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
+	"github.com/minuk-dev/opentelemetry-querier/qerror"
 )
 
 // EnforceLabel is a statically-configured matcher to inject into every query.
@@ -53,7 +54,12 @@ func (p *Processor) ProcessQuery(_ context.Context, query *qdata.Query) error {
 		return nil
 	}
 
-	enforcement := p.enforcement(query)
+	matchers, err := p.collectMatchers(query)
+	if err != nil {
+		return err
+	}
+
+	enforcement := enforcement(query, matchers)
 	if enforcement == nil {
 		return nil
 	}
@@ -67,8 +73,7 @@ func (p *Processor) ProcessQuery(_ context.Context, query *qdata.Query) error {
 // enforcement builds the single predicate to AND into every Select: the enforced
 // matchers (from the tenant processor and this processor's static config) plus
 // any enforced_predicates trees. Returns nil when there is nothing to enforce.
-func (p *Processor) enforcement(query *qdata.Query) *qdata.Predicate {
-	matchers := p.collectMatchers(query)
+func enforcement(query *qdata.Query, matchers []*qdata.LabelMatcher) *qdata.Predicate {
 	trees := query.GetEnforcedPredicates()
 
 	operands := make([]*qdata.Predicate, 0, len(matchers)+len(trees))
@@ -90,11 +95,11 @@ func (p *Processor) enforcement(query *qdata.Query) *qdata.Predicate {
 
 // collectMatchers merges the query's already-registered enforced matchers (e.g.
 // from the tenant processor) with this processor's static config, resolving
-// from_tenant values and skipping empties.
-func (p *Processor) collectMatchers(query *qdata.Query) []*qdata.LabelMatcher {
+// from_tenant values and rejecting unresolved tenants.
+func (p *Processor) collectMatchers(query *qdata.Query) ([]*qdata.LabelMatcher, error) {
 	enforced := query.GetEnforcedMatchers()
 	if len(p.cfg.EnforceLabels) == 0 {
-		return enforced
+		return enforced, nil
 	}
 
 	matchers := append([]*qdata.LabelMatcher(nil), enforced...)
@@ -103,16 +108,15 @@ func (p *Processor) collectMatchers(query *qdata.Query) []*qdata.LabelMatcher {
 		value := label.Value
 		if label.FromTenant {
 			value = qdata.TenantID(query)
-		}
-
-		if value == "" {
-			continue
+			if value == "" {
+				return nil, qerror.New(qerror.CodePermissionDenied, "queryrewrite: unresolved tenant for %q", label.Name)
+			}
 		}
 
 		matchers = append(matchers, &qdata.LabelMatcher{Name: label.Name, Op: qdata.MatchEqual, Value: value})
 	}
 
-	return matchers
+	return matchers, nil
 }
 
 // composeEnforcement AND-s enforcement into every Select leaf of the plan tree.

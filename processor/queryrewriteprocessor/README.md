@@ -29,3 +29,5 @@ processors:
       - name: "tenant_id"
         from_tenant: true
 ```
+
+A `from_tenant` constraint requires a resolved tenant and rejects the query when absent. Static empty values remain explicit equality constraints.

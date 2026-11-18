@@ -158,11 +158,10 @@ func TestFromTenantResolvesSubjectAndValue(t *testing.T) {
 	assert.Equal(t, "acme", query.GetEnforcedMatchers()[0].GetValue())
 }
 
-func TestEmptyEnforceValueSkipped(t *testing.T) {
+func TestUnresolvedEnforceTenantRejected(t *testing.T) {
 	t.Parallel()
 
-	// from_tenant with no tenant resolved yields an empty value; the matcher is
-	// skipped rather than enforcing namespace="".
+	// An unresolved tenant cannot remove an allow rule's scope.
 	cfg := baseConfig()
 	cfg.Rules = []simpleauthzprocessor.Rule{
 		{
@@ -174,7 +173,7 @@ func TestEmptyEnforceValueSkipped(t *testing.T) {
 	proc := simpleauthzprocessor.New(cfg)
 
 	query := queryWithSubject("alice")
-	require.NoError(t, proc.ProcessQuery(context.Background(), query))
+	require.Error(t, proc.ProcessQuery(context.Background(), query))
 	assert.Empty(t, query.GetEnforcedMatchers())
 }
 
@@ -217,4 +216,26 @@ func TestValidateAcceptsWellFormedPolicy(t *testing.T) {
 		{Subjects: nil, Effect: simpleauthzprocessor.EffectDeny, EnforceLabels: nil},
 	}
 	require.NoError(t, simpleauthzprocessor.Validate(cfg))
+}
+
+func TestOmittedRuleEffectDenies(t *testing.T) {
+	t.Parallel()
+
+	cfg := baseConfig()
+	cfg.Rules = []simpleauthzprocessor.Rule{{Subjects: nil, Effect: "", EnforceLabels: nil}}
+	err := simpleauthzprocessor.New(cfg).ProcessQuery(t.Context(), queryWithSubject("alice"))
+	require.Error(t, err)
+	assert.Equal(t, qerror.CodePermissionDenied, qerror.CodeOf(err))
+}
+
+func TestStaticEmptyEnforcementIsPreserved(t *testing.T) {
+	t.Parallel()
+
+	cfg := baseConfig()
+	cfg.Rules = []simpleauthzprocessor.Rule{{Subjects: nil, Effect: simpleauthzprocessor.EffectAllow,
+		EnforceLabels: []simpleauthzprocessor.EnforceLabel{{Name: "namespace", Value: "", FromTenant: false}}}}
+	query := queryWithSubject("alice")
+	require.NoError(t, simpleauthzprocessor.New(cfg).ProcessQuery(t.Context(), query))
+	require.Len(t, query.GetEnforcedMatchers(), 1)
+	assert.Empty(t, query.GetEnforcedMatchers()[0].GetValue())
 }

@@ -73,7 +73,7 @@ func New(cfg Config, handler pipeline.Handler) *Acceptor {
 // acceptor can be embedded or tested with httptest.
 func (a *Acceptor) Handler() http.Handler {
 	mux := http.NewServeMux()
-	// _search under any index (or index pattern) path prefix, plus the bare form.
+	// Only the fixed-backend /_search API accepts searches.
 	mux.HandleFunc("/_search", a.handleSearch)
 	mux.HandleFunc("/", a.route)
 
@@ -114,11 +114,11 @@ func (a *Acceptor) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-// route dispatches _search requests under an index path (e.g. /logs-*/_search)
-// and answers the ping endpoint ("/"); anything else is a 404.
+// route rejects index-specific searches and serves the ping endpoint.
 func (a *Acceptor) route(writer http.ResponseWriter, request *http.Request) {
 	if strings.HasSuffix(request.URL.Path, "/_search") {
-		a.handleSearch(writer, request)
+		writeError(writer, http.StatusBadRequest,
+			qerror.New(qerror.CodeInvalidArgument, "index selection is unsupported; use /_search with the configured backend"))
 
 		return
 	}
@@ -165,15 +165,23 @@ func parseSearch(request *http.Request) (*qdata.Query, error) {
 		return nil, fmt.Errorf("elasticsearchacceptor: parse form: %w", err)
 	}
 
+	for key := range request.Form {
+		if key != "q" {
+			return nil, qerror.New(qerror.CodeInvalidArgument, "unsupported search parameter %q", key)
+		}
+	}
+
 	expr := request.Form.Get("q")
 
-	if expr == "" && request.Body != nil {
+	if request.Body != nil {
 		bodyExpr, bodyErr := queryStringFromBody(request.Body)
 		if bodyErr != nil {
 			return nil, bodyErr
 		}
 
-		expr = bodyExpr
+		if expr == "" {
+			expr = bodyExpr
+		}
 	}
 
 	if expr == "" {
@@ -214,6 +222,12 @@ func queryStringFromBody(reader io.Reader) (string, error) {
 		}
 
 		return "", fmt.Errorf("%w: %w", errBadBody, err)
+	}
+
+	for key := range body {
+		if key != "query" {
+			return "", fmt.Errorf("%w: unsupported search option %q", errBadBody, key)
+		}
 	}
 
 	rawQuery, present := body["query"]
@@ -268,14 +282,35 @@ func resultToResponse(result *qdata.Result) any {
 		hits = append(hits, recordToHit(record))
 	}
 
-	return map[string]any{
-		"took":      0,
-		"timed_out": false,
-		"hits": map[string]any{
-			"total": map[string]any{"value": len(hits), "relation": "eq"},
-			"hits":  hits,
-		},
+	hitsBlock := map[string]any{"hits": hits}
+	response := map[string]any{"hits": hitsBlock}
+
+	metadata := result.GetLogs().GetSearchMetadata()
+	if total := metadata.GetTotal(); total != nil {
+		hitsBlock["total"] = map[string]any{"value": total.GetValue(), "relation": total.GetRelation()}
 	}
+
+	if metadata != nil && metadata.TimedOut != nil {
+		response["timed_out"] = metadata.GetTimedOut()
+	}
+
+	if shards := metadata.GetShards(); shards != nil {
+		response["_shards"] = map[string]any{
+			"total": shards.GetTotal(), "successful": shards.GetSuccessful(),
+			"failed": shards.GetFailed(), "skipped": shards.GetSkipped(),
+		}
+	}
+
+	if notes := result.GetFeedback().GetNotifications(); len(notes) > 0 {
+		warnings := make([]string, 0, len(notes))
+		for _, note := range notes {
+			warnings = append(warnings, note.GetMessage())
+		}
+
+		response["warnings"] = warnings
+	}
+
+	return response
 }
 
 // recordToHit renders one log record as an Elasticsearch hit.

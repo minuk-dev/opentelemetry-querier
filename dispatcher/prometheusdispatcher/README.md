@@ -37,3 +37,5 @@ dispatchers:
     endpoint: "http://localhost:9090"
     timeout: 30s
 ```
+
+Only float vector/matrix results are supported. Scalar, string, unknown result types, and native histogram payloads return an explicit upstream-result error (HTTP 502) until the result model can preserve them; no successful response drops those measurements.

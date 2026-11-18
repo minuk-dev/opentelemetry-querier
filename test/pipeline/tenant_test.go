@@ -38,7 +38,7 @@ func TestTenant(t *testing.T) {
 			"the isolation matcher is registered but not enforced into the query without queryrewrite")
 	})
 
-	t.Run("no header leaves the tenant unset", func(t *testing.T) {
+	t.Run("no header rejects configured isolation", func(t *testing.T) {
 		t.Parallel()
 
 		upstream := newUpstream(t)
@@ -46,7 +46,7 @@ func TestTenant(t *testing.T) {
 
 		code, body := getWith(t, base, nil)
 
-		assert.Equal(t, http.StatusOK, code, "body: %s", body)
+		assert.Equal(t, http.StatusUnauthorized, code, "body: %s", body)
 		assert.Empty(t, upstream.gotTenant(), "no tenant resolves, so none is forwarded")
 	})
 }
