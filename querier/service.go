@@ -28,7 +28,8 @@ var (
 	errUnknownAcceptor = errors.New("querier: unknown acceptor type")
 	// errConnectorTargetNotLeaf is returned when a connector's target pipeline is
 	// itself connector-terminated (nested connectors are unsupported).
-	errConnectorTargetNotLeaf = errors.New("querier: connector target must be a leaf pipeline")
+	errConnectorTargetNotLeaf   = errors.New("querier: connector target must be a leaf pipeline")
+	errDuplicateConnectorTarget = errors.New("querier: connector has multiple targets for one signal")
 )
 
 // Service is a fully assembled, runnable querier: a set of pipelines and the
@@ -181,6 +182,11 @@ func connectorTargets(
 
 			if targets[accStr] == nil {
 				targets[accStr] = map[qdata.Signal]pipeline.Handler{}
+			}
+
+			if previous, exists := targets[accStr][signal].(*pipeline.Pipeline); exists {
+				return nil, fmt.Errorf("%w: %q for %s: %q and %q", errDuplicateConnectorTarget,
+					accStr, signal, previous.Name, name)
 			}
 
 			targets[accStr][signal] = leaf

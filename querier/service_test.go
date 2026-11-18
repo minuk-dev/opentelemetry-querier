@@ -183,3 +183,31 @@ func TestBuildRejectsNamedSecurityDependency(t *testing.T) {
 	assert.Contains(t, err.Error(), "metrics/private")
 	assert.Contains(t, err.Error(), "consumer/tenant-quota")
 }
+
+func TestBuildRejectsDuplicateConnectorTargets(t *testing.T) {
+	t.Parallel()
+
+	var captured map[qdata.Signal]pipeline.Handler
+
+	dispatchers, err := dispatcher.MakeFactoryMap(dispatcherFactory("prometheus"))
+	require.NoError(t, err)
+	connectors, err := connector.MakeFactoryMap(recordingConnFactory(&captured))
+	require.NoError(t, err)
+
+	factories := querier.Factories{Acceptors: nil, Processors: nil, Dispatchers: dispatchers, Connectors: connectors}
+	cfg := &querier.Config{
+		Acceptors: nil, Processors: nil, Dispatchers: nil,
+		Connectors: map[string]map[string]any{"crosssignal/a": {}},
+		Service: querier.ServiceConfig{Pipelines: map[string]querier.PipelineConfig{
+			"metrics/a":    pipe("prometheus", "crosssignal/a"),
+			"metrics/b":    pipe("prometheus", "crosssignal/a"),
+			"metrics/join": pipe("crosssignal/a", "otqp"),
+		}},
+	}
+
+	_, err = querier.Build(factories, cfg, buildInfo())
+	require.ErrorContains(t, err, "connector has multiple targets for one signal")
+	require.ErrorContains(t, err, "crosssignal/a")
+	require.ErrorContains(t, err, "metrics/a")
+	require.ErrorContains(t, err, "metrics/b")
+}
