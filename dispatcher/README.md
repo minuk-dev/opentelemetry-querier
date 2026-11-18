@@ -18,3 +18,7 @@ a `qdata.Result`.
 | [prometheusdispatcher](./prometheusdispatcher) | `prometheus` | Executes against an upstream Prometheus HTTP query API. |
 | [lokidispatcher](./lokidispatcher) | `loki` | Executes LogQL against an upstream Grafana Loki HTTP query API. |
 | [elasticsearchdispatcher](./elasticsearchdispatcher) | `elasticsearch` | Executes Lucene queries against an upstream Elasticsearch `_search` API. |
+
+The built-in HTTP dispatchers accept up to 16 MiB of decoded response data
+per upstream request. This limit also applies to upstream error responses.
+Larger responses fail with an upstream error.

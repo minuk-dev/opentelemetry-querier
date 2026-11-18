@@ -39,6 +39,9 @@ const DefaultDirection = directionBackward
 // defaultTimeout bounds each upstream request when the config leaves it unset.
 const defaultTimeout = 30 * time.Second
 
+// maxResponseBytes bounds the decoded body before JSON parsing.
+const maxResponseBytes = 16 << 20
+
 // defaultRangeLookback is the start-to-end window used when a range query
 // arrives with no start bound set.
 const defaultRangeLookback = time.Hour
@@ -140,9 +143,13 @@ func (d *Dispatcher) Dispatch(ctx context.Context, query *qdata.Query) (*qdata.R
 
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
 		return nil, qerror.UpstreamTransportError(err)
+	}
+
+	if len(body) > maxResponseBytes {
+		return nil, qerror.New(qerror.CodeUnavailable, "upstream response exceeds %d bytes", maxResponseBytes)
 	}
 
 	if resp.StatusCode != http.StatusOK {

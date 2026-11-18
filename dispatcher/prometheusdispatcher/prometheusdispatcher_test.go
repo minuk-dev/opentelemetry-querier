@@ -2,8 +2,10 @@ package prometheusdispatcher_test
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -382,4 +384,46 @@ func TestExpiredDeadline(t *testing.T) {
 	_, err := newDispatcher(server.URL).Dispatch(ctx, metricQuery("up"))
 	require.Error(t, err)
 	assert.Equal(t, qerror.CodeDeadlineExceeded, qerror.CodeOf(err))
+}
+
+func TestDispatchRejectsOversizedUpstreamBodies(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name   string
+		status int
+	}{
+		{name: "success", status: http.StatusOK},
+		{name: "error", status: http.StatusBadGateway},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+				const (
+					chunkSize = 64 << 10
+					limit     = 16 << 20
+				)
+
+				writer.WriteHeader(test.status)
+				_ = http.NewResponseController(writer).Flush()
+
+				chunk := strings.Repeat("x", chunkSize)
+				for range limit / chunkSize {
+					_, err := io.WriteString(writer, chunk)
+					if err != nil {
+						return
+					}
+				}
+
+				_, _ = io.WriteString(writer, "x")
+			}))
+			t.Cleanup(server.Close)
+
+			result, err := newDispatcher(server.URL).Dispatch(t.Context(), metricQuery("up"))
+			require.ErrorContains(t, err, "upstream response exceeds")
+			assert.Equal(t, qerror.CodeUnavailable, qerror.CodeOf(err))
+			assert.Nil(t, result)
+		})
+	}
 }
