@@ -3,11 +3,11 @@ module github.com/minuk-dev/opentelemetry-querier/processor/responsefilterproces
 go 1.25.4
 
 require (
-	github.com/minuk-dev/opentelemetry-querier/component v0.0.0
-	github.com/minuk-dev/opentelemetry-querier/gen v0.0.0
-	github.com/minuk-dev/opentelemetry-querier/processor v0.0.0
-	github.com/minuk-dev/opentelemetry-querier/qdata v0.0.0
-	github.com/minuk-dev/opentelemetry-querier/qerror v0.0.0
+	github.com/minuk-dev/opentelemetry-querier/component v0.1.0
+	github.com/minuk-dev/opentelemetry-querier/gen v0.1.0
+	github.com/minuk-dev/opentelemetry-querier/processor v0.1.0
+	github.com/minuk-dev/opentelemetry-querier/qdata v0.1.0
+	github.com/minuk-dev/opentelemetry-querier/qerror v0.1.0
 	github.com/stretchr/testify v1.12.1
 )
 

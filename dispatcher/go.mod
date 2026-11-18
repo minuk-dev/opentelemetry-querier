@@ -3,12 +3,12 @@ module github.com/minuk-dev/opentelemetry-querier/dispatcher
 go 1.25.4
 
 require (
-	github.com/minuk-dev/opentelemetry-querier/component v0.0.0
-	github.com/minuk-dev/opentelemetry-querier/qdata v0.0.0
+	github.com/minuk-dev/opentelemetry-querier/component v0.1.0
+	github.com/minuk-dev/opentelemetry-querier/qdata v0.1.0
 )
 
 require (
-	github.com/minuk-dev/opentelemetry-querier/gen v0.0.0 // indirect
+	github.com/minuk-dev/opentelemetry-querier/gen v0.1.0 // indirect
 	github.com/samber/lo v1.53.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect

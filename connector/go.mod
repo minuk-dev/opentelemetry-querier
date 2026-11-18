@@ -3,15 +3,15 @@ module github.com/minuk-dev/opentelemetry-querier/connector
 go 1.25.4
 
 require (
-	github.com/minuk-dev/opentelemetry-querier/component v0.0.0
-	github.com/minuk-dev/opentelemetry-querier/dispatcher v0.0.0
-	github.com/minuk-dev/opentelemetry-querier/pipeline v0.0.0
-	github.com/minuk-dev/opentelemetry-querier/qdata v0.0.0
+	github.com/minuk-dev/opentelemetry-querier/component v0.1.0
+	github.com/minuk-dev/opentelemetry-querier/dispatcher v0.1.0
+	github.com/minuk-dev/opentelemetry-querier/pipeline v0.1.0
+	github.com/minuk-dev/opentelemetry-querier/qdata v0.1.0
 )
 
 require (
-	github.com/minuk-dev/opentelemetry-querier/gen v0.0.0 // indirect
-	github.com/minuk-dev/opentelemetry-querier/processor v0.0.0 // indirect
+	github.com/minuk-dev/opentelemetry-querier/gen v0.1.0 // indirect
+	github.com/minuk-dev/opentelemetry-querier/processor v0.1.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 

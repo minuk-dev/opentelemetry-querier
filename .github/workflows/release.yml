@@ -63,6 +63,14 @@ jobs:
           done
           (cd dist && sha256sum ./*.tar.gz ./*.zip > "checksums_${VERSION}.txt")
 
+      - name: publish Go module tags
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          refs=$(scripts/tag-go-modules.sh "$VERSION")
+          git push --atomic origin $refs
+
       - name: publish release
         env:
           GH_TOKEN: ${{ github.token }}
