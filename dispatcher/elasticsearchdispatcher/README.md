@@ -13,7 +13,7 @@ JSON response back into a qdata **logs** `Result`. It sits alongside the
   `range` filter on the configured time field derived from the query's time
   range, sorted newest-first and capped at `size`.
 - Each hit becomes a `LogRecord`: the timestamp comes from the `time_field`, the
-  body from a `message` field (falling back to the raw `_source`), and every
+  body from a string `message` field (empty when absent), and every
   `_source` field (plus `_index`/`_id`) becomes an attribute.
 - Optional HTTP basic auth via `username`/`password`.
 
