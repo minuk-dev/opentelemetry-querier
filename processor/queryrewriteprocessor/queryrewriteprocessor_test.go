@@ -161,13 +161,14 @@ func TestBooleanEnforcementComposesInsteadOfFailingClosed(t *testing.T) {
 	assert.False(t, flat, "the OR survives in the tree, so the filter is not a plain conjunction")
 }
 
-func TestNoPlanIsNoop(t *testing.T) {
+func TestNoPlanRejectsEnforcement(t *testing.T) {
 	t.Parallel()
 
 	query := &qdata.Query{}
 	qdata.SetTenantID(query, testTenant)
 
-	require.NoError(t, queryrewriteprocessor.New(tenantConfig()).ProcessQuery(context.Background(), query))
+	require.ErrorContains(t, queryrewriteprocessor.New(tenantConfig()).ProcessQuery(context.Background(), query),
+		"enforcement requires a query plan")
 	assert.Nil(t, query.GetPlan())
 }
 

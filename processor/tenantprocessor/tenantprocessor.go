@@ -97,3 +97,11 @@ func headerValue(query *qdata.Query, name string) string {
 
 	return ""
 }
+
+// SecurityRequirements declares tenant resolution and optional isolation.
+func (p *Processor) SecurityRequirements() processor.SecurityRequirements {
+	return processor.SecurityRequirements{
+		ResolvesTenant: true, NeedsTenant: false,
+		RegistersEnforcement: p.cfg.EnforceLabel != "", AppliesEnforcement: false,
+	}
+}
