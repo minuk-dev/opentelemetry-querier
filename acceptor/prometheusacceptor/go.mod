@@ -3,12 +3,12 @@ module github.com/minuk-dev/opentelemetry-querier/acceptor/prometheusacceptor
 go 1.25.4
 
 require (
-	github.com/minuk-dev/opentelemetry-querier/acceptor v0.0.0
-	github.com/minuk-dev/opentelemetry-querier/component v0.0.0
-	github.com/minuk-dev/opentelemetry-querier/gen v0.0.0
-	github.com/minuk-dev/opentelemetry-querier/pipeline v0.0.0
-	github.com/minuk-dev/opentelemetry-querier/qdata v0.0.0
-	github.com/minuk-dev/opentelemetry-querier/qerror v0.0.0
+	github.com/minuk-dev/opentelemetry-querier/acceptor v0.0.0-20261118130729-ccf10be9c110
+	github.com/minuk-dev/opentelemetry-querier/component v0.0.0-20261118130729-ccf10be9c110
+	github.com/minuk-dev/opentelemetry-querier/gen v0.0.0-20261118130729-ccf10be9c110
+	github.com/minuk-dev/opentelemetry-querier/pipeline v0.0.0-20261118130729-ccf10be9c110
+	github.com/minuk-dev/opentelemetry-querier/qdata v0.0.0-20261118130729-ccf10be9c110
+	github.com/minuk-dev/opentelemetry-querier/qerror v0.0.0-20261118130729-ccf10be9c110
 	github.com/prometheus/common v0.69.0
 	github.com/prometheus/prometheus v0.313.1
 	github.com/stretchr/testify v1.11.1
@@ -21,9 +21,9 @@ require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dennwc/varint v1.0.0 // indirect
 	github.com/grafana/regexp v0.0.0-20250905093917-f7b3be9d1853 // indirect
-	github.com/minuk-dev/opentelemetry-querier/dispatcher v0.0.0 // indirect
-	github.com/minuk-dev/opentelemetry-querier/dispatcher/prometheusdispatcher v0.0.0
-	github.com/minuk-dev/opentelemetry-querier/processor v0.0.0 // indirect
+	github.com/minuk-dev/opentelemetry-querier/dispatcher v0.0.0-20261118130729-ccf10be9c110 // indirect
+	github.com/minuk-dev/opentelemetry-querier/dispatcher/prometheusdispatcher v0.0.0-20261118130729-ccf10be9c110
+	github.com/minuk-dev/opentelemetry-querier/processor v0.0.0-20261118130729-ccf10be9c110 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_golang v1.23.2 // indirect
