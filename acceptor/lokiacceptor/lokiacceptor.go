@@ -340,7 +340,7 @@ func resultToResponse(result *qdata.Result, instant bool) lokiResponse {
 		return lokiResponse{Status: "success", Data: lokiTableData{ResultType: "table", TableWire: qdata.RenderTable(table)}}
 	}
 
-	if metrics := result.GetMetrics(); metrics != nil && len(metrics.GetSeries()) > 0 {
+	if metrics := result.GetMetrics(); metrics != nil {
 		if instant {
 			return lokiResponse{Status: "success", Data: lokiData{ResultType: "vector", Result: metricsToVector(metrics)}}
 		}

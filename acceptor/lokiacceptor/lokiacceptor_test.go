@@ -478,3 +478,31 @@ func TestStringLiterals(t *testing.T) {
 		})
 	}
 }
+
+func TestEmptyResultsPreserveResultType(t *testing.T) {
+	t.Parallel()
+
+	metrics := &qdata.Result{Data: &qdatav1.Result_Metrics{Metrics: &qdata.Metrics{}}}
+	logs := &qdata.Result{Data: &qdatav1.Result_Logs{Logs: &qdata.Logs{}}}
+
+	for _, test := range []struct {
+		name, path string
+		result     *qdata.Result
+	}{
+		{name: "vector", path: "/loki/api/v1/query?query=%7Bjob%3D%22api%22%7D", result: metrics},
+		{name: "matrix", result: metrics,
+			path: "/loki/api/v1/query_range?start=1700000000&end=1700000060&query=%7Bjob%3D%22api%22%7D"},
+		{name: "streams", path: "/loki/api/v1/query?query=%7Bjob%3D%22api%22%7D", result: logs},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := serve(t, stubHandler{result: test.result, err: nil})
+			status, body := get(t, server.URL+test.path)
+
+			if status != http.StatusOK || body.Data.ResultType != test.name || len(body.Data.Result) != 0 {
+				t.Fatalf("status %d, want empty %s, got %+v", status, test.name, body.Data)
+			}
+		})
+	}
+}

@@ -279,8 +279,7 @@ func parseResponse(body []byte) (*qdata.Result, error) {
 	case "matrix", "vector":
 		return metricsResult(resp.Data.Result, resp.Data.ResultType)
 	default:
-		// scalar/unknown carries no series; return an empty logs payload.
-		return &qdata.Result{Signal: qdata.SignalLogs, Data: &qdatav1.Result_Logs{Logs: &qdata.Logs{}}}, nil
+		return nil, qerror.New(qerror.CodeUnavailable, "lokidispatcher: unsupported result type %q", resp.Data.ResultType)
 	}
 }
 
