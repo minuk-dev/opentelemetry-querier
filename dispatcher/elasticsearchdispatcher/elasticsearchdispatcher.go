@@ -40,6 +40,9 @@ const DefaultSize = 100
 // defaultTimeout bounds each upstream request when the config leaves it unset.
 const defaultTimeout = 30 * time.Second
 
+// maxResponseBytes bounds the decoded body before JSON parsing.
+const maxResponseBytes = 16 << 20
+
 // Config configures the upstream Elasticsearch.
 type Config struct {
 	// Endpoint is the upstream base URL, e.g. http://localhost:9200.
@@ -121,9 +124,13 @@ func (d *Dispatcher) Dispatch(ctx context.Context, query *qdata.Query) (*qdata.R
 
 	defer func() { _ = resp.Body.Close() }()
 
-	payload, err := io.ReadAll(resp.Body)
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
 		return nil, qerror.UpstreamTransportError(err)
+	}
+
+	if len(payload) > maxResponseBytes {
+		return nil, qerror.New(qerror.CodeUnavailable, "upstream response exceeds %d bytes", maxResponseBytes)
 	}
 
 	if resp.StatusCode != http.StatusOK {
