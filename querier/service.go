@@ -29,6 +29,7 @@ var (
 	// errConnectorTargetNotLeaf is returned when a connector's target pipeline is
 	// itself connector-terminated (nested connectors are unsupported).
 	errConnectorTargetNotLeaf   = errors.New("querier: connector target must be a leaf pipeline")
+	errConnectorCache           = errors.New("querier: configure caching on connector target pipelines")
 	errDuplicateConnectorTarget = errors.New("querier: connector has multiple targets for one signal")
 )
 
@@ -157,7 +158,15 @@ func (svc *Service) buildLeafPipelines(factories Factories, cfg *Config, built m
 			return err
 		}
 
-		built[name] = pipeline.New(name, procs, disp)
+		pipe := pipeline.New(name, procs, disp)
+		if pipelineCfg.Cache != nil {
+			err = pipe.EnableCache(*pipelineCfg.Cache)
+			if err != nil {
+				return fmt.Errorf("querier: pipeline %q: %w", name, err)
+			}
+		}
+
+		built[name] = pipe
 	}
 
 	return nil
@@ -216,6 +225,10 @@ func (svc *Service) buildConnectorPipelines(
 		connID := pipelineCfg.Dispatchers[0]
 		if !isConnectorID(cfg, connID) {
 			continue
+		}
+
+		if pipelineCfg.Cache != nil {
+			return fmt.Errorf("%w: %q", errConnectorCache, name)
 		}
 
 		procs, err := svc.buildProcessors(factories, cfg, name, pipelineCfg.Processors)

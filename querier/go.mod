@@ -12,6 +12,7 @@ require (
 	github.com/minuk-dev/opentelemetry-querier/processor v0.1.0
 	github.com/minuk-dev/opentelemetry-querier/qdata v0.1.0
 	github.com/stretchr/testify v1.12.1
+	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -20,7 +21,6 @@ require (
 	github.com/samber/lo v1.53.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/text v0.38.0 // indirect
-	google.golang.org/protobuf v1.36.12 // indirect
 )
 
 replace github.com/minuk-dev/opentelemetry-querier/acceptor => ../acceptor

@@ -7,6 +7,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/minuk-dev/opentelemetry-querier/component"
 	"github.com/minuk-dev/opentelemetry-querier/dispatcher"
@@ -34,11 +35,12 @@ type Pipeline struct {
 	Name       string
 	Processors []processor.Processor
 	Dispatcher dispatcher.Dispatcher
+	cache      *queryCache
 }
 
 // New builds a pipeline.
 func New(name string, processors []processor.Processor, disp dispatcher.Dispatcher) *Pipeline {
-	return &Pipeline{Name: name, Processors: processors, Dispatcher: disp}
+	return &Pipeline{Name: name, Processors: processors, Dispatcher: disp, cache: nil}
 }
 
 // Handle validates the client's plan, runs the request path (processors in
@@ -56,26 +58,11 @@ func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (*qdata.Resul
 		return nil, err
 	}
 
-	result, err := p.Dispatcher.Dispatch(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("pipeline %q: %w", p.Name, err)
+	if p.cache != nil && cacheEligible(query) {
+		return p.handleCached(ctx, query)
 	}
 
-	// Backfill the single-signal convenience field from the query when a
-	// single-signal dispatcher left it unset. A relational Table (cross-signal)
-	// result is legitimately signal-unspecified, so it is left untouched.
-	if result.GetSignal() == qdata.SignalUnspecified && result.GetTable() == nil {
-		result.Signal = query.GetSignal()
-	}
-
-	for i := len(p.Processors) - 1; i >= 0; i-- {
-		err = p.Processors[i].ProcessResult(ctx, query, result)
-		if err != nil {
-			return nil, fmt.Errorf("pipeline %q: %w", p.Name, err)
-		}
-	}
-
-	return result, nil
+	return p.dispatch(ctx, query)
 }
 
 // Start starts the processor chain and the dispatcher (acceptors are started
@@ -114,6 +101,33 @@ func (p *Pipeline) Shutdown(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (p *Pipeline) dispatch(ctx context.Context, query *qdata.Query) (*qdata.Result, error) {
+	result, err := p.Dispatcher.Dispatch(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("pipeline %q: %w", p.Name, err)
+	}
+
+	return p.processResult(ctx, query, result)
+}
+
+func (p *Pipeline) processResult(ctx context.Context, query *qdata.Query, result *qdata.Result) (*qdata.Result, error) {
+	// Backfill the single-signal convenience field from the query when a
+	// single-signal dispatcher left it unset. A relational Table (cross-signal)
+	// result is legitimately signal-unspecified, so it is left untouched.
+	if result.GetSignal() == qdata.SignalUnspecified && result.GetTable() == nil {
+		result.Signal = query.GetSignal()
+	}
+
+	for _, proc := range slices.Backward(p.Processors) {
+		err := proc.ProcessResult(ctx, query, result)
+		if err != nil {
+			return nil, fmt.Errorf("pipeline %q: %w", p.Name, err)
+		}
+	}
+
+	return result, nil
 }
 
 // processQuery validates configuration and executes the request path, rejecting
