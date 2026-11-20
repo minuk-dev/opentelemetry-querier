@@ -2,6 +2,7 @@ package crosssignalconnector_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,6 +12,7 @@ import (
 	qdatav1 "github.com/minuk-dev/opentelemetry-querier/gen/qdata/v1"
 	"github.com/minuk-dev/opentelemetry-querier/pipeline"
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
+	"github.com/minuk-dev/opentelemetry-querier/qerror"
 )
 
 // fakeHandler returns a preset result (or error), recording the query it saw.
@@ -443,4 +445,50 @@ func mustDouble(t *testing.T, result *qdata.Result, column string) float64 {
 	require.True(t, ok, "row has column %q", column)
 
 	return value.GetDoubleValue()
+}
+
+func TestJoinOutputLimit(t *testing.T) {
+	t.Parallel()
+
+	const sideRows = 100
+
+	row := qdata.NewRow("job", qdata.Str("api"))
+	left := qdata.NewTable([]string{"job"}, slices.Repeat([]*qdata.Row{row}, sideRows)...)
+	right := qdata.NewTable([]string{"job"}, slices.Repeat([]*qdata.Row{row}, sideRows)...)
+	sut := crosssignalconnector.New(map[qdata.Signal]pipeline.Handler{
+		qdata.SignalMetrics: &fakeHandler{result: qdata.TableResult(left), err: nil, seen: nil},
+		qdata.SignalLogs:    &fakeHandler{result: qdata.TableResult(right), err: nil, seen: nil},
+	})
+
+	result, err := sut.Dispatch(t.Context(), &qdata.Query{Plan: joinPlan("job")})
+	require.NoError(t, err)
+	require.Len(t, result.GetTable().GetRows(), sideRows*sideRows)
+
+	right.Rows = append(right.Rows, row)
+
+	result, err = sut.Dispatch(t.Context(), &qdata.Query{Plan: joinPlan("job")})
+	require.ErrorContains(t, err, "join exceeds")
+	assert.Equal(t, qerror.CodeResourceExhausted, qerror.CodeOf(err))
+	assert.Nil(t, result)
+}
+
+func TestJoinChecksCancellationAfterFetchingBothSides(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	sut := crosssignalconnector.New(map[qdata.Signal]pipeline.Handler{
+		qdata.SignalMetrics: &fakeHandler{result: metricResult(1), err: nil, seen: nil},
+		qdata.SignalLogs: pipeline.HandlerFunc(func(context.Context, *qdata.Query) (*qdata.Result, error) {
+			cancel()
+
+			return logResult("api"), nil
+		}),
+	})
+
+	result, err := sut.Dispatch(ctx, &qdata.Query{Plan: joinPlan("job")})
+	require.Error(t, err)
+	assert.Equal(t, qerror.CodeCanceled, qerror.CodeOf(err))
+	assert.Nil(t, result)
 }

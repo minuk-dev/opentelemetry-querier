@@ -195,11 +195,10 @@ func TestDispatchUpstreamError(t *testing.T) {
 	require.Error(t, err, "upstream 500 should be an error")
 }
 
-func TestDispatchBodyFallsBackToRawSource(t *testing.T) {
+func TestDispatchDoesNotCopySourceIntoEmptyMessage(t *testing.T) {
 	t.Parallel()
 
-	// A hit with no "message" field: the body should carry the raw source so no
-	// information is lost.
+	// Source fields remain attributes so response filters can remove or mask them.
 	body := `{"hits":{"hits":[{"_index":"i","_id":"1","_source":{"@timestamp":"2026-01-02T03:04:05Z","code":500}}]}}`
 	server := newServer(t, http.StatusOK, body)
 
@@ -208,7 +207,7 @@ func TestDispatchBodyFallsBackToRawSource(t *testing.T) {
 
 	records := result.GetLogs().GetRecords()
 	require.Len(t, records, 1)
-	assert.Contains(t, records[0].GetBody().GetStringValue(), "\"code\":500")
+	assert.Empty(t, records[0].GetBody().GetStringValue())
 
 	code, ok := qdata.AttrGet(records[0].GetAttributes(), "code")
 	require.True(t, ok)

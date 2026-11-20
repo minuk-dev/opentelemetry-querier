@@ -1,6 +1,8 @@
 package crosssignalconnector
 
 import (
+	"context"
+	"errors"
 	"slices"
 	"strconv"
 	"strings"
@@ -22,6 +24,7 @@ const (
 	floatFmt    = -1
 	floatBit    = 64
 	decimalBase = 10
+	maxJoinRows = 10_000
 )
 
 // resultToTable normalizes a single-signal backend Result into a relational
@@ -193,19 +196,24 @@ func joinModeFor(operator qdatav1.BinOp) (joinMode, error) {
 }
 
 // joinTables joins two normalized tables per the BinaryOp's matching and mode.
-func joinTables(left, right *qdata.Table, matching *qdatav1.VectorMatch, mode joinMode) (*qdata.Table, error) {
+func joinTables(
+	ctx context.Context, left, right *qdata.Table, matching *qdatav1.VectorMatch, mode joinMode,
+) (*qdata.Table, error) {
 	keys, err := resolveKeys(left, right, matching)
 	if err != nil {
 		return nil, err
 	}
 
-	index := indexRows(right.GetRows(), keys)
-
-	if mode == joinAnti {
-		return antiJoin(left, keys, index), nil
+	index, err := indexRows(ctx, right.GetRows(), keys)
+	if err != nil {
+		return nil, err
 	}
 
-	return innerJoin(left, right, keys, index), nil
+	if mode == joinAnti {
+		return antiJoin(ctx, left, keys, index)
+	}
+
+	return innerJoin(ctx, left, right, keys, index)
 }
 
 // resolveKeys picks the equijoin columns: the explicit `on` list; else the shared
@@ -229,40 +237,86 @@ func resolveKeys(left, right *qdata.Table, matching *qdatav1.VectorMatch) ([]str
 	return keys, nil
 }
 
-func innerJoin(left, right *qdata.Table, keys []string, index map[string][]*qdata.Row) *qdata.Table {
+func innerJoin(
+	ctx context.Context, left, right *qdata.Table, keys []string, index map[string][]*qdata.Row,
+) (*qdata.Table, error) {
 	columns, rightNames := joinedColumns(left.GetColumns(), right.GetColumns(), keys)
 	joined := &qdata.Table{Columns: columns}
 
 	for _, lrow := range left.GetRows() {
+		err := joinContextError(ctx)
+		if err != nil {
+			return nil, err
+		}
+
 		tuple, ok := keyTuple(rowMap(lrow), keys)
 		if !ok {
 			continue
 		}
 
-		for _, rrow := range index[tuple] {
+		matches := index[tuple]
+		if len(matches) > maxJoinRows-len(joined.Rows) {
+			return nil, joinLimitError()
+		}
+
+		for _, rrow := range matches {
+			err := joinContextError(ctx)
+			if err != nil {
+				return nil, err
+			}
+
 			joined.Rows = append(joined.Rows, mergeRow(lrow, rrow, rightNames))
 		}
 	}
 
-	return joined
+	return joined, joinContextError(ctx)
 }
 
 // antiJoin keeps left rows with no matching right row (UNLESS). A left row that
 // lacks a join key can never match, so it is kept.
-func antiJoin(left *qdata.Table, keys []string, index map[string][]*qdata.Row) *qdata.Table {
+func antiJoin(
+	ctx context.Context, left *qdata.Table, keys []string, index map[string][]*qdata.Row,
+) (*qdata.Table, error) {
 	out := &qdata.Table{Columns: slices.Clone(left.GetColumns())}
 
 	for _, lrow := range left.GetRows() {
+		err := joinContextError(ctx)
+		if err != nil {
+			return nil, err
+		}
+
 		if tuple, ok := keyTuple(rowMap(lrow), keys); ok {
 			if _, matched := index[tuple]; matched {
 				continue
 			}
 		}
 
+		if len(out.Rows) == maxJoinRows {
+			return nil, joinLimitError()
+		}
+
 		out.Rows = append(out.Rows, &qdata.Row{Values: cloneAttrs(lrow.GetValues())})
 	}
 
-	return out
+	return out, joinContextError(ctx)
+}
+
+func joinContextError(ctx context.Context) error {
+	err := ctx.Err()
+	if err == nil {
+		return nil
+	}
+
+	code := qerror.CodeCanceled
+	if errors.Is(err, context.DeadlineExceeded) {
+		code = qerror.CodeDeadlineExceeded
+	}
+
+	return qerror.New(code, "crosssignalconnector: join interrupted: %v", err)
+}
+
+func joinLimitError() *qerror.Error {
+	return qerror.New(qerror.CodeResourceExhausted, "crosssignalconnector: join exceeds %d output rows", maxJoinRows)
 }
 
 // removeAll returns values with every element of drop removed.
@@ -279,10 +333,15 @@ func removeAll(values, drop []string) []string {
 	return out
 }
 
-func indexRows(rows []*qdata.Row, keys []string) map[string][]*qdata.Row {
+func indexRows(ctx context.Context, rows []*qdata.Row, keys []string) (map[string][]*qdata.Row, error) {
 	index := map[string][]*qdata.Row{}
 
 	for _, row := range rows {
+		err := joinContextError(ctx)
+		if err != nil {
+			return nil, err
+		}
+
 		tuple, ok := keyTuple(rowMap(row), keys)
 		if !ok {
 			continue
@@ -291,7 +350,7 @@ func indexRows(rows []*qdata.Row, keys []string) map[string][]*qdata.Row {
 		index[tuple] = append(index[tuple], row)
 	}
 
-	return index
+	return index, joinContextError(ctx)
 }
 
 func mergeRow(left, right *qdata.Row, rightNames map[string]string) *qdata.Row {

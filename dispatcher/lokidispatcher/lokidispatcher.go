@@ -115,7 +115,10 @@ func (d *Dispatcher) Dispatch(ctx context.Context, query *qdata.Query) (*qdata.R
 		return nil, err
 	}
 
-	endpoint, form := d.buildRequest(query, logQL)
+	endpoint, form, err := d.buildRequest(query, logQL)
+	if err != nil {
+		return nil, err
+	}
 
 	err = d.applyLogOptions(query.GetLogOptions(), form)
 	if err != nil {
@@ -164,57 +167,66 @@ func queryText(query *qdata.Query) (string, error) {
 }
 
 // buildRequest picks the instant vs range endpoint and encodes the form.
-func (d *Dispatcher) buildRequest(query *qdata.Query, logQL string) (string, url.Values) {
+func (d *Dispatcher) buildRequest(query *qdata.Query, logQL string) (string, url.Values, error) {
 	base := strings.TrimRight(d.cfg.Endpoint, "/")
 	form := url.Values{}
 	form.Set("query", logQL)
 	form.Set("limit", strconv.Itoa(d.cfg.Limit))
 	form.Set("direction", d.cfg.Direction)
 
+	window := query.GetRange()
+	for _, bound := range []*timestamppb.Timestamp{window.GetStart(), window.GetEnd()} {
+		if bound != nil {
+			err := bound.CheckValid()
+			if err != nil {
+				return "", nil, qerror.New(qerror.CodeInvalidArgument, "lokidispatcher: invalid timestamp: %v", err)
+			}
+		}
+	}
+
+	end := time.Now()
+	if stamp := window.GetEnd(); stamp != nil {
+		end = stamp.AsTime()
+	}
+
 	if query.GetContext() == qdata.ContextRange {
-		start, end := rangeBounds(query)
-		form.Set("start", formatNano(start))
-		form.Set("end", formatNano(end))
+		start := end.Add(-defaultRangeLookback)
+		if stamp := window.GetStart(); stamp != nil {
+			start = stamp.AsTime()
+		}
+
+		err := setTimestamp(form, "start", start)
+		if err != nil {
+			return "", nil, err
+		}
 
 		if step := query.GetStep().AsDuration(); step > 0 {
 			form.Set("step", formatStep(step))
 		}
 
-		return base + "/loki/api/v1/query_range", form
+		return base + "/loki/api/v1/query_range", form, setTimestamp(form, "end", end)
 	}
 
-	// Instant: evaluate at the range end, or now when unset.
-	evalAt := query.GetRange().GetEnd().AsTime()
-	if evalAt.IsZero() || evalAt.Unix() <= 0 {
-		evalAt = time.Now()
-	}
-
-	form.Set("time", formatNano(evalAt))
-
-	return base + "/loki/api/v1/query", form
+	return base + "/loki/api/v1/query", form, setTimestamp(form, "time", end)
 }
 
-// rangeBounds resolves the [start, end] window for a range query, defaulting
-// unset bounds rather than sending Loki the year-1 zero time (whose UnixNano is
-// a large negative integer): end falls back to now, start to end minus the
-// default lookback.
-func rangeBounds(query *qdata.Query) (time.Time, time.Time) {
-	end := query.GetRange().GetEnd().AsTime()
-	if end.IsZero() || end.Unix() <= 0 {
-		end = time.Now()
+func setTimestamp(form url.Values, field string, instant time.Time) error {
+	const secondsDigits = 10
+
+	nanos := instant.UnixNano()
+	if !time.Unix(0, nanos).Equal(instant) {
+		return qerror.New(qerror.CodeInvalidArgument, "lokidispatcher: %s timestamp does not fit Unix nanoseconds", field)
 	}
 
-	start := query.GetRange().GetStart().AsTime()
-	if start.IsZero() || start.Unix() <= 0 {
-		start = end.Add(-defaultRangeLookback)
+	value := strconv.FormatInt(nanos, 10)
+	if nanos != 0 && len(value) <= secondsDigits {
+		// Loki interprets short integers as Unix seconds.
+		value = instant.UTC().Format(time.RFC3339Nano)
 	}
 
-	return start, end
-}
+	form.Set(field, value)
 
-// formatNano renders an instant as Loki's Unix-nanosecond integer string.
-func formatNano(instant time.Time) string {
-	return strconv.FormatInt(instant.UnixNano(), 10)
+	return nil
 }
 
 func formatStep(step time.Duration) string {

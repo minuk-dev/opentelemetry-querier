@@ -109,7 +109,7 @@ func (c *Connector) dispatchJoin(
 		return nil, err
 	}
 
-	table, err := joinTables(left.table, right.table, binary.GetMatching(), mode)
+	table, err := joinTables(ctx, left.table, right.table, binary.GetMatching(), mode)
 	if err != nil {
 		return nil, err
 	}

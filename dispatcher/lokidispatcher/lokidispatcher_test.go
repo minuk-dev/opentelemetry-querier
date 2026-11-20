@@ -4,13 +4,16 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/minuk-dev/opentelemetry-querier/dispatcher/lokidispatcher"
+	qdatav1 "github.com/minuk-dev/opentelemetry-querier/gen/qdata/v1"
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
 	"github.com/minuk-dev/opentelemetry-querier/qerror"
 )
@@ -388,4 +391,61 @@ func TestExpiredDeadline(t *testing.T) {
 	_, err := newDispatcher(server.URL).Dispatch(ctx, logQLQuery())
 	require.Error(t, err)
 	assert.Equal(t, qerror.CodeDeadlineExceeded, qerror.CodeOf(err))
+}
+
+func TestDispatchPreservesExplicitTimeBounds(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name       string
+		context    qdatav1.QueryContext
+		start, end *timestamppb.Timestamp
+		want       url.Values
+	}{
+		{name: "instant epoch", context: qdata.ContextInstant, start: nil,
+			end: timestamppb.New(time.Unix(0, 0)), want: url.Values{"time": {"0"}}},
+		{name: "fractional second", context: qdata.ContextInstant, start: nil,
+			end: timestamppb.New(time.Unix(0, int64(time.Millisecond))), want: url.Values{"time": {"1970-01-01T00:00:00.001Z"}}},
+		{name: "range across epoch", context: qdata.ContextRange, start: timestamppb.New(time.Unix(-1, 0)),
+			end: timestamppb.New(time.Unix(0, 0)), want: url.Values{"start": {"-1000000000"}, "end": {"0"}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			captured := make(chan url.Values, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				request.Body = http.MaxBytesReader(writer, request.Body, 1<<20)
+				_ = request.ParseForm()
+
+				captured <- request.Form
+
+				_, _ = writer.Write([]byte(`{"status":"success","data":{"resultType":"streams","result":[]}}`))
+			}))
+			t.Cleanup(server.Close)
+
+			query := logQLQuery()
+			query.Context = test.context
+			query.Range = &qdata.TimeRange{Start: test.start, End: test.end}
+
+			_, err := newDispatcher(server.URL).Dispatch(t.Context(), query)
+			require.NoError(t, err)
+
+			form := <-captured
+			for key, values := range test.want {
+				assert.Equal(t, values, form[key], key)
+			}
+		})
+	}
+}
+
+func TestDispatchRejectsOverflowingTimestamp(t *testing.T) {
+	t.Parallel()
+
+	query := logQLQuery()
+	query.Range = &qdata.TimeRange{End: timestamppb.New(time.Date(2300, 1, 1, 0, 0, 0, 0, time.UTC))}
+
+	result, err := newDispatcher("http://unused.invalid").Dispatch(t.Context(), query)
+	require.ErrorContains(t, err, "does not fit Unix nanoseconds")
+	assert.Equal(t, qerror.CodeInvalidArgument, qerror.CodeOf(err))
+	assert.Nil(t, result)
 }

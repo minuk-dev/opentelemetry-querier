@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -41,7 +42,11 @@ const (
 
 // readHeaderTimeout bounds how long the HTTP server waits for request headers
 // (mitigates Slowloris).
-const readHeaderTimeout = 10 * time.Second
+const (
+	readHeaderTimeout  = 10 * time.Second
+	readRequestTimeout = 20 * time.Second
+	maxRequestBytes    = 4 << 20
+)
 
 // Config configures the OTQP acceptor. An empty endpoint disables that transport.
 type Config struct {
@@ -106,17 +111,7 @@ func (a *Acceptor) Start(ctx context.Context, _ component.Host) error {
 	}
 
 	if a.cfg.HTTPEndpoint != "" {
-		mux := http.NewServeMux()
-		mux.HandleFunc(HTTPQueryPath, a.handleHTTPQuery)
-		mux.HandleFunc("/healthz", func(writer http.ResponseWriter, _ *http.Request) {
-			writer.WriteHeader(http.StatusOK)
-		})
-
-		a.httpServer = &http.Server{
-			Addr:              a.cfg.HTTPEndpoint,
-			Handler:           mux,
-			ReadHeaderTimeout: readHeaderTimeout,
-		}
+		a.httpServer = a.newHTTPServer()
 
 		listener, err := listenConfig.Listen(ctx, "tcp", a.cfg.HTTPEndpoint)
 		if err != nil {
@@ -142,6 +137,21 @@ func (a *Acceptor) Shutdown(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (a *Acceptor) newHTTPServer() *http.Server {
+	mux := http.NewServeMux()
+	mux.HandleFunc(HTTPQueryPath, a.handleHTTPQuery)
+	mux.HandleFunc("/healthz", func(writer http.ResponseWriter, _ *http.Request) {
+		writer.WriteHeader(http.StatusOK)
+	})
+
+	return &http.Server{
+		Addr:              a.cfg.HTTPEndpoint,
+		Handler:           mux,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readRequestTimeout,
+	}
 }
 
 // ---- gRPC transport ----
@@ -214,9 +224,11 @@ func (a *Acceptor) handleHTTPQuery(writer http.ResponseWriter, request *http.Req
 		return
 	}
 
+	request.Body = http.MaxBytesReader(writer, request.Body, maxRequestBytes)
+
 	body, err := io.ReadAll(request.Body)
 	if err != nil {
-		http.Error(writer, "read body: "+err.Error(), http.StatusBadRequest)
+		writeBodyReadError(writer, err)
 
 		return
 	}
@@ -250,6 +262,19 @@ func (a *Acceptor) handleHTTPQuery(writer http.ResponseWriter, request *http.Req
 	}
 
 	writeResponse(writer, useJSON, &otqpv1.QueryResponse{Result: result})
+}
+
+func writeBodyReadError(writer http.ResponseWriter, err error) {
+	var tooLarge *http.MaxBytesError
+
+	switch {
+	case errors.As(err, &tooLarge):
+		http.Error(writer, "request body too large", http.StatusRequestEntityTooLarge)
+	case errors.Is(err, os.ErrDeadlineExceeded):
+		http.Error(writer, "request body read timed out", http.StatusRequestTimeout)
+	default:
+		http.Error(writer, "read body: "+err.Error(), http.StatusBadRequest)
+	}
 }
 
 func writeResponse(writer http.ResponseWriter, useJSON bool, resp *otqpv1.QueryResponse) {
