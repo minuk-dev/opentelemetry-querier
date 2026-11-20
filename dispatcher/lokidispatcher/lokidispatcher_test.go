@@ -95,13 +95,22 @@ func TestDispatchMetrics(t *testing.T) {
 func TestDispatchRejectsUnsupportedResultType(t *testing.T) {
 	t.Parallel()
 
-	body := `{"status":"success","data":{"resultType":"scalar","result":[1700000000,"4"]}}`
-	server := newServer(t, http.StatusOK, body)
+	for _, test := range []struct{ resultType, payload string }{
+		{resultType: "scalar", payload: `[1700000000,"4"]`},
+		{resultType: "unknown", payload: `[]`},
+	} {
+		t.Run(test.resultType, func(t *testing.T) {
+			t.Parallel()
 
-	result, err := newDispatcher(server.URL).Dispatch(t.Context(), logQLQuery())
-	require.ErrorContains(t, err, "unsupported result type")
-	assert.Equal(t, qerror.CodeUnavailable, qerror.CodeOf(err))
-	assert.Nil(t, result)
+			body := `{"status":"success","data":{"resultType":"` + test.resultType + `","result":` + test.payload + `}}`
+			server := newServer(t, http.StatusOK, body)
+
+			result, err := newDispatcher(server.URL).Dispatch(t.Context(), logQLQuery())
+			require.ErrorContains(t, err, "unsupported result type")
+			assert.Equal(t, qerror.CodeUnavailable, qerror.CodeOf(err))
+			assert.Nil(t, result)
+		})
+	}
 }
 
 // captureQuery runs a request against a server that records the `query` form

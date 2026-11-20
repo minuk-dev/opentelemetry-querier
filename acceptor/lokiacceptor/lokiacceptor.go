@@ -324,8 +324,9 @@ type lokiTableData struct {
 // (Values holds [ts, value] sample pairs), or one vector series (Value holds a
 // single [ts, value] sample). Only one shape is used per response.
 type lokiEntry struct {
-	Stream map[string]string `json:"stream,omitempty"`
-	Metric map[string]string `json:"metric,omitempty"`
+	// A present label set must serialize as an object even when it is empty.
+	Stream map[string]string `json:"stream,omitzero"`
+	Metric map[string]string `json:"metric,omitzero"`
 	Value  []any             `json:"value,omitempty"`
 	Values [][]any           `json:"values,omitempty"`
 }
@@ -389,8 +390,8 @@ func recordLabels(record *qdata.LogRecord) map[string]string {
 	return labels
 }
 
-// labelKey builds a stable key from a label set so records with identical labels
-// collapse into one stream.
+// labelKey prefixes each sorted name and value with its byte length so embedded
+// delimiters cannot make distinct label sets share a key.
 func labelKey(labels map[string]string) string {
 	keys := make([]string, 0, len(labels))
 	for key := range labels {
@@ -400,11 +401,13 @@ func labelKey(labels map[string]string) string {
 	sort.Strings(keys)
 
 	var builder strings.Builder
+
 	for _, key := range keys {
-		builder.WriteString(key)
-		builder.WriteByte('=')
-		builder.WriteString(labels[key])
-		builder.WriteByte(',')
+		for _, part := range []string{key, labels[key]} {
+			builder.WriteString(strconv.Itoa(len(part)))
+			builder.WriteByte(':')
+			builder.WriteString(part)
+		}
 	}
 
 	return builder.String()

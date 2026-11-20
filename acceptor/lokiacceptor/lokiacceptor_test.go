@@ -185,6 +185,43 @@ func TestInstantQueryReturnsStreams(t *testing.T) {
 	}
 }
 
+func TestStreamsPreserveDistinctLabelSets(t *testing.T) {
+	t.Parallel()
+
+	result := logsResult()
+	escaped := `x,="\`
+	result.GetLogs().Records = []*qdata.LogRecord{
+		{End: timestamppb.New(time.Unix(1700000000, 1)), Body: qdata.Str("first"),
+			Attributes: qdata.NewAttrs("a", qdata.Str("x,b=y"))},
+		{End: timestamppb.New(time.Unix(1700000000, 2)), Body: qdata.Str("second"),
+			Attributes: qdata.NewAttrs("a", qdata.Str("x"), "b", qdata.Str("y"))},
+		{End: timestamppb.New(time.Unix(1700000000, 3)), Body: qdata.Str("third"),
+			Attributes: qdata.NewAttrs("b", qdata.Str("y"), "a", qdata.Str("x"))},
+		{End: timestamppb.New(time.Unix(1700000000, 4)), Body: qdata.Str("fourth"),
+			Attributes: qdata.NewAttrs("a", qdata.Str(""), "escape", qdata.Str(escaped))},
+		{End: timestamppb.New(time.Unix(1700000000, 5)), Body: qdata.Str("fifth")},
+	}
+	server := serve(t, stubHandler{result: result, err: nil})
+
+	status, body := get(t, server.URL+`/loki/api/v1/query?query={job="api"}`)
+	require.Equal(t, http.StatusOK, status)
+	assert.Equal(t, "streams", body.Data.ResultType)
+	streams := body.Data.Result
+	require.Len(t, streams, 4)
+	assert.Equal(t, map[string]string{"a": "x,b=y"}, streams[0].Stream)
+	assert.Equal(t, [][]any{{"1700000000000000001", "first"}}, streams[0].Values)
+	assert.Equal(t, map[string]string{"a": "x", "b": "y"}, streams[1].Stream)
+	assert.Equal(t, [][]any{{"1700000000000000002", "second"}, {"1700000000000000003", "third"}}, streams[1].Values)
+	assert.Equal(t, map[string]string{"a": "", "escape": escaped}, streams[2].Stream)
+	assert.Equal(t, [][]any{{"1700000000000000004", "fourth"}}, streams[2].Values)
+	assert.Equal(t, map[string]string{}, streams[3].Stream)
+	assert.Equal(t, [][]any{{"1700000000000000005", "fifth"}}, streams[3].Values)
+
+	for _, stream := range streams {
+		assert.Nil(t, stream.Metric)
+	}
+}
+
 func TestMetricsResultReturnsMatrix(t *testing.T) {
 	t.Parallel()
 
@@ -250,6 +287,43 @@ func TestInstantMetricQueryReturnsVector(t *testing.T) {
 
 	if len(body.Data.Result[0].Values) != 0 {
 		t.Fatalf("vector series must not carry a matrix 'values' array: %+v", body.Data.Result[0].Values)
+	}
+}
+
+func TestMetricResponsesKeepEmptyLabelSet(t *testing.T) {
+	t.Parallel()
+
+	result := metricsResult()
+	series := result.GetMetrics().GetSeries()[0]
+	series.Name = ""
+	series.Attributes = nil
+	server := serve(t, stubHandler{result: result, err: nil})
+
+	query := url.QueryEscape(`sum(rate({job="api"}[5m]))`)
+	sample := []any{float64(1700000000), "2"}
+
+	for _, test := range []struct {
+		name, path string
+		value      []any
+		values     [][]any
+	}{
+		{name: "vector", path: "/loki/api/v1/query?query=", value: sample, values: nil},
+		{name: "matrix", path: "/loki/api/v1/query_range?start=1700000000&end=1700000060&query=",
+			value: nil, values: [][]any{sample}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			status, body := get(t, server.URL+test.path+query)
+			require.Equal(t, http.StatusOK, status)
+			assert.Equal(t, test.name, body.Data.ResultType)
+			require.Len(t, body.Data.Result, 1)
+			entry := body.Data.Result[0]
+			assert.Equal(t, map[string]string{}, entry.Metric)
+			assert.Nil(t, entry.Stream)
+			assert.Equal(t, test.value, entry.Value)
+			assert.Equal(t, test.values, entry.Values)
+		})
 	}
 }
 
@@ -489,9 +563,9 @@ func TestEmptyResultsPreserveResultType(t *testing.T) {
 		name, path string
 		result     *qdata.Result
 	}{
-		{name: "vector", path: "/loki/api/v1/query?query=%7Bjob%3D%22api%22%7D", result: metrics},
+		{name: "vector", path: "/loki/api/v1/query?query=rate(%7Bjob%3D%22api%22%7D%5B5m%5D)", result: metrics},
 		{name: "matrix", result: metrics,
-			path: "/loki/api/v1/query_range?start=1700000000&end=1700000060&query=%7Bjob%3D%22api%22%7D"},
+			path: "/loki/api/v1/query_range?start=1700000000&end=1700000060&query=rate(%7Bjob%3D%22api%22%7D%5B5m%5D)"},
 		{name: "streams", path: "/loki/api/v1/query?query=%7Bjob%3D%22api%22%7D", result: logs},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -503,6 +577,8 @@ func TestEmptyResultsPreserveResultType(t *testing.T) {
 			if status != http.StatusOK || body.Data.ResultType != test.name || len(body.Data.Result) != 0 {
 				t.Fatalf("status %d, want empty %s, got %+v", status, test.name, body.Data)
 			}
+
+			assert.NotNil(t, body.Data.Result, "result must be a JSON array")
 		})
 	}
 }
