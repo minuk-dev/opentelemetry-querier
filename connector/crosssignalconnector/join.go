@@ -64,6 +64,15 @@ func warnIfTruncated(result *qdata.Result, metrics *qdata.Metrics) {
 
 func metricRows(metrics *qdata.Metrics) []*qdata.Row {
 	rows := make([]*qdata.Row, 0, len(metrics.GetSeries()))
+	columns := map[string]struct{}{}
+
+	for _, series := range metrics.GetSeries() {
+		for _, attr := range series.GetAttributes().GetValues() {
+			columns[attr.GetKey()] = struct{}{}
+		}
+	}
+
+	valueLabel := allocateAlias(columns, metricValueColumn, qdata.ShadowedLabelPrefix)
 
 	for _, series := range metrics.GetSeries() {
 		kvl := cloneAttrs(series.GetAttributes())
@@ -76,7 +85,7 @@ func metricRows(metrics *qdata.Metrics) []*qdata.Row {
 			}
 		}
 
-		putSample(kvl, latestValue(series))
+		putSample(kvl, latestValue(series), valueLabel)
 		rows = append(rows, &qdata.Row{Values: kvl})
 	}
 
@@ -87,10 +96,10 @@ func metricRows(metrics *qdata.Metrics) []*qdata.Row {
 // label literally named "value" would otherwise be clobbered, so it is moved to
 // a prefixed column first — both survive and the value column keeps a
 // stable name for downstream readers.
-func putSample(kvl *qdata.KeyValueList, sample *qdata.Value) {
+func putSample(kvl *qdata.KeyValueList, sample *qdata.Value, valueLabel string) {
 	if label, ok := qdata.AttrGet(kvl, metricValueColumn); ok {
 		qdata.AttrDelete(kvl, metricValueColumn)
-		qdata.AttrPut(kvl, qdata.ShadowedLabelPrefix+metricValueColumn, label)
+		qdata.AttrPut(kvl, valueLabel, label)
 	}
 
 	qdata.AttrPut(kvl, metricValueColumn, sample)
@@ -231,7 +240,8 @@ func resolveKeys(left, right *qdata.Table, matching *qdatav1.VectorMatch) ([]str
 func innerJoin(
 	ctx context.Context, left, right *qdata.Table, keys []string, index map[string][]*qdata.Row,
 ) (*qdata.Table, error) {
-	joined := &qdata.Table{Columns: mergedColumns(left, right, keys)}
+	columns, rightNames := joinedColumns(left.GetColumns(), right.GetColumns(), keys)
+	joined := &qdata.Table{Columns: columns}
 
 	for _, lrow := range left.GetRows() {
 		err := joinContextError(ctx)
@@ -255,7 +265,7 @@ func innerJoin(
 				return nil, err
 			}
 
-			joined.Rows = append(joined.Rows, mergeRow(lrow, rrow, left.GetColumns(), keys))
+			joined.Rows = append(joined.Rows, mergeRow(lrow, rrow, rightNames))
 		}
 	}
 
@@ -343,50 +353,58 @@ func indexRows(ctx context.Context, rows []*qdata.Row, keys []string) (map[strin
 	return index, joinContextError(ctx)
 }
 
-// mergeRow combines a matched left/right row pair: every left column, then every
-// right column that is neither a join key (already present from the left) nor a
-// name colliding with a left column (renamed with qdata.RightColumnPrefix).
-func mergeRow(left, right *qdata.Row, leftColumns, keys []string) *qdata.Row {
+func mergeRow(left, right *qdata.Row, rightNames map[string]string) *qdata.Row {
 	out := cloneAttrs(left.GetValues())
-	leftSet := toSet(leftColumns)
-	keySet := toSet(keys)
 
 	for _, entry := range right.GetValues().GetValues() {
-		if _, isKey := keySet[entry.GetKey()]; isKey {
-			continue
+		if name, keep := rightNames[entry.GetKey()]; keep {
+			qdata.AttrPut(out, name, entry.GetValue())
 		}
-
-		name := entry.GetKey()
-		if _, clash := leftSet[name]; clash {
-			name = qdata.RightColumnPrefix + name
-		}
-
-		qdata.AttrPut(out, name, entry.GetValue())
 	}
 
 	return &qdata.Row{Values: out}
 }
 
-// mergedColumns computes the joined schema with the same key-skip and collision-
-// rename rules as mergeRow, so columns and rows stay aligned.
-func mergedColumns(left, right *qdata.Table, keys []string) []string {
-	leftSet := toSet(left.GetColumns())
+// joinedColumns assigns each non-key right column a unique output name.
+// Reserve the original names first so generated aliases cannot displace them.
+func joinedColumns(left, right, keys []string) ([]string, map[string]string) {
+	leftSet := toSet(left)
 	keySet := toSet(keys)
-	out := slices.Clone(left.GetColumns())
 
-	for _, column := range right.GetColumns() {
+	taken := toSet(left)
+	for _, column := range right {
+		taken[column] = struct{}{}
+	}
+
+	out := slices.Clone(left)
+
+	rightNames := make(map[string]string, len(right))
+	for _, column := range right {
 		if _, isKey := keySet[column]; isKey {
 			continue
 		}
 
+		name := column
 		if _, clash := leftSet[column]; clash {
-			column = qdata.RightColumnPrefix + column
+			name = allocateAlias(taken, column, qdata.RightColumnPrefix)
 		}
 
-		out = append(out, column)
+		rightNames[column] = name
+		out = append(out, name)
 	}
 
-	return out
+	return out, rightNames
+}
+
+func allocateAlias(taken map[string]struct{}, name, prefix string) string {
+	for {
+		name = prefix + name
+		if _, used := taken[name]; !used {
+			taken[name] = struct{}{}
+
+			return name
+		}
+	}
 }
 
 // sharedColumns is the sorted intersection of two tables' columns.
