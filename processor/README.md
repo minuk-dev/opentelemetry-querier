@@ -38,3 +38,12 @@ configured `SecurityRequirements`. Query rewrite consumes pending
 `EnforcedMatchers`/`EnforcedPredicates` after composing them into the plan; the
 pipeline rejects any pending constraints left before dispatch, including ones
 registered by custom processors without dependency declarations.
+
+## Dispatch processors
+
+A processor can implement `DispatchProcessor` to supply a result after every
+`ProcessQuery` hook runs. Its `next` callback dispatches and runs the response
+hooks after the processor. Its `respond` callback runs the response hooks
+before the processor in the context of the caller. Both response segments run
+in reverse order. The [cache processor](./cacheprocessor) uses this boundary
+to store a result at a configurable position.

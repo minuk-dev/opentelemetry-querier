@@ -429,6 +429,9 @@ func DeleteMetadata(q *Query, key string) {
 // rather than a query-language field, so it lives here instead of on Query.
 const MetadataTenantID = "tenant.id"
 
+// MetadataImplicitEvaluationTime marks a timestamp defaulted by an acceptor.
+const MetadataImplicitEvaluationTime = "query.implicit_evaluation_time"
+
 // TenantID returns the resolved tenant id, or the empty string when unresolved.
 func TenantID(q *Query) string { return Metadata(q, MetadataTenantID) }
 

@@ -34,6 +34,21 @@ type Processor interface {
 	ProcessResult(ctx context.Context, q *qdata.Query, r *qdata.Result) error
 }
 
+// DispatchFunc runs the remainder of the dispatch and response chain.
+type DispatchFunc func(context.Context, *qdata.Query) (*qdata.Result, error)
+
+// RespondFunc runs the response chain before a dispatch processor.
+type RespondFunc func(*qdata.Result) (*qdata.Result, error)
+
+// DispatchProcessor can supply a result after all ProcessQuery hooks have run.
+// It calls next on a miss and respond for each successful caller. The pipeline
+// assigns response hooks by position. Hooks after the processor belong to next,
+// and hooks before it belong to respond.
+type DispatchProcessor interface {
+	Processor
+	ProcessDispatch(ctx context.Context, q *qdata.Query, next DispatchFunc, respond RespondFunc) (*qdata.Result, error)
+}
+
 // Base provides no-op implementations of every Processor method so a concrete
 // processor can embed it and override only what it needs.
 type Base struct{}

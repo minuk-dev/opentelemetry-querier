@@ -180,8 +180,9 @@ func parseInstant(request *http.Request) (*qdata.Query, error) {
 
 	evalAt := time.Now()
 
-	if raw := request.Form.Get("time"); raw != "" {
-		evalAt, err = parseTime(raw)
+	rawTime := request.Form.Get("time")
+	if rawTime != "" {
+		evalAt, err = parseTime(rawTime)
 		if err != nil {
 			return nil, err
 		}
@@ -201,6 +202,10 @@ func parseInstant(request *http.Request) (*qdata.Query, error) {
 	}
 
 	acceptor.PrepareIngress(query, request.Header)
+
+	if rawTime == "" {
+		qdata.SetMetadata(query, qdata.MetadataImplicitEvaluationTime, "true")
+	}
 
 	return query, nil
 }

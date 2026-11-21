@@ -19,6 +19,7 @@ use (
 	./pipeline
 	./processor
 	./processor/authratelimitprocessor
+	./processor/cacheprocessor
 	./processor/queryrewriteprocessor
 	./processor/responsefilterprocessor
 	./processor/simpleauthzprocessor

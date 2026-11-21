@@ -28,8 +28,9 @@ var (
 	errUnknownAcceptor = errors.New("querier: unknown acceptor type")
 	// errConnectorTargetNotLeaf is returned when a connector's target pipeline is
 	// itself connector-terminated (nested connectors are unsupported).
-	errConnectorTargetNotLeaf   = errors.New("querier: connector target must be a leaf pipeline")
-	errDuplicateConnectorTarget = errors.New("querier: connector has multiple targets for one signal")
+	errConnectorTargetNotLeaf     = errors.New("querier: connector target must be a leaf pipeline")
+	errConnectorDispatchProcessor = errors.New("querier: dispatch processors belong on connector target pipelines")
+	errDuplicateConnectorTarget   = errors.New("querier: connector has multiple targets for one signal")
 )
 
 // Service is a fully assembled, runnable querier: a set of pipelines and the
@@ -221,6 +222,12 @@ func (svc *Service) buildConnectorPipelines(
 		procs, err := svc.buildProcessors(factories, cfg, name, pipelineCfg.Processors)
 		if err != nil {
 			return err
+		}
+
+		for _, proc := range procs {
+			if _, ok := proc.(processor.DispatchProcessor); ok {
+				return fmt.Errorf("%w: %q", errConnectorDispatchProcessor, name)
+			}
 		}
 
 		conn, err := svc.buildConnector(factories, cfg, connID, targets[connID])
