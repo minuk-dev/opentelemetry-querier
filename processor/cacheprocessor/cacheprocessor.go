@@ -263,7 +263,11 @@ func (c *Processor) acquire(
 	flight := &cacheFlight{done: make(chan struct{}), cancel: cancel, waiters: 1, result: nil, err: nil, entry: nil}
 	c.flights[key] = flight
 
-	go c.dispatch(dispatchCtx, key, flight, next, query)
+	go func() {
+		defer cancel()
+
+		c.dispatch(dispatchCtx, key, flight, next, query)
+	}()
 
 	return nil, flight
 }
@@ -271,8 +275,6 @@ func (c *Processor) acquire(
 func (c *Processor) dispatch(
 	ctx context.Context, key cacheKey, flight *cacheFlight, next processor.DispatchFunc, query *qdata.Query,
 ) {
-	defer flight.cancel()
-
 	flight.result, flight.err = next(ctx, query)
 	if flight.err != nil {
 		c.mu.Lock()
