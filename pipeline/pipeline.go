@@ -35,12 +35,11 @@ type Pipeline struct {
 	Name       string
 	Processors []processor.Processor
 	Dispatcher dispatcher.Dispatcher
-	cache      *queryCache
 }
 
 // New builds a pipeline.
 func New(name string, processors []processor.Processor, disp dispatcher.Dispatcher) *Pipeline {
-	return &Pipeline{Name: name, Processors: processors, Dispatcher: disp, cache: nil}
+	return &Pipeline{Name: name, Processors: processors, Dispatcher: disp}
 }
 
 // Handle validates the client's plan, runs the request path (processors in
@@ -58,11 +57,7 @@ func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (*qdata.Resul
 		return nil, err
 	}
 
-	if p.cache != nil && cacheEligible(query) {
-		return p.handleCached(ctx, query)
-	}
-
-	return p.dispatch(ctx, query)
+	return p.execute(ctx, query, p.Processors)
 }
 
 // Start starts the processor chain and the dispatcher (acceptors are started
@@ -103,24 +98,48 @@ func (p *Pipeline) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func (p *Pipeline) dispatch(ctx context.Context, query *qdata.Query) (*qdata.Result, error) {
+// execute builds the response chain around each dispatch processor's position.
+func (p *Pipeline) execute(
+	ctx context.Context, query *qdata.Query, processors []processor.Processor,
+) (*qdata.Result, error) {
+	for index, proc := range processors {
+		middleware, ok := proc.(processor.DispatchProcessor)
+		if !ok {
+			continue
+		}
+
+		next := func(ctx context.Context, query *qdata.Query) (*qdata.Result, error) {
+			return p.execute(ctx, query, processors[index+1:])
+		}
+		respond := func(result *qdata.Result) (*qdata.Result, error) {
+			return p.processResult(ctx, query, result, processors[:index])
+		}
+
+		result, err := middleware.ProcessDispatch(ctx, query, next, respond)
+		if err != nil {
+			return nil, fmt.Errorf("pipeline %q: %w", p.Name, err)
+		}
+
+		return result, nil
+	}
+
 	result, err := p.Dispatcher.Dispatch(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("pipeline %q: %w", p.Name, err)
 	}
 
-	return p.processResult(ctx, query, result)
-}
-
-func (p *Pipeline) processResult(ctx context.Context, query *qdata.Query, result *qdata.Result) (*qdata.Result, error) {
-	// Backfill the single-signal convenience field from the query when a
-	// single-signal dispatcher left it unset. A relational Table (cross-signal)
-	// result is legitimately signal-unspecified, so it is left untouched.
+	// Backfill once, before any response processor sees the dispatch result.
 	if result.GetSignal() == qdata.SignalUnspecified && result.GetTable() == nil {
 		result.Signal = query.GetSignal()
 	}
 
-	for _, proc := range slices.Backward(p.Processors) {
+	return p.processResult(ctx, query, result, processors)
+}
+
+func (p *Pipeline) processResult(
+	ctx context.Context, query *qdata.Query, result *qdata.Result, processors []processor.Processor,
+) (*qdata.Result, error) {
+	for _, proc := range slices.Backward(processors) {
 		err := proc.ProcessResult(ctx, query, result)
 		if err != nil {
 			return nil, fmt.Errorf("pipeline %q: %w", p.Name, err)

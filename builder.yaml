@@ -20,6 +20,7 @@ acceptors:
   - gomod: github.com/minuk-dev/opentelemetry-querier/acceptor/elasticsearchacceptor
 
 processors:
+  - gomod: github.com/minuk-dev/opentelemetry-querier/processor/cacheprocessor
   - gomod: github.com/minuk-dev/opentelemetry-querier/processor/authratelimitprocessor
   - gomod: github.com/minuk-dev/opentelemetry-querier/processor/tenantprocessor
   - gomod: github.com/minuk-dev/opentelemetry-querier/processor/queryrewriteprocessor

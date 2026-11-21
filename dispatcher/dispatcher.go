@@ -26,14 +26,6 @@ type Dispatcher interface {
 	Dispatch(ctx context.Context, q *qdata.Query) (*qdata.Result, error)
 }
 
-// CacheableDispatcher opts in to query caching. For a fixed dispatcher instance,
-// a cacheable result depends only on the rewritten query and its metadata.
-// Request headers and context values cannot affect the result or authorization.
-type CacheableDispatcher interface {
-	Dispatcher
-	SupportsQueryCache() bool
-}
-
 // Base provides no-op lifecycle methods for dispatchers that need no setup.
 type Base struct{}
 

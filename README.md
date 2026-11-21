@@ -34,6 +34,7 @@ following the CNCF Observability TAG QLSWG draft. The default acceptor speaks
 | --- | --- | --- |
 | Acceptor | [`otqp`](./acceptor/otqpacceptor) | OTQP over gRPC + HTTP (default). |
 | Acceptor | [`prometheus`](./acceptor/prometheusacceptor) | Prometheus HTTP query API ingress. |
+| Processor | [`cache`](./processor/cacheprocessor) | TTL-bounded result caching and coalescing at a configurable pipeline position. |
 | Processor | [`authratelimit`](./processor/authratelimitprocessor) | Bearer auth + per-tenant rate limiting. |
 | Processor | [`tenant`](./processor/tenantprocessor) | Tenant resolution + series isolation. |
 | Processor | [`simpleauthz`](./processor/simpleauthzprocessor) | Per-subject authorization and query scoping. |

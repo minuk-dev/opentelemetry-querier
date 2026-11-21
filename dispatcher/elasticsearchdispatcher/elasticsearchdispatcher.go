@@ -97,9 +97,6 @@ func New(cfg Config) *Dispatcher {
 	}
 }
 
-// SupportsQueryCache reports that dispatch uses the query and backend configuration.
-func (*Dispatcher) SupportsQueryCache() bool { return true }
-
 // Dispatch executes the query and returns a logs result.
 func (d *Dispatcher) Dispatch(ctx context.Context, query *qdata.Query) (*qdata.Result, error) {
 	body, err := d.buildBody(query)

@@ -2,13 +2,10 @@ package querier_test
 
 import (
 	"context"
-	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/minuk-dev/opentelemetry-querier/acceptor"
 	"github.com/minuk-dev/opentelemetry-querier/component"
@@ -71,7 +68,7 @@ func recordingConnFactory(captured *map[qdata.Signal]pipeline.Handler) connector
 
 // pipe builds a PipelineConfig terminated by terminal, fed by acceptors.
 func pipe(terminal string, acceptors ...string) querier.PipelineConfig {
-	return querier.PipelineConfig{Acceptors: acceptors, Processors: nil, Dispatchers: []string{terminal}, Cache: nil}
+	return querier.PipelineConfig{Acceptors: acceptors, Processors: nil, Dispatchers: []string{terminal}}
 }
 
 func buildInfo() component.BuildInfo { return component.BuildInfo{Command: "test", Version: "test"} }
@@ -213,73 +210,4 @@ func TestBuildRejectsDuplicateConnectorTargets(t *testing.T) {
 	require.ErrorContains(t, err, "crosssignal/a")
 	require.ErrorContains(t, err, "metrics/a")
 	require.ErrorContains(t, err, "metrics/b")
-}
-
-type cacheProbe struct {
-	dispatcher.Base
-
-	calls *atomic.Int32
-}
-
-func (cacheProbe) SupportsQueryCache() bool { return true }
-
-func (d cacheProbe) Dispatch(_ context.Context, _ *qdata.Query) (*qdata.Result, error) {
-	d.calls.Add(1)
-
-	return new(qdata.Result), nil
-}
-
-func TestBuildWiresConfiguredQueryCache(t *testing.T) {
-	t.Parallel()
-
-	cfg, err := querier.LoadConfig(writeConfig(t, pipelineConfig("metrics")+
-		"      cache:\n        ttl: 1m\n        max_bytes: 4096\n"))
-	require.NoError(t, err)
-	require.Equal(t, &pipeline.CacheConfig{TTL: time.Minute, MaxBytes: 4096}, cfg.Service.Pipelines["metrics"].Cache)
-
-	var (
-		handler pipeline.Handler
-		calls   atomic.Int32
-	)
-
-	acceptors, err := acceptor.MakeFactoryMap(
-		acceptor.NewFactory(component.MustNewType("otqp"), emptyDefault,
-			func(_ context.Context, _ component.Settings, _ component.Config, next pipeline.Handler) (acceptor.Acceptor, error) {
-				handler = next
-
-				return fakeAcceptor{}, nil
-			}))
-	require.NoError(t, err)
-
-	dispatchers, err := dispatcher.MakeFactoryMap(
-		dispatcher.NewFactory(component.MustNewType("prometheus"), emptyDefault,
-			func(context.Context, component.Settings, component.Config) (dispatcher.Dispatcher, error) {
-				return cacheProbe{Base: dispatcher.Base{}, calls: &calls}, nil
-			}))
-	require.NoError(t, err)
-
-	factories := querier.Factories{Acceptors: acceptors, Processors: nil, Dispatchers: dispatchers, Connectors: nil}
-
-	cfg.Acceptors = map[string]map[string]any{"otqp": {}}
-	cfg.Dispatchers = map[string]map[string]any{"prometheus": {}}
-
-	_, err = querier.Build(factories, cfg, buildInfo())
-	require.NoError(t, err)
-	require.NotNil(t, handler)
-
-	for range 2 {
-		window := new(qdata.TimeRange)
-		window.End = timestamppb.New(time.Unix(20, 0))
-
-		query := new(qdata.Query)
-		query.Plan = qdata.Plan(qdata.SelectNode(qdata.SignalMetrics, nil))
-		query.Range = window
-
-		qdata.SetTenantID(query, "trusted")
-
-		_, err = handler.Handle(t.Context(), query)
-		require.NoError(t, err)
-	}
-
-	assert.EqualValues(t, 1, calls.Load())
 }

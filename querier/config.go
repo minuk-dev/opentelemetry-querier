@@ -10,7 +10,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/minuk-dev/opentelemetry-querier/component"
-	"github.com/minuk-dev/opentelemetry-querier/pipeline"
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
 )
 
@@ -52,10 +51,9 @@ type ServiceConfig struct {
 
 // PipelineConfig references component instances by ID, defining processor order.
 type PipelineConfig struct {
-	Acceptors   []string              `mapstructure:"acceptors"`
-	Processors  []string              `mapstructure:"processors"`
-	Dispatchers []string              `mapstructure:"dispatchers"`
-	Cache       *pipeline.CacheConfig `mapstructure:"cache"`
+	Acceptors   []string `mapstructure:"acceptors"`
+	Processors  []string `mapstructure:"processors"`
+	Dispatchers []string `mapstructure:"dispatchers"`
 }
 
 // LoadConfig reads a YAML config file and structurally decodes it.

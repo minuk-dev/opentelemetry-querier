@@ -19,8 +19,16 @@ import (
 	"github.com/minuk-dev/opentelemetry-querier/dispatcher"
 	"github.com/minuk-dev/opentelemetry-querier/pipeline"
 	"github.com/minuk-dev/opentelemetry-querier/processor"
+	"github.com/minuk-dev/opentelemetry-querier/processor/cacheprocessor"
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
 	"github.com/minuk-dev/opentelemetry-querier/qerror"
+)
+
+const (
+	cacheFullView   = "full"
+	cacheTenantA    = "team-a"
+	cacheAuthHeader = "Authorization"
+	cacheToken      = "token-1"
 )
 
 type cacheDispatcher struct {
@@ -28,8 +36,6 @@ type cacheDispatcher struct {
 
 	handle pipeline.HandlerFunc
 }
-
-func (cacheDispatcher) SupportsQueryCache() bool { return true }
 
 func (d cacheDispatcher) Dispatch(ctx context.Context, query *qdata.Query) (*qdata.Result, error) {
 	result, err := d.handle(ctx, query)
@@ -87,12 +93,21 @@ func cacheQuery() *qdata.Query {
 	return query
 }
 
+func newCache(t *testing.T, maxBytes int, key string) *cacheprocessor.Processor {
+	t.Helper()
+
+	cache, err := cacheprocessor.New(cacheprocessor.Config{TTL: time.Minute, MaxBytes: maxBytes, Key: key})
+	require.NoError(t, err)
+
+	return cache
+}
+
 func TestCacheRunsPolicyAndResponseProcessorsOnHits(t *testing.T) {
 	t.Parallel()
 
 	var calls atomic.Int32
 
-	policy := &cachePolicy{Base: processor.Base{}, deny: false, fail: false, scope: "full", mask: "original"}
+	policy := &cachePolicy{Base: processor.Base{}, deny: false, fail: false, scope: cacheFullView, mask: "original"}
 	dispatch := func(_ context.Context, query *qdata.Query) (*qdata.Result, error) {
 		calls.Add(1)
 
@@ -102,14 +117,13 @@ func TestCacheRunsPolicyAndResponseProcessorsOnHits(t *testing.T) {
 		return result, nil
 	}
 	disp := cacheDispatcher{Base: dispatcher.Base{}, handle: dispatch}
-	pipe := pipeline.New("metrics", []processor.Processor{policy}, disp)
-	require.NoError(t, pipe.EnableCache(pipeline.CacheConfig{TTL: time.Minute, MaxBytes: 4096}))
+	pipe := pipeline.New("metrics", []processor.Processor{policy, newCache(t, 4096, "")}, disp)
 
 	first, err := pipe.Handle(t.Context(), cacheQuery())
 	require.NoError(t, err)
 	assert.Equal(t, qdata.SignalMetrics, first.GetSignal())
 	require.Len(t, first.GetFeedback().GetNotifications(), 2)
-	assert.Equal(t, "full", first.GetFeedback().GetNotifications()[0].GetMessage())
+	assert.Equal(t, cacheFullView, first.GetFeedback().GetNotifications()[0].GetMessage())
 	assert.Equal(t, "original", first.GetFeedback().GetNotifications()[1].GetMessage())
 
 	hit, err := pipe.Handle(t.Context(), cacheQuery())
@@ -122,7 +136,7 @@ func TestCacheRunsPolicyAndResponseProcessorsOnHits(t *testing.T) {
 	hit, err = pipe.Handle(t.Context(), cacheQuery())
 	require.NoError(t, err)
 	require.Len(t, hit.GetFeedback().GetNotifications(), 2)
-	assert.Equal(t, "full", hit.GetFeedback().GetNotifications()[0].GetMessage())
+	assert.Equal(t, cacheFullView, hit.GetFeedback().GetNotifications()[0].GetMessage())
 	assert.Equal(t, "stricter", hit.GetFeedback().GetNotifications()[1].GetMessage())
 	assert.EqualValues(t, 1, calls.Load())
 
@@ -148,9 +162,10 @@ func TestCacheKeyDistinguishesEffectiveQueries(t *testing.T) {
 		change func(*qdata.Query)
 		want   int32
 	}{
-		{name: "equivalent plan and transport-only headers", change: func(query *qdata.Query) {
+		{name: "equivalent plan", change: func(*qdata.Query) {}, want: 1},
+		{name: "transport header", change: func(query *qdata.Query) {
 			query.Header = map[string]*qdata.HeaderValues{"User-Agent": {Values: []string{"different"}}}
-		}, want: 1},
+		}, want: 2},
 		{name: "tenant", change: func(query *qdata.Query) { qdata.SetTenantID(query, "other") }, want: 2},
 		{name: "authorization metadata", change: func(query *qdata.Query) {
 			qdata.SetMetadata(query, "authz.subject", "another-principal")
@@ -173,8 +188,7 @@ func TestCacheKeyDistinguishesEffectiveQueries(t *testing.T) {
 
 				return new(qdata.Result), nil
 			}}
-			pipe := pipeline.New("one", nil, disp)
-			require.NoError(t, pipe.EnableCache(pipeline.CacheConfig{TTL: time.Minute, MaxBytes: 4096}))
+			pipe := pipeline.New("one", []processor.Processor{newCache(t, 4096, "")}, disp)
 
 			_, err := pipe.Handle(t.Context(), cacheQuery())
 			require.NoError(t, err)
@@ -185,8 +199,7 @@ func TestCacheKeyDistinguishesEffectiveQueries(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, testCase.want, calls.Load())
 
-			other := pipeline.New("two", nil, disp)
-			require.NoError(t, other.EnableCache(pipeline.CacheConfig{TTL: time.Minute, MaxBytes: 4096}))
+			other := pipeline.New("two", []processor.Processor{newCache(t, 4096, "")}, disp)
 			_, err = other.Handle(t.Context(), cacheQuery())
 			require.NoError(t, err)
 			assert.Equal(t, testCase.want+1, calls.Load(), "different pipeline has its own cache")
@@ -205,8 +218,11 @@ func TestCacheExpiryEvictionAndUnpinnedQueries(t *testing.T) {
 
 			return new(qdata.Result), nil
 		}}
-		pipe := pipeline.New("metrics", nil, disp)
-		require.NoError(t, pipe.EnableCache(pipeline.CacheConfig{TTL: time.Minute, MaxBytes: sha256.Size}))
+		encodedResult := new(qdata.Result)
+		encodedResult.Signal = qdata.SignalMetrics
+
+		cache := newCache(t, sha256.Size+proto.Size(encodedResult), "")
+		pipe := pipeline.New("metrics", []processor.Processor{cache}, disp)
 
 		handle := func(query *qdata.Query) {
 			t.Helper()
@@ -254,14 +270,13 @@ func TestCacheDoesNotStoreFailedResponses(t *testing.T) {
 
 	var calls atomic.Int32
 
-	policy := &cachePolicy{Base: processor.Base{}, deny: false, fail: true, scope: "full", mask: ""}
+	policy := &cachePolicy{Base: processor.Base{}, deny: false, fail: true, scope: cacheFullView, mask: ""}
 	disp := cacheDispatcher{Base: dispatcher.Base{}, handle: func(context.Context, *qdata.Query) (*qdata.Result, error) {
 		calls.Add(1)
 
 		return new(qdata.Result), nil
 	}}
-	pipe := pipeline.New("metrics", []processor.Processor{policy}, disp)
-	require.NoError(t, pipe.EnableCache(pipeline.CacheConfig{TTL: time.Minute, MaxBytes: 4096}))
+	pipe := pipeline.New("metrics", []processor.Processor{policy, newCache(t, 4096, "")}, disp)
 
 	_, err := pipe.Handle(t.Context(), cacheQuery())
 	require.Error(t, err)
@@ -297,8 +312,7 @@ func TestCacheSkipsOversizedAndPartialResults(t *testing.T) {
 
 				return raw, nil
 			}}
-			pipe := pipeline.New("metrics", nil, disp)
-			require.NoError(t, pipe.EnableCache(pipeline.CacheConfig{TTL: time.Minute, MaxBytes: testCase.capacity}))
+			pipe := pipeline.New("metrics", []processor.Processor{newCache(t, testCase.capacity, "")}, disp)
 
 			for range 2 {
 				_, err := pipe.Handle(t.Context(), cacheQuery())
@@ -339,8 +353,7 @@ func TestCacheCoalescesWithoutInheritingFirstDeadline(t *testing.T) {
 			}
 		}
 		disp := cacheDispatcher{Base: dispatcher.Base{}, handle: dispatch}
-		pipe := pipeline.New("metrics", nil, disp)
-		require.NoError(t, pipe.EnableCache(pipeline.CacheConfig{TTL: time.Minute, MaxBytes: 4096}))
+		pipe := pipeline.New("metrics", []processor.Processor{newCache(t, 4096, "")}, disp)
 
 		firstCtx, cancel := context.WithTimeout(t.Context(), time.Second)
 		defer cancel()
@@ -389,8 +402,7 @@ func TestCacheCancelsDispatchWhenLastWaiterLeaves(t *testing.T) {
 			return new(qdata.Result), nil
 		}
 		disp := cacheDispatcher{Base: dispatcher.Base{}, handle: dispatch}
-		pipe := pipeline.New("metrics", nil, disp)
-		require.NoError(t, pipe.EnableCache(pipeline.CacheConfig{TTL: time.Minute, MaxBytes: 4096}))
+		pipe := pipeline.New("metrics", []processor.Processor{newCache(t, 4096, "")}, disp)
 
 		ctx, cancel := context.WithCancel(t.Context())
 		first := startCachedRequest(ctx, pipe, cacheQuery())
@@ -426,8 +438,7 @@ func TestCacheClearsFailedSharedDispatches(t *testing.T) {
 
 			return new(qdata.Result), nil
 		}}
-		pipe := pipeline.New("metrics", nil, disp)
-		require.NoError(t, pipe.EnableCache(pipeline.CacheConfig{TTL: time.Minute, MaxBytes: 4096}))
+		pipe := pipeline.New("metrics", []processor.Processor{newCache(t, 4096, "")}, disp)
 
 		first := startCachedRequest(t.Context(), pipe, cacheQuery())
 		second := startCachedRequest(t.Context(), pipe, cacheQuery())
@@ -447,4 +458,117 @@ func TestCacheClearsFailedSharedDispatches(t *testing.T) {
 		require.NoError(t, err)
 		assert.EqualValues(t, 2, calls.Load())
 	})
+}
+
+func TestCachePositionKeepsDownstreamRequestChecks(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+
+	disp := cacheDispatcher{Base: dispatcher.Base{}, handle: func(context.Context, *qdata.Query) (*qdata.Result, error) {
+		calls.Add(1)
+
+		return new(qdata.Result), nil
+	}}
+	before := &cachePolicy{Base: processor.Base{}, deny: false, fail: false, scope: "outer", mask: "before"}
+	after := &cachePolicy{Base: processor.Base{}, deny: false, fail: false, scope: "inner", mask: "after"}
+	cache := newCache(t, 4096, "fixed")
+	pipe := pipeline.New("metrics", []processor.Processor{before, cache, after}, disp)
+
+	first, err := pipe.Handle(t.Context(), cacheQuery())
+	require.NoError(t, err)
+	require.Len(t, first.GetFeedback().GetNotifications(), 2)
+	assert.Equal(t, "after", first.GetFeedback().GetNotifications()[0].GetMessage())
+	assert.Equal(t, "before", first.GetFeedback().GetNotifications()[1].GetMessage())
+
+	before.mask = "before again"
+	after.mask = "after only on misses"
+	second, err := pipe.Handle(t.Context(), cacheQuery())
+	require.NoError(t, err)
+	require.Len(t, second.GetFeedback().GetNotifications(), 2)
+	assert.Equal(t, "after", second.GetFeedback().GetNotifications()[0].GetMessage())
+	assert.Equal(t, "before again", second.GetFeedback().GetNotifications()[1].GetMessage())
+	assert.EqualValues(t, 1, calls.Load())
+
+	after.deny = true
+	_, err = pipe.Handle(t.Context(), cacheQuery())
+	require.Error(t, err)
+	assert.Equal(t, qerror.CodePermissionDenied, qerror.CodeOf(err))
+	assert.EqualValues(t, 1, calls.Load())
+
+	after.deny = false
+	after.scope = "new scope"
+	third, err := pipe.Handle(t.Context(), cacheQuery())
+	require.NoError(t, err)
+	require.NotEmpty(t, third.GetFeedback().GetNotifications())
+	assert.Equal(t, "after only on misses", third.GetFeedback().GetNotifications()[0].GetMessage())
+	assert.EqualValues(t, 2, calls.Load())
+}
+
+func TestCacheCustomKeySelectsVariantsWithoutAliasingTenantOrCredentials(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+
+	dispatch := func(_ context.Context, query *qdata.Query) (*qdata.Result, error) {
+		calls.Add(1)
+
+		result := new(qdata.Result)
+		qdata.Warn(result, "variant", query.GetHeader()["X-View"].GetValues()[0], "test")
+
+		return result, nil
+	}
+	disp := cacheDispatcher{Base: dispatcher.Base{}, handle: dispatch}
+	cache := newCache(t, 4096, `{{ index (index .Header "X-View").Values 0 }}`)
+	pipe := pipeline.New("metrics", []processor.Processor{cache}, disp)
+
+	for _, step := range []struct {
+		view, agent, tenant, credential string
+		calls                           int32
+	}{
+		{view: "small", agent: "a", tenant: cacheTenantA, credential: cacheToken, calls: 1},
+		{view: "small", agent: "b", tenant: cacheTenantA, credential: cacheToken, calls: 1},
+		{view: cacheFullView, agent: "b", tenant: cacheTenantA, credential: cacheToken, calls: 2},
+		{view: cacheFullView, agent: "b", tenant: "team-b", credential: cacheToken, calls: 3},
+		{view: cacheFullView, agent: "b", tenant: "team-b", credential: "token-2", calls: 4},
+	} {
+		query := cacheQuery()
+		qdata.SetTenantID(query, step.tenant)
+
+		query.Header = map[string]*qdata.HeaderValues{
+			"X-View":        {Values: []string{step.view}},
+			"User-Agent":    {Values: []string{step.agent}},
+			cacheAuthHeader: {Values: []string{step.credential}},
+		}
+
+		result, err := pipe.Handle(t.Context(), query)
+		require.NoError(t, err)
+		require.NotEmpty(t, result.GetFeedback().GetNotifications())
+		assert.Equal(t, step.view, result.GetFeedback().GetNotifications()[0].GetMessage())
+		assert.Equal(t, step.calls, calls.Load())
+	}
+}
+
+func TestCacheInvalidKeyTemplateAndExecutionFallback(t *testing.T) {
+	t.Parallel()
+
+	_, err := cacheprocessor.New(cacheprocessor.Config{TTL: time.Minute, MaxBytes: 4096, Key: "{{"})
+	require.ErrorContains(t, err, "parse cache key")
+
+	var calls atomic.Int32
+
+	disp := cacheDispatcher{Base: dispatcher.Base{}, handle: func(context.Context, *qdata.Query) (*qdata.Result, error) {
+		calls.Add(1)
+
+		return new(qdata.Result), nil
+	}}
+	cache := newCache(t, 4096, `{{ .Metadata.missing }}`)
+	pipe := pipeline.New("metrics", []processor.Processor{cache}, disp)
+
+	for range 2 {
+		_, err := pipe.Handle(t.Context(), cacheQuery())
+		require.NoError(t, err)
+	}
+
+	assert.EqualValues(t, 2, calls.Load())
 }
