@@ -16,6 +16,7 @@ import (
 	prometheusdispatcher "github.com/minuk-dev/opentelemetry-querier/dispatcher/prometheusdispatcher"
 	"github.com/minuk-dev/opentelemetry-querier/processor"
 	authratelimitprocessor "github.com/minuk-dev/opentelemetry-querier/processor/authratelimitprocessor"
+	cacheprocessor "github.com/minuk-dev/opentelemetry-querier/processor/cacheprocessor"
 	queryrewriteprocessor "github.com/minuk-dev/opentelemetry-querier/processor/queryrewriteprocessor"
 	responsefilterprocessor "github.com/minuk-dev/opentelemetry-querier/processor/responsefilterprocessor"
 	simpleauthzprocessor "github.com/minuk-dev/opentelemetry-querier/processor/simpleauthzprocessor"
@@ -38,6 +39,7 @@ func components() (querier.Factories, error) {
 	}
 
 	if factories.Processors, err = processor.MakeFactoryMap(
+		cacheprocessor.NewFactory(),
 		authratelimitprocessor.NewFactory(),
 		tenantprocessor.NewFactory(),
 		queryrewriteprocessor.NewFactory(),

@@ -30,3 +30,6 @@ function name rendered as `(...)`.
 
 A query carrying no plan at all is left to the dispatcher, which fails closed on
 it with its own message.
+
+A [dispatch processor](../processor#dispatch-processors) can supply the result
+at its configured position in the response chain.

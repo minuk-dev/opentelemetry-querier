@@ -15,6 +15,7 @@ require (
 	github.com/minuk-dev/opentelemetry-querier/dispatcher/prometheusdispatcher v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/processor v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/processor/authratelimitprocessor v0.0.0
+	github.com/minuk-dev/opentelemetry-querier/processor/cacheprocessor v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/processor/queryrewriteprocessor v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/processor/responsefilterprocessor v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/processor/simpleauthzprocessor v0.0.0
@@ -82,6 +83,8 @@ replace github.com/minuk-dev/opentelemetry-querier/pipeline => ../../pipeline
 replace github.com/minuk-dev/opentelemetry-querier/processor => ../../processor
 
 replace github.com/minuk-dev/opentelemetry-querier/processor/authratelimitprocessor => ../../processor/authratelimitprocessor
+
+replace github.com/minuk-dev/opentelemetry-querier/processor/cacheprocessor => ../../processor/cacheprocessor
 
 replace github.com/minuk-dev/opentelemetry-querier/processor/queryrewriteprocessor => ../../processor/queryrewriteprocessor
 
