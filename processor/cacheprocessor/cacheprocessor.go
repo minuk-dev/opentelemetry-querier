@@ -5,9 +5,11 @@ import (
 	"container/list"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"text/template"
@@ -24,9 +26,10 @@ var errCacheBounds = errors.New("cache requires positive ttl and max_bytes")
 
 // Config bounds the cache and optionally selects additional key dimensions.
 type Config struct {
-	TTL      time.Duration `mapstructure:"ttl"`
-	MaxBytes int           `mapstructure:"max_bytes"`
-	Key      string        `mapstructure:"key"`
+	RequireVerifiedIdentity bool          `mapstructure:"require_verified_identity"`
+	TTL                     time.Duration `mapstructure:"ttl"`
+	MaxBytes                int           `mapstructure:"max_bytes"`
+	Key                     string        `mapstructure:"key"`
 }
 
 // New builds a local cache processor.
@@ -97,6 +100,9 @@ func cacheEligible(query *qdata.Query) bool {
 	return (mode == qdata.ContextInstant || mode == qdata.ContextRange) && query.GetRange().GetEnd() != nil
 }
 
+// RequiresTerminalDispatchPosition keeps response filtering outside the verified cache.
+func (c *Processor) RequiresTerminalDispatchPosition() bool { return c.cfg.RequireVerifiedIdentity }
+
 // ProcessDispatch serves a cached response or shares a downstream execution.
 func (c *Processor) ProcessDispatch(
 	ctx context.Context, query *qdata.Query, next processor.DispatchFunc, respond processor.RespondFunc,
@@ -105,6 +111,10 @@ func (c *Processor) ProcessDispatch(
 		return runDirect(ctx, query, next, respond)
 	}
 
+	identity, verified := qdata.IdentityFromContext(ctx)
+	if c.cfg.RequireVerifiedIdentity && (!verified || identity.Authority == "" || identity.Principal == "" || identity.Tenant != qdata.TenantID(query)) {
+		return runDirect(ctx, query, next, respond)
+	}
 	snapshot := proto.CloneOf(query)
 
 	key, err := c.key(snapshot)
@@ -112,6 +122,12 @@ func (c *Processor) ProcessDispatch(
 		return runDirect(ctx, query, next, respond)
 	}
 
+	if verified {
+		key, err = verifiedKey(key, identity)
+		if err != nil {
+			return runDirect(ctx, query, next, respond)
+		}
+	}
 	err = ctx.Err()
 	if err != nil {
 		return nil, fmt.Errorf("wait for cache result: %w", qerror.UpstreamTransportError(err))
@@ -125,6 +141,25 @@ func (c *Processor) ProcessDispatch(
 	defer c.release(key, flight)
 
 	return c.finishFlight(ctx, key, flight, respond)
+}
+
+func verifiedKey(key cacheKey, identity qdata.Identity) (cacheKey, error) {
+	normalize := func(values []string) []string {
+		out := append([]string(nil), values...)
+		slices.Sort(out)
+		return slices.Compact(out)
+	}
+	identity.Groups = normalize(identity.Groups)
+	identity.Roles = normalize(identity.Roles)
+	identity.Scopes = normalize(identity.Scopes)
+	encoded, err := json.Marshal(identity)
+	if err != nil {
+		return cacheKey{}, err
+	}
+	hash := sha256.New()
+	_, _ = hash.Write(key[:])
+	_, _ = hash.Write(encoded)
+	return cacheKey(hash.Sum(nil)), nil
 }
 
 func runDirect(

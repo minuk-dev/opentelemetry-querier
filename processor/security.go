@@ -29,6 +29,10 @@ func ValidateOrder(processors []Processor) error {
 	pending := -1
 
 	for index, proc := range processors {
+		if terminal, ok := proc.(interface{ RequiresTerminalDispatchPosition() bool }); ok &&
+			terminal.RequiresTerminalDispatchPosition() && index != len(processors)-1 {
+			return fmt.Errorf("%w: processor %d (%T) must be last so result processors run on every response", errSecurityOrder, index, proc)
+		}
 		security, ok := proc.(SecurityProcessor)
 		if !ok {
 			continue

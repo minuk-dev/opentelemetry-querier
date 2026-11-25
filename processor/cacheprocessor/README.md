@@ -44,3 +44,14 @@ errors bypass the cache for that request.
 Each processor instance belongs to one pipeline and replica. Concurrent misses
 at the same key share one downstream execution. Each caller keeps its own
 deadline, and the last caller to leave cancels unfinished work.
+
+### Verified identity isolation
+
+On authenticated pipelines, set `require_verified_identity: true` and put
+the cache last in the processor list. Requests without verified identity
+bypass the cache. The cache is local to its pipeline instance and keys
+the rewritten effective query, verified issuer and principal, selected
+tenant, and verified groups, roles and scopes. Authorization runs before
+each lookup and every result processor runs for hits and misses. A policy
+change that rewrites the query changes the key. Implicit current-time
+queries continue to bypass the cache.
