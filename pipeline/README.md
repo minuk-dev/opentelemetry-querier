@@ -51,3 +51,13 @@ subject and allowed tenant, then enable identity on the protected pipeline.
 Tenant and authorization processors use the verified identity when available.
 Authenticators can implement `pipeline.Authenticator`. Components can read
 the identity through `qdata.IdentityFromContext`, including in connector leaves.
+
+## Authorization audit events
+
+Enable `authorization_audit: true` on a service pipeline. Querier sends
+`query.authorization` events through its structured logger at INFO. Route
+this event type to an audit sink. The fields include a server-generated
+`request_id` shared by audited connector operands, pipeline, decision, stage
+reason and execution outcome. Principal, authority and tenant appear when
+verified. The event excludes authorization values, raw tokens, query data
+and upstream error text.

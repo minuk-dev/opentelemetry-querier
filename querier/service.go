@@ -159,6 +159,9 @@ func (svc *Service) buildLeafPipelines(factories Factories, cfg *Config, built m
 		}
 
 		built[name] = pipeline.New(name, procs, disp)
+		if pipelineCfg.AuthorizationAudit {
+			built[name].AuditLogger = svc.logger
+		}
 		if err := configureIdentity(built[name], pipelineCfg.Identity); err != nil {
 			return fmt.Errorf("pipeline %q: %w", name, err)
 		}
@@ -239,6 +242,9 @@ func (svc *Service) buildConnectorPipelines(
 		}
 
 		built[name] = pipeline.New(name, procs, conn)
+		if pipelineCfg.AuthorizationAudit {
+			built[name].AuditLogger = svc.logger
+		}
 		if err := configureIdentity(built[name], pipelineCfg.Identity); err != nil {
 			return fmt.Errorf("pipeline %q: %w", name, err)
 		}

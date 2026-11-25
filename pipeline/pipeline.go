@@ -7,6 +7,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"slices"
 
 	"github.com/minuk-dev/opentelemetry-querier/component"
@@ -35,6 +36,7 @@ type Pipeline struct {
 	Name         string
 	Authenticate Authenticator
 	TenantHeader string
+	AuditLogger  *slog.Logger
 	Processors   []processor.Processor
 	Dispatcher   dispatcher.Dispatcher
 }
@@ -48,7 +50,13 @@ func New(name string, processors []processor.Processor, disp dispatcher.Dispatch
 // order), dispatches to storage, then runs the response path (processors in
 // reverse order). A validation or processor error on the request path
 // short-circuits before the dispatcher is reached.
-func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (*qdata.Result, error) {
+func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (_ *qdata.Result, handleErr error) {
+	decision := auditDecision{ctx: ctx, decision: "not_evaluated", reason: "validation"}
+	if p.AuditLogger != nil {
+		decision.ctx = withAuditRequestID(ctx)
+		ctx = decision.ctx
+		defer func() { p.audit(decision, handleErr) }()
+	}
 	err := qdata.ValidateQueryTime(query)
 	if err != nil {
 		return nil, qerror.New(qerror.CodeInvalidArgument, "pipeline %q: %v", p.Name, err)
@@ -56,13 +64,17 @@ func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (*qdata.Resul
 
 	ctx, err = p.authorizeIdentity(ctx, query)
 	if err != nil {
+		decision.recordDenial(err, "authentication")
 		return nil, err
 	}
+	decision.ctx = ctx
 	err = p.processQuery(ctx, query)
 	if err != nil {
+		decision.recordDenial(err, "request_policy")
 		return nil, err
 	}
-
+	decision.decision = "allow"
+	decision.reason = "request_policy"
 	return p.execute(ctx, query, p.Processors)
 }
 
