@@ -62,3 +62,17 @@ after five minutes. Missing or unverified keys fail authentication. Issuer,
 audience, signature and expiration are mandatory. The subject identifies the
 principal. Claim values are a string or a string array. Define `group_claim`
 and `role_claim` to map those claims into the verified identity.
+
+### OAuth access tokens
+
+Set `identity.oauth.required_scopes: [query]` and configure either
+`identity.oauth.jwt` with the JWT settings above or
+`identity.oauth.introspection` with `endpoint`, `issuer`, `audience`,
+`tenant_claim`, `client_id` and `client_secret_file`. Introspection uses HTTPS
+and defaults to a three-second timeout. Its endpoint must return the active
+flag, issuer, resource audience, subject, expiry and configured tenant claim.
+
+Invalid credentials return HTTP 401 or gRPC UNAUTHENTICATED. An active token
+missing a required scope returns 403 or PERMISSION_DENIED. Introspection
+endpoint failure, invalid protocol response and its own timeout return
+502 or UNAVAILABLE. A query with an earlier deadline uses that deadline.

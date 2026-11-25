@@ -35,6 +35,12 @@ type JWTIdentityConfig struct {
 }
 
 func jwtAuthenticator(cfg JWTIdentityConfig) (pipeline.Authenticator, error) {
+	return newJWTAuthenticator(cfg, func(_ *jwt.Token, claims jwt.MapClaims) (pipeline.Principal, error) {
+		return principalFromJWT(cfg, claims)
+	})
+}
+
+func newJWTAuthenticator(cfg JWTIdentityConfig, read func(*jwt.Token, jwt.MapClaims) (pipeline.Principal, error)) (pipeline.Authenticator, error) {
 	if cfg.Issuer == "" || cfg.Audience == "" || len(cfg.Algorithms) == 0 || cfg.TenantClaim == "" ||
 		(cfg.PublicKeyFile == "") == (cfg.JWKSURL == "") {
 		return nil, errors.New("JWT requires issuer, audience, algorithms, tenant_claim and exactly one verification key source")
@@ -78,7 +84,7 @@ func jwtAuthenticator(cfg JWTIdentityConfig) (pipeline.Authenticator, error) {
 		if err != nil || !token.Valid {
 			return pipeline.Principal{}, qerror.New(qerror.CodeUnauthenticated, "invalid Bearer credentials")
 		}
-		return principalFromJWT(cfg, claims)
+		return read(token, claims)
 	}, nil
 }
 
