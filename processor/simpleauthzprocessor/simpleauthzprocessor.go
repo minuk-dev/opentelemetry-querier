@@ -122,8 +122,8 @@ func New(cfg Config) *Processor {
 // ProcessQuery resolves the subject and applies the policy: it rejects a denied
 // query with PermissionDenied, or registers the matched rule's enforced
 // matchers so downstream queryrewrite scopes the query.
-func (p *Processor) ProcessQuery(_ context.Context, query *qdata.Query) error {
-	subject := p.resolveSubject(query)
+func (p *Processor) ProcessQuery(ctx context.Context, query *qdata.Query) error {
+	subject := p.resolveSubject(ctx, query)
 
 	if subject == "" && p.cfg.Required {
 		return qerror.New(qerror.CodePermissionDenied,
@@ -155,7 +155,14 @@ func (p *Processor) ProcessQuery(_ context.Context, query *qdata.Query) error {
 
 // resolveSubject reads the subject from the tenant id or the configured header,
 // falling back to the static default.
-func (p *Processor) resolveSubject(query *qdata.Query) string {
+func (p *Processor) resolveSubject(ctx context.Context, query *qdata.Query) string {
+	if identity, ok := qdata.IdentityFromContext(ctx); ok {
+		if p.cfg.FromTenant {
+			return identity.Tenant
+		}
+		return identity.Principal
+	}
+
 	var subject string
 
 	if p.cfg.FromTenant {

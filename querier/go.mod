@@ -11,6 +11,7 @@ require (
 	github.com/minuk-dev/opentelemetry-querier/pipeline v0.1.0
 	github.com/minuk-dev/opentelemetry-querier/processor v0.1.0
 	github.com/minuk-dev/opentelemetry-querier/qdata v0.1.0
+	github.com/minuk-dev/opentelemetry-querier/qerror v0.1.0
 	github.com/stretchr/testify v1.12.1
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -38,3 +39,5 @@ replace github.com/minuk-dev/opentelemetry-querier/processor => ../processor
 replace github.com/minuk-dev/opentelemetry-querier/qdata => ../qdata
 
 replace github.com/minuk-dev/opentelemetry-querier/connector => ../connector
+
+replace github.com/minuk-dev/opentelemetry-querier/qerror => ../qerror

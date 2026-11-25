@@ -33,3 +33,21 @@ it with its own message.
 
 A [dispatch processor](../processor#dispatch-processors) can supply the result
 at its configured position in the response chain.
+
+## Verified identity
+
+Configure `identity.gateway.authority` and `identity.gateway.secret_file` on
+a pipeline to require a gateway assertion. Mount a dedicated, randomly
+generated secret of at least 32 bytes and use TLS between the gateway and
+Querier. The gateway strips inbound `X-Querier-*` headers and sets
+`X-Querier-Gateway-Secret`, `X-Querier-Principal` and at least one
+`X-Querier-Allowed-Tenant` value. It can also assert `X-Querier-Group` and
+`X-Querier-Role` values. Deploy the listener on a private interface.
+Set `identity.tenant_header` to select a tenant header. The default is
+`X-Scope-OrgID`. A single allowed tenant can be selected implicitly.
+
+For existing header-based policies, configure the gateway to assert the old
+subject and allowed tenant, then enable identity on the protected pipeline.
+Tenant and authorization processors use the verified identity when available.
+Authenticators can implement `pipeline.Authenticator`. Components can read
+the identity through `qdata.IdentityFromContext`, including in connector leaves.

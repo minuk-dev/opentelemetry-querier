@@ -32,9 +32,11 @@ func (f HandlerFunc) Handle(ctx context.Context, q *qdata.Query) (*qdata.Result,
 
 // Pipeline is an ordered processor chain terminated by a dispatcher.
 type Pipeline struct {
-	Name       string
-	Processors []processor.Processor
-	Dispatcher dispatcher.Dispatcher
+	Name         string
+	Authenticate Authenticator
+	TenantHeader string
+	Processors   []processor.Processor
+	Dispatcher   dispatcher.Dispatcher
 }
 
 // New builds a pipeline.
@@ -52,6 +54,10 @@ func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (*qdata.Resul
 		return nil, qerror.New(qerror.CodeInvalidArgument, "pipeline %q: %v", p.Name, err)
 	}
 
+	ctx, err = p.authorizeIdentity(ctx, query)
+	if err != nil {
+		return nil, err
+	}
 	err = p.processQuery(ctx, query)
 	if err != nil {
 		return nil, err
@@ -123,6 +129,9 @@ func (p *Pipeline) execute(
 		return result, nil
 	}
 
+	if identity, ok := qdata.IdentityFromContext(ctx); ok {
+		qdata.SetTenantID(query, identity.Tenant)
+	}
 	result, err := p.Dispatcher.Dispatch(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("pipeline %q: %w", p.Name, err)

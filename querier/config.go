@@ -51,9 +51,10 @@ type ServiceConfig struct {
 
 // PipelineConfig references component instances by ID, defining processor order.
 type PipelineConfig struct {
-	Acceptors   []string `mapstructure:"acceptors"`
-	Processors  []string `mapstructure:"processors"`
-	Dispatchers []string `mapstructure:"dispatchers"`
+	Identity    IdentityConfig `mapstructure:"identity"`
+	Acceptors   []string       `mapstructure:"acceptors"`
+	Processors  []string       `mapstructure:"processors"`
+	Dispatchers []string       `mapstructure:"dispatchers"`
 }
 
 // LoadConfig reads a YAML config file and structurally decodes it.

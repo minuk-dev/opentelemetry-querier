@@ -48,7 +48,7 @@ func New(cfg Config) *Processor {
 
 // ProcessQuery resolves the tenant and, if configured, registers the isolation
 // matcher.
-func (p *Processor) ProcessQuery(_ context.Context, query *qdata.Query) error {
+func (p *Processor) ProcessQuery(ctx context.Context, query *qdata.Query) error {
 	// The header (or the configured default) is the only tenant source an upstream
 	// gateway or authenticator controls, so it is the sole input here. A tenant id
 	// already sitting in the query's metadata is never read: metadata rides on the
@@ -59,6 +59,10 @@ func (p *Processor) ProcessQuery(_ context.Context, query *qdata.Query) error {
 	tenantID := headerValue(query, p.cfg.Header)
 	if tenantID == "" {
 		tenantID = p.cfg.Default
+	}
+
+	if identity, ok := qdata.IdentityFromContext(ctx); ok {
+		tenantID = identity.Tenant
 	}
 
 	if tenantID == "" {

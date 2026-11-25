@@ -159,6 +159,9 @@ func (svc *Service) buildLeafPipelines(factories Factories, cfg *Config, built m
 		}
 
 		built[name] = pipeline.New(name, procs, disp)
+		if err := configureIdentity(built[name], pipelineCfg.Identity); err != nil {
+			return fmt.Errorf("pipeline %q: %w", name, err)
+		}
 	}
 
 	return nil
@@ -236,6 +239,9 @@ func (svc *Service) buildConnectorPipelines(
 		}
 
 		built[name] = pipeline.New(name, procs, conn)
+		if err := configureIdentity(built[name], pipelineCfg.Identity); err != nil {
+			return fmt.Errorf("pipeline %q: %w", name, err)
+		}
 	}
 
 	return nil
