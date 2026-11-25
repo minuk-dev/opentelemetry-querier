@@ -61,7 +61,15 @@ type Rule struct {
 }
 
 // Config configures subject resolution and the authorization policy.
+// GroupRule grants or denies requests by a verified group name.
+type GroupRule struct {
+	Groups        []string       `mapstructure:"groups"`
+	Effect        string         `mapstructure:"effect"`
+	EnforceLabels []EnforceLabel `mapstructure:"enforce_labels"`
+}
+
 type Config struct {
+	GroupRules []GroupRule `mapstructure:"group_rules"`
 	// SubjectHeader is the request header carrying the subject id.
 	SubjectHeader string `mapstructure:"subject_header"`
 	// FromTenant resolves the subject from the tenant id instead of the header.
@@ -102,6 +110,15 @@ func (p *Processor) SecurityRequirements() processor.SecurityRequirements {
 		}
 	}
 
+	for _, rule := range p.cfg.GroupRules {
+		if denies(rule.Effect) {
+			continue
+		}
+		requirements.RegistersEnforcement = requirements.RegistersEnforcement || len(rule.EnforceLabels) > 0
+		for _, label := range rule.EnforceLabels {
+			requirements.NeedsTenant = requirements.NeedsTenant || label.FromTenant
+		}
+	}
 	return requirements
 }
 
@@ -136,6 +153,10 @@ func (p *Processor) ProcessQuery(ctx context.Context, query *qdata.Query) error 
 
 	rule, matched := p.match(subject)
 
+	if len(p.cfg.GroupRules) != 0 {
+		return p.processGroups(ctx, query, rule, matched)
+	}
+
 	effect := p.cfg.DefaultEffect
 	if matched {
 		effect = rule.Effect
@@ -151,6 +172,34 @@ func (p *Processor) ProcessQuery(ctx context.Context, query *qdata.Query) error 
 	}
 
 	return nil
+}
+
+func (p *Processor) processGroups(ctx context.Context, query *qdata.Query, subject Rule, matched bool) error {
+	identity, _ := qdata.IdentityFromContext(ctx)
+	if matched && denies(subject.Effect) {
+		return qerror.New(qerror.CodePermissionDenied, "simpleauthz: subject denied by policy")
+	}
+
+	allowed := false
+	var labels []EnforceLabel
+	for _, rule := range p.cfg.GroupRules {
+		if !slices.ContainsFunc(rule.Groups, func(group string) bool { return slices.Contains(identity.Groups, group) }) {
+			continue
+		}
+		if denies(rule.Effect) {
+			return qerror.New(qerror.CodePermissionDenied, "simpleauthz: group denied by policy")
+		}
+		allowed = true
+		labels = append(labels, rule.EnforceLabels...)
+	}
+
+	if !allowed {
+		return qerror.New(qerror.CodePermissionDenied, "simpleauthz: no verified group grant")
+	}
+	if matched {
+		labels = append(labels, subject.EnforceLabels...)
+	}
+	return enforce(query, labels)
 }
 
 // resolveSubject reads the subject from the tenant id or the configured header,

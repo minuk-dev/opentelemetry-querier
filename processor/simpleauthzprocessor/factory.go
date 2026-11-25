@@ -74,6 +74,20 @@ func Validate(cfg Config) error {
 		}
 	}
 
+	for index, rule := range cfg.GroupRules {
+		if len(rule.Groups) == 0 {
+			return fmt.Errorf("group_rules[%d]: groups are required", index)
+		}
+		if err := validateEffect(fmt.Sprintf("group_rules[%d].effect", index), rule.Effect); err != nil {
+			return err
+		}
+		for labelIndex, label := range rule.EnforceLabels {
+			if label.Name == "" {
+				return fmt.Errorf("%w: group_rules[%d].enforce_labels[%d]", errLabelNameEmpty, index, labelIndex)
+			}
+		}
+	}
+
 	return nil
 }
 
