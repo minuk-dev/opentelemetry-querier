@@ -33,3 +33,10 @@ it with its own message.
 
 A [dispatch processor](../processor#dispatch-processors) can supply the result
 at its configured position in the response chain.
+
+## Query deadline
+
+Set `query_timeout: 10s` under a service pipeline to bound query processing
+through response handling. The default is zero, which uses any caller
+deadline. Connector operands share the parent deadline, and a leaf can
+shorten it. Expiration returns HTTP 504 or gRPC DEADLINE_EXCEEDED.
