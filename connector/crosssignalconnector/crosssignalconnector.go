@@ -27,6 +27,7 @@ type Connector struct {
 
 	// targets maps a signal to the pipeline that serves it.
 	targets map[qdata.Signal]pipeline.Handler
+	maxRows int
 }
 
 // compile-time assertion that Connector satisfies the category interface.
@@ -109,7 +110,7 @@ func (c *Connector) dispatchJoin(
 		return nil, err
 	}
 
-	table, err := joinTables(ctx, left.table, right.table, binary.GetMatching(), mode)
+	table, err := joinTables(ctx, left.table, right.table, binary.GetMatching(), mode, c.rowLimit())
 	if err != nil {
 		return nil, err
 	}
@@ -149,6 +150,12 @@ func (c *Connector) execSide(ctx context.Context, parent *qdata.Query, subtree *
 		return nil, fmt.Errorf("crosssignalconnector: handle %s operand: %w", signal, err)
 	}
 
+	if c.maxRows > 0 {
+		count := max(len(result.GetMetrics().GetSeries()), len(result.GetLogs().GetRecords()), len(result.GetTable().GetRows()))
+		if count > c.maxRows {
+			return nil, qerror.New(qerror.CodeResourceExhausted, "crosssignalconnector: operand exceeds %d rows", c.maxRows)
+		}
+	}
 	table, err := resultToTable(signal, result)
 	if err != nil {
 		return nil, err
@@ -182,4 +189,11 @@ func mergeFeedback(dst *qdata.Result, sides ...*qdata.Result) {
 			qdata.Notify(dst, note.GetSeverity(), note.GetCode(), note.GetMessage(), note.GetSource())
 		}
 	}
+}
+
+func (c *Connector) rowLimit() int {
+	if c.maxRows > 0 {
+		return c.maxRows
+	}
+	return maxJoinRows
 }

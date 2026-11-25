@@ -13,9 +13,10 @@ import (
 // errInvalidConfig is returned when the factory receives an unexpected config type.
 var errInvalidConfig = errors.New("crosssignalconnector: invalid config type")
 
-// Config configures the cross-signal connector. It currently has no options; the
-// join mode and keys are derived from the plan's BinaryOp and vector matching.
-type Config struct{}
+// Config configures cross-signal result size.
+type Config struct {
+	MaxRows int `mapstructure:"max_rows"`
+}
 
 // NewFactory returns the factory for the cross-signal connector.
 func NewFactory() connector.Factory {
@@ -36,10 +37,15 @@ func createConnector(
 	cfg component.Config,
 	targets map[qdata.Signal]pipeline.Handler,
 ) (connector.Connector, error) {
-	_, ok := cfg.(*Config)
+	conf, ok := cfg.(*Config)
 	if !ok {
 		return nil, errInvalidConfig
 	}
 
-	return New(targets), nil
+	if conf.MaxRows < 0 || conf.MaxRows > maxJoinRows {
+		return nil, errors.New("crosssignalconnector max_rows must be between 0 and 10000")
+	}
+	connector := New(targets)
+	connector.maxRows = conf.MaxRows
+	return connector, nil
 }

@@ -197,7 +197,7 @@ func joinModeFor(operator qdatav1.BinOp) (joinMode, error) {
 
 // joinTables joins two normalized tables per the BinaryOp's matching and mode.
 func joinTables(
-	ctx context.Context, left, right *qdata.Table, matching *qdatav1.VectorMatch, mode joinMode,
+	ctx context.Context, left, right *qdata.Table, matching *qdatav1.VectorMatch, mode joinMode, limit int,
 ) (*qdata.Table, error) {
 	keys, err := resolveKeys(left, right, matching)
 	if err != nil {
@@ -210,10 +210,10 @@ func joinTables(
 	}
 
 	if mode == joinAnti {
-		return antiJoin(ctx, left, keys, index)
+		return antiJoin(ctx, left, keys, index, limit)
 	}
 
-	return innerJoin(ctx, left, right, keys, index)
+	return innerJoin(ctx, left, right, keys, index, limit)
 }
 
 // resolveKeys picks the equijoin columns: the explicit `on` list; else the shared
@@ -238,7 +238,7 @@ func resolveKeys(left, right *qdata.Table, matching *qdatav1.VectorMatch) ([]str
 }
 
 func innerJoin(
-	ctx context.Context, left, right *qdata.Table, keys []string, index map[string][]*qdata.Row,
+	ctx context.Context, left, right *qdata.Table, keys []string, index map[string][]*qdata.Row, limit int,
 ) (*qdata.Table, error) {
 	columns, rightNames := joinedColumns(left.GetColumns(), right.GetColumns(), keys)
 	joined := &qdata.Table{Columns: columns}
@@ -255,8 +255,8 @@ func innerJoin(
 		}
 
 		matches := index[tuple]
-		if len(matches) > maxJoinRows-len(joined.Rows) {
-			return nil, joinLimitError()
+		if len(matches) > limit-len(joined.Rows) {
+			return nil, joinLimitError(limit)
 		}
 
 		for _, rrow := range matches {
@@ -275,7 +275,7 @@ func innerJoin(
 // antiJoin keeps left rows with no matching right row (UNLESS). A left row that
 // lacks a join key can never match, so it is kept.
 func antiJoin(
-	ctx context.Context, left *qdata.Table, keys []string, index map[string][]*qdata.Row,
+	ctx context.Context, left *qdata.Table, keys []string, index map[string][]*qdata.Row, limit int,
 ) (*qdata.Table, error) {
 	out := &qdata.Table{Columns: slices.Clone(left.GetColumns())}
 
@@ -291,8 +291,8 @@ func antiJoin(
 			}
 		}
 
-		if len(out.Rows) == maxJoinRows {
-			return nil, joinLimitError()
+		if len(out.Rows) == limit {
+			return nil, joinLimitError(limit)
 		}
 
 		out.Rows = append(out.Rows, &qdata.Row{Values: cloneAttrs(lrow.GetValues())})
@@ -315,8 +315,8 @@ func joinContextError(ctx context.Context) error {
 	return qerror.New(code, "crosssignalconnector: join interrupted: %v", err)
 }
 
-func joinLimitError() *qerror.Error {
-	return qerror.New(qerror.CodeResourceExhausted, "crosssignalconnector: join exceeds %d output rows", maxJoinRows)
+func joinLimitError(limit int) *qerror.Error {
+	return qerror.New(qerror.CodeResourceExhausted, "crosssignalconnector: join exceeds %d output rows", limit)
 }
 
 // removeAll returns values with every element of drop removed.

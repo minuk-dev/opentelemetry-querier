@@ -38,5 +38,8 @@ func createDispatcher(_ context.Context, _ component.Settings, cfg component.Con
 		return nil, errInvalidConfig
 	}
 
+	if conf.MaxRecords < 0 || conf.MaxResponseBytes < 0 || conf.MaxResponseBytes > maxResponseBytes {
+		return nil, errors.New("result counts must be non-negative and max_response_bytes must not exceed 16 MiB")
+	}
 	return New(*conf), nil
 }
