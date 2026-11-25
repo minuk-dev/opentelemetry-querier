@@ -48,8 +48,9 @@ type Config struct {
 // the opentelemetry-collector. The type token names the signal the pipeline
 // carries (metrics/logs/traces/profiles).
 type ServiceConfig struct {
-	BackendRetries map[string]pipeline.RetryConfig `mapstructure:"backend_retries"`
-	Pipelines      map[string]PipelineConfig       `mapstructure:"pipelines"`
+	BackendBreakers map[string]pipeline.CircuitConfig `mapstructure:"backend_circuit_breakers"`
+	BackendRetries  map[string]pipeline.RetryConfig   `mapstructure:"backend_retries"`
+	Pipelines       map[string]PipelineConfig         `mapstructure:"pipelines"`
 }
 
 // PipelineConfig references component instances by ID, defining processor order.
@@ -96,6 +97,14 @@ func LoadConfig(path string) (*Config, error) {
 }
 
 func (c *Config) validate() error {
+	for id, breaker := range c.Service.BackendBreakers {
+		if _, exists := c.Dispatchers[id]; !exists {
+			return fmt.Errorf("backend_circuit_breakers references unknown dispatcher %q", id)
+		}
+		if err := breaker.Validate(); err != nil {
+			return fmt.Errorf("dispatcher %q: %w", id, err)
+		}
+	}
 	for id, retry := range c.Service.BackendRetries {
 		if _, exists := c.Dispatchers[id]; !exists {
 			return fmt.Errorf("backend_retries references unknown dispatcher %q", id)
