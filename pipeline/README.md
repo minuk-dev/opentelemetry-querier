@@ -51,3 +51,23 @@ subject and allowed tenant, then enable identity on the protected pipeline.
 Tenant and authorization processors use the verified identity when available.
 Authenticators can implement `pipeline.Authenticator`. Components can read
 the identity through `qdata.IdentityFromContext`, including in connector leaves.
+
+## Query concurrency
+
+```yaml
+service:
+  concurrency:
+    per_tenant: 8
+    backends:
+      prometheus/primary: 16
+    queue_size: 32
+```
+
+Caps and queue capacity are shared across pipelines in one process.
+A zero tenant cap disables tenant limiting. A zero queue rejects
+immediately. Otherwise a full queue returns HTTP 429 or gRPC
+RESOURCE_EXHAUSTED. Queued requests use their caller or query deadline.
+The parent holds one verified-tenant slot through connector execution.
+Each storage call takes its configured backend slot. Cache hits only
+take a tenant slot. Slots release after active work ends. Waiters
+compete for a freed slot.

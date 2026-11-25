@@ -35,6 +35,7 @@ type Pipeline struct {
 	Name         string
 	Authenticate Authenticator
 	TenantHeader string
+	Concurrency  *Concurrency
 	Processors   []processor.Processor
 	Dispatcher   dispatcher.Dispatcher
 }
@@ -63,6 +64,14 @@ func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (*qdata.Resul
 		return nil, err
 	}
 
+	if p.Concurrency != nil {
+		var release func()
+		ctx, release, err = p.Concurrency.admitTenant(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer release()
+	}
 	return p.execute(ctx, query, p.Processors)
 }
 

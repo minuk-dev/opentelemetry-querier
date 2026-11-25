@@ -36,11 +36,12 @@ var (
 // Service is a fully assembled, runnable querier: a set of pipelines and the
 // acceptors that feed them.
 type Service struct {
-	buildInfo component.BuildInfo
-	logger    *slog.Logger
-	pipelines []*pipeline.Pipeline
-	acceptors []acceptor.Acceptor
-	host      component.Host
+	buildInfo   component.BuildInfo
+	logger      *slog.Logger
+	concurrency *pipeline.Concurrency
+	pipelines   []*pipeline.Pipeline
+	acceptors   []acceptor.Acceptor
+	host        component.Host
 }
 
 // host is a minimal component.Host implementation.
@@ -64,9 +65,19 @@ func Build(factories Factories, cfg *Config, buildInfo component.BuildInfo) (*Se
 		host:      host{},
 	}
 
+	for backend := range cfg.Service.Concurrency.Backends {
+		if _, ok := cfg.Dispatchers[backend]; !ok {
+			return nil, fmt.Errorf("concurrency references unknown dispatcher %q", backend)
+		}
+	}
+	concurrency, err := pipeline.NewConcurrency(cfg.Service.Concurrency)
+	if err != nil {
+		return nil, err
+	}
+	svc.concurrency = concurrency
 	built := map[string]*pipeline.Pipeline{}
 
-	err := svc.buildLeafPipelines(factories, cfg, built)
+	err = svc.buildLeafPipelines(factories, cfg, built)
 	if err != nil {
 		return nil, err
 	}
@@ -159,6 +170,7 @@ func (svc *Service) buildLeafPipelines(factories Factories, cfg *Config, built m
 		}
 
 		built[name] = pipeline.New(name, procs, disp)
+		built[name].Concurrency = svc.concurrency
 		if err := configureIdentity(built[name], pipelineCfg.Identity); err != nil {
 			return fmt.Errorf("pipeline %q: %w", name, err)
 		}
@@ -239,6 +251,7 @@ func (svc *Service) buildConnectorPipelines(
 		}
 
 		built[name] = pipeline.New(name, procs, conn)
+		built[name].Concurrency = svc.concurrency
 		if err := configureIdentity(built[name], pipelineCfg.Identity); err != nil {
 			return fmt.Errorf("pipeline %q: %w", name, err)
 		}
@@ -367,7 +380,7 @@ func (svc *Service) buildDispatcher(factories Factories, cfg *Config, idStr stri
 		return nil, fmt.Errorf("querier: create dispatcher %q: %w", idStr, err)
 	}
 
-	return disp, nil
+	return svc.concurrency.WrapBackend(idStr, disp), nil
 }
 
 func (svc *Service) buildAcceptor(

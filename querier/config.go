@@ -3,6 +3,7 @@ package querier
 import (
 	"errors"
 	"fmt"
+	"github.com/minuk-dev/opentelemetry-querier/pipeline"
 	"os"
 	"path/filepath"
 
@@ -46,7 +47,8 @@ type Config struct {
 // the opentelemetry-collector. The type token names the signal the pipeline
 // carries (metrics/logs/traces/profiles).
 type ServiceConfig struct {
-	Pipelines map[string]PipelineConfig `mapstructure:"pipelines"`
+	Concurrency pipeline.ConcurrencyConfig `mapstructure:"concurrency"`
+	Pipelines   map[string]PipelineConfig  `mapstructure:"pipelines"`
 }
 
 // PipelineConfig references component instances by ID, defining processor order.
