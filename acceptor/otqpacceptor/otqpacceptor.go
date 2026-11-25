@@ -329,6 +329,7 @@ func writeResponse(writer http.ResponseWriter, useJSON bool, resp *otqpv1.QueryR
 }
 
 func writeHTTPError(writer http.ResponseWriter, err error) {
+	qerror.SetAuthenticationChallenge(writer.Header(), err)
 	var codedErr *qerror.Error
 	if errors.As(err, &codedErr) {
 		http.Error(writer, codedErr.Msg, codedErr.HTTPStatus())

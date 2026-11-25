@@ -51,3 +51,22 @@ subject and allowed tenant, then enable identity on the protected pipeline.
 Tenant and authorization processors use the verified identity when available.
 Authenticators can implement `pipeline.Authenticator`. Components can read
 the identity through `qdata.IdentityFromContext`, including in connector leaves.
+
+### Basic credentials
+
+Use `identity.basic` on a pipeline and configure its accounts with mounted
+bcrypt hash files. Each file holds a single hash with cost 10–16. Configure
+TLS at the listener or at a trusted TLS terminator, including protection of
+the connection to Querier. OTQP gRPC clients send the same Authorization
+value as request metadata.
+
+```yaml
+identity:
+  basic:
+    authority: platform
+    realm: Querier
+    accounts:
+      alice:
+        hash_file: /run/secrets/querier-alice-bcrypt
+        tenants: [team-a]
+```

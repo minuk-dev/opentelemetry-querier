@@ -420,6 +420,7 @@ func writeError(writer http.ResponseWriter, status int, errorType string, err er
 }
 
 func writeHandlerError(writer http.ResponseWriter, err error) {
+	qerror.SetAuthenticationChallenge(writer.Header(), err)
 	status := http.StatusInternalServerError
 	errorType := errorTypeInternal
 

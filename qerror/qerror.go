@@ -29,8 +29,9 @@ const (
 // Error carries a Code and a message. Processors return it to short-circuit the
 // pipeline (e.g. auth failure, rate limit).
 type Error struct {
-	Code Code
-	Msg  string
+	Code      Code
+	Msg       string
+	Challenge string
 }
 
 func (e *Error) Error() string { return e.Msg }
@@ -70,4 +71,12 @@ func CodeOf(err error) Code {
 	}
 
 	return CodeInternal
+}
+
+// SetAuthenticationChallenge adds the challenge carried by an unauthenticated error.
+func SetAuthenticationChallenge(header http.Header, err error) {
+	var coded *Error
+	if errors.As(err, &coded) && coded.Code == CodeUnauthenticated && coded.Challenge != "" {
+		header.Set("WWW-Authenticate", coded.Challenge)
+	}
 }
