@@ -363,7 +363,11 @@ func (svc *Service) buildDispatcher(factories Factories, cfg *Config, idStr stri
 		return nil, fmt.Errorf("querier: create dispatcher %q: %w", idStr, err)
 	}
 
-	return disp, nil
+	retry := cfg.Service.BackendRetries[idStr]
+	if err := retry.Validate(); err != nil {
+		return nil, fmt.Errorf("dispatcher %q: %w", idStr, err)
+	}
+	return pipeline.WithBackendRetry(disp, retry, svc.logger.With("backend", idStr)), nil
 }
 
 func (svc *Service) buildAcceptor(

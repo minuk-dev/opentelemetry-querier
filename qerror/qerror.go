@@ -29,8 +29,9 @@ const (
 // Error carries a Code and a message. Processors return it to short-circuit the
 // pipeline (e.g. auth failure, rate limit).
 type Error struct {
-	Code Code
-	Msg  string
+	Code      Code
+	Msg       string
+	retryable bool
 }
 
 func (e *Error) Error() string { return e.Msg }
