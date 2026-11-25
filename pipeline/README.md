@@ -51,3 +51,14 @@ subject and allowed tenant, then enable identity on the protected pipeline.
 Tenant and authorization processors use the verified identity when available.
 Authenticators can implement `pipeline.Authenticator`. Components can read
 the identity through `qdata.IdentityFromContext`, including in connector leaves.
+
+### JWT Bearer
+
+Configure `identity.jwt` with `issuer`, `audience`, `algorithms: [RS256]`,
+and `tenant_claim`. Choose `public_key_file` (RSA PEM) or `jwks_url` (HTTPS).
+RSA algorithms RS256, RS384 and RS512 are supported. With JWKS, one request
+at a time can refresh keys, at most once in 15 seconds. Cached keys expire
+after five minutes. Missing or unverified keys fail authentication. Issuer,
+audience, signature and expiration are mandatory. The subject identifies the
+principal. Claim values are a string or a string array. Define `group_claim`
+and `role_claim` to map those claims into the verified identity.

@@ -4,6 +4,7 @@ go 1.25.4
 
 require (
 	github.com/go-viper/mapstructure/v2 v2.5.0
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/minuk-dev/opentelemetry-querier/acceptor v0.1.0
 	github.com/minuk-dev/opentelemetry-querier/component v0.1.0
 	github.com/minuk-dev/opentelemetry-querier/connector v0.1.0

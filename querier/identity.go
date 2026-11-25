@@ -16,6 +16,7 @@ import (
 
 // IdentityConfig configures identity for one query pipeline.
 type IdentityConfig struct {
+	JWT          *JWTIdentityConfig     `mapstructure:"jwt"`
 	TenantHeader string                 `mapstructure:"tenant_header"`
 	Gateway      *GatewayIdentityConfig `mapstructure:"gateway"`
 }
@@ -28,6 +29,17 @@ type GatewayIdentityConfig struct {
 
 func configureIdentity(pipe *pipeline.Pipeline, cfg IdentityConfig) error {
 	pipe.TenantHeader = cfg.TenantHeader
+	if cfg.JWT != nil {
+		if cfg.Gateway != nil {
+			return errors.New("configure one identity verifier per pipeline")
+		}
+		authenticate, err := jwtAuthenticator(*cfg.JWT)
+		if err != nil {
+			return err
+		}
+		pipe.Authenticate = authenticate
+		return nil
+	}
 	if cfg.Gateway != nil {
 		authenticate, err := gatewayAuthenticator(*cfg.Gateway)
 		if err != nil {
