@@ -3,6 +3,7 @@ package querier
 import (
 	"errors"
 	"fmt"
+	"github.com/minuk-dev/opentelemetry-querier/pipeline"
 	"os"
 	"path/filepath"
 
@@ -51,9 +52,10 @@ type ServiceConfig struct {
 
 // PipelineConfig references component instances by ID, defining processor order.
 type PipelineConfig struct {
-	Acceptors   []string `mapstructure:"acceptors"`
-	Processors  []string `mapstructure:"processors"`
-	Dispatchers []string `mapstructure:"dispatchers"`
+	QueryBudget pipeline.CostBudget `mapstructure:"query_budget"`
+	Acceptors   []string            `mapstructure:"acceptors"`
+	Processors  []string            `mapstructure:"processors"`
+	Dispatchers []string            `mapstructure:"dispatchers"`
 }
 
 // LoadConfig reads a YAML config file and structurally decodes it.
@@ -97,6 +99,9 @@ func (c *Config) validate() error {
 	}
 
 	for name, pipe := range c.Service.Pipelines {
+		if err := pipe.QueryBudget.Validate(); err != nil {
+			return fmt.Errorf("pipeline %q: %w", name, err)
+		}
 		_, err := pipelineSignal(name)
 		if err != nil {
 			return err

@@ -33,6 +33,7 @@ func (f HandlerFunc) Handle(ctx context.Context, q *qdata.Query) (*qdata.Result,
 // Pipeline is an ordered processor chain terminated by a dispatcher.
 type Pipeline struct {
 	Name       string
+	Cost       CostBudget
 	Processors []processor.Processor
 	Dispatcher dispatcher.Dispatcher
 }
@@ -57,6 +58,9 @@ func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (*qdata.Resul
 		return nil, err
 	}
 
+	if err := p.Cost.check(query); err != nil {
+		return nil, err
+	}
 	return p.execute(ctx, query, p.Processors)
 }
 
