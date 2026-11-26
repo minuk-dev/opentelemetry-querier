@@ -51,3 +51,15 @@ denials, other statuses, streaming queries and canceled requests are
 excluded. The fixed wait and attempts share the original query context.
 Executor slots should enclose the full retry loop. Debug logs report
 attempt counts and final success without query data.
+
+## Backend circuit breaker
+
+Set `service.backend_circuit_breakers` by dispatcher ID, for example
+`prometheus/primary: {failure_threshold: 3, open_for: 20s, probe_limit: 1}`.
+The default is disabled. A successful backend call resets the failure count.
+Backend unavailable and timeout outcomes count while the query is active.
+Admission, authorization and caller cancellation do not count. The breaker
+counts the final logical outcome after retries. Open circuits return HTTP 502
+or gRPC UNAVAILABLE while other dispatcher IDs remain independent. After the
+open interval, the first conclusive recovery probe wins. Debug logs describe
+transitions and admitted probes.

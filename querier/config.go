@@ -17,6 +17,7 @@ import (
 )
 
 var (
+	errUnknownCircuitBackend  = errors.New("backend_circuit_breakers references unknown dispatcher")
 	errRetryUnknownDispatcher = errors.New("backend_retries references unknown dispatcher")
 	errNegativeQueryTimeout   = errors.New("query_timeout must be non-negative")
 	// errEmptyPipelines is returned when no pipelines are configured.
@@ -51,8 +52,9 @@ type Config struct {
 // the opentelemetry-collector. The type token names the signal the pipeline
 // carries (metrics/logs/traces/profiles).
 type ServiceConfig struct {
-	BackendRetries map[string]pipeline.RetryConfig `mapstructure:"backend_retries"`
-	Pipelines      map[string]PipelineConfig       `mapstructure:"pipelines"`
+	BackendBreakers map[string]pipeline.CircuitConfig `mapstructure:"backend_circuit_breakers"`
+	BackendRetries  map[string]pipeline.RetryConfig   `mapstructure:"backend_retries"`
+	Pipelines       map[string]PipelineConfig         `mapstructure:"pipelines"`
 }
 
 // PipelineConfig references component instances by ID, defining processor order.
@@ -82,7 +84,7 @@ func LoadConfig(path string) (*Config, error) {
 		Processors:  nil,
 		Dispatchers: nil,
 		Connectors:  nil,
-		Service:     ServiceConfig{BackendRetries: nil, Pipelines: nil},
+		Service:     ServiceConfig{BackendBreakers: nil, BackendRetries: nil, Pipelines: nil},
 	}
 
 	err = decodeStrict(tree, cfg)
@@ -99,15 +101,9 @@ func LoadConfig(path string) (*Config, error) {
 }
 
 func (c *Config) validate() error {
-	for id, retry := range c.Service.BackendRetries {
-		if _, exists := c.Dispatchers[id]; !exists {
-			return fmt.Errorf("%w %q", errRetryUnknownDispatcher, id)
-		}
-
-		err := retry.Validate()
-		if err != nil {
-			return fmt.Errorf("dispatcher %q: %w", id, err)
-		}
+	err := c.validateBackends()
+	if err != nil {
+		return err
 	}
 
 	if len(c.Service.Pipelines) == 0 {
@@ -130,6 +126,32 @@ func (c *Config) validate() error {
 
 		if len(pipe.Dispatchers) != 1 {
 			return fmt.Errorf("%w: %q", errDispatcherCount, name)
+		}
+	}
+
+	return nil
+}
+
+func (c *Config) validateBackends() error {
+	for id, breaker := range c.Service.BackendBreakers {
+		if _, exists := c.Dispatchers[id]; !exists {
+			return fmt.Errorf("%w %q", errUnknownCircuitBackend, id)
+		}
+
+		err := breaker.Validate()
+		if err != nil {
+			return fmt.Errorf("dispatcher %q: %w", id, err)
+		}
+	}
+
+	for id, retry := range c.Service.BackendRetries {
+		if _, exists := c.Dispatchers[id]; !exists {
+			return fmt.Errorf("%w %q", errRetryUnknownDispatcher, id)
+		}
+
+		err := retry.Validate()
+		if err != nil {
+			return fmt.Errorf("dispatcher %q: %w", id, err)
 		}
 	}
 

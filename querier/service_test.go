@@ -95,11 +95,13 @@ func TestBuildWiresConnectorTargetsBySignal(t *testing.T) {
 		Processors:  nil,
 		Dispatchers: map[string]map[string]any{"prometheus": {}, "loki": {}},
 		Connectors:  map[string]map[string]any{"crosssignal": {}},
-		Service: querier.ServiceConfig{BackendRetries: nil, Pipelines: map[string]querier.PipelineConfig{
-			"metrics":    pipe("prometheus", "metricsin", "crosssignal"),
-			"logs":       pipe("loki", "logsin", "crosssignal"),
-			"logs/cross": pipe("crosssignal", "otqp"),
-		}},
+		Service: querier.ServiceConfig{
+			BackendBreakers: nil, BackendRetries: nil,
+			Pipelines: map[string]querier.PipelineConfig{
+				"metrics":    pipe("prometheus", "metricsin", "crosssignal"),
+				"logs":       pipe("loki", "logsin", "crosssignal"),
+				"logs/cross": pipe("crosssignal", "otqp"),
+			}},
 	}
 
 	svc, err := querier.Build(factories, cfg, buildInfo())
@@ -134,10 +136,12 @@ func TestBuildRejectsNestedConnectorTarget(t *testing.T) {
 		Processors:  nil,
 		Dispatchers: map[string]map[string]any{"prometheus": {}},
 		Connectors:  map[string]map[string]any{"crosssignal": {}},
-		Service: querier.ServiceConfig{BackendRetries: nil, Pipelines: map[string]querier.PipelineConfig{
-			"metrics":    pipe("prometheus", "metricsin"),
-			"logs/cross": pipe("crosssignal", "otqp", "crosssignal"),
-		}},
+		Service: querier.ServiceConfig{
+			BackendBreakers: nil, BackendRetries: nil,
+			Pipelines: map[string]querier.PipelineConfig{
+				"metrics":    pipe("prometheus", "metricsin"),
+				"logs/cross": pipe("crosssignal", "otqp", "crosssignal"),
+			}},
 	}
 
 	_, err = querier.Build(factories, cfg, buildInfo())
@@ -173,10 +177,12 @@ func TestBuildRejectsNamedSecurityDependency(t *testing.T) {
 		Acceptors:   map[string]map[string]any{"otqp": {}},
 		Processors:  map[string]map[string]any{"consumer/tenant-quota": {}},
 		Dispatchers: map[string]map[string]any{"prometheus": {}}, Connectors: nil,
-		Service: querier.ServiceConfig{BackendRetries: nil, Pipelines: map[string]querier.PipelineConfig{
-			"metrics/private": {QueryTimeout: 0, Acceptors: []string{"otqp"}, Processors: []string{"consumer/tenant-quota"},
-				Dispatchers: []string{"prometheus"}},
-		}},
+		Service: querier.ServiceConfig{
+			BackendBreakers: nil, BackendRetries: nil,
+			Pipelines: map[string]querier.PipelineConfig{
+				"metrics/private": {QueryTimeout: 0, Acceptors: []string{"otqp"}, Processors: []string{"consumer/tenant-quota"},
+					Dispatchers: []string{"prometheus"}},
+			}},
 	}
 	_, err := querier.Build(factories, cfg, buildInfo())
 	require.ErrorContains(t, err, "tenant resolver")
@@ -198,11 +204,13 @@ func TestBuildRejectsDuplicateConnectorTargets(t *testing.T) {
 	cfg := &querier.Config{
 		Acceptors: nil, Processors: nil, Dispatchers: nil,
 		Connectors: map[string]map[string]any{"crosssignal/a": {}},
-		Service: querier.ServiceConfig{BackendRetries: nil, Pipelines: map[string]querier.PipelineConfig{
-			"metrics/a":    pipe("prometheus", "crosssignal/a"),
-			"metrics/b":    pipe("prometheus", "crosssignal/a"),
-			"metrics/join": pipe("crosssignal/a", "otqp"),
-		}},
+		Service: querier.ServiceConfig{
+			BackendBreakers: nil, BackendRetries: nil,
+			Pipelines: map[string]querier.PipelineConfig{
+				"metrics/a":    pipe("prometheus", "crosssignal/a"),
+				"metrics/b":    pipe("prometheus", "crosssignal/a"),
+				"metrics/join": pipe("crosssignal/a", "otqp"),
+			}},
 	}
 
 	_, err = querier.Build(factories, cfg, buildInfo())

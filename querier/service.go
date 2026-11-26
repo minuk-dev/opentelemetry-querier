@@ -38,6 +38,7 @@ var (
 type Service struct {
 	buildInfo component.BuildInfo
 	logger    *slog.Logger
+	breakers  map[string]*pipeline.CircuitBreaker
 	pipelines []*pipeline.Pipeline
 	acceptors []acceptor.Acceptor
 	host      component.Host
@@ -59,9 +60,23 @@ func Build(factories Factories, cfg *Config, buildInfo component.BuildInfo) (*Se
 	svc := &Service{
 		buildInfo: buildInfo,
 		logger:    slog.Default(),
+		breakers:  nil,
 		pipelines: nil,
 		acceptors: nil,
 		host:      host{},
+	}
+
+	svc.breakers = make(map[string]*pipeline.CircuitBreaker)
+
+	for id, circuit := range cfg.Service.BackendBreakers {
+		err := circuit.Validate()
+		if err != nil {
+			return nil, fmt.Errorf("dispatcher %q: %w", id, err)
+		}
+
+		if circuit.FailureThreshold > 0 {
+			svc.breakers[id] = pipeline.NewCircuitBreaker(circuit, svc.logger.With("backend", id))
+		}
 	}
 
 	built := map[string]*pipeline.Pipeline{}
@@ -370,7 +385,12 @@ func (svc *Service) buildDispatcher(factories Factories, cfg *Config, idStr stri
 		return nil, fmt.Errorf("dispatcher %q: %w", idStr, err)
 	}
 
-	return pipeline.WithBackendRetry(disp, retry, svc.logger.With("backend", idStr)), nil
+	disp = pipeline.WithBackendRetry(disp, retry, svc.logger.With("backend", idStr))
+	if breaker := svc.breakers[idStr]; breaker != nil {
+		disp = breaker.Wrap(disp)
+	}
+
+	return disp, nil
 }
 
 func (svc *Service) buildAcceptor(
