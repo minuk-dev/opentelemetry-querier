@@ -26,6 +26,7 @@ func TestSimpleAuthz(t *testing.T) {
 	// Policy: admin is allowed unscoped, blocked is explicitly denied, and any
 	// other subject falls through to default_effect (deny).
 	authz := simpleauthzprocessor.New(simpleauthzprocessor.Config{
+		GroupRules:     nil,
 		SubjectHeader:  "X-Scope-User",
 		FromTenant:     false,
 		DefaultSubject: "",

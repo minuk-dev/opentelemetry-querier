@@ -10,6 +10,7 @@ import (
 )
 
 var (
+	errGroupsRequired = errors.New("groups are required")
 	// errInvalidConfig is returned when the factory receives an unexpected config type.
 	errInvalidConfig = errors.New("simpleauthz: invalid config type")
 	// errUnknownEffect is returned for an effect that is neither allow nor deny.
@@ -29,6 +30,7 @@ func NewFactory() processor.Factory {
 
 func createDefaultConfig() component.Config {
 	return &Config{
+		GroupRules:     nil,
 		SubjectHeader:  DefaultSubjectHeader,
 		FromTenant:     false,
 		DefaultSubject: "",
@@ -74,13 +76,20 @@ func Validate(cfg Config) error {
 		}
 	}
 
-	for index, rule := range cfg.GroupRules {
+	return validateGroups(cfg.GroupRules)
+}
+
+func validateGroups(rules []GroupRule) error {
+	for index, rule := range rules {
 		if len(rule.Groups) == 0 {
-			return fmt.Errorf("group_rules[%d]: groups are required", index)
+			return fmt.Errorf("group_rules[%d]: %w", index, errGroupsRequired)
 		}
-		if err := validateEffect(fmt.Sprintf("group_rules[%d].effect", index), rule.Effect); err != nil {
+
+		err := validateEffect(fmt.Sprintf("group_rules[%d].effect", index), rule.Effect)
+		if err != nil {
 			return err
 		}
+
 		for labelIndex, label := range rule.EnforceLabels {
 			if label.Name == "" {
 				return fmt.Errorf("%w: group_rules[%d].enforce_labels[%d]", errLabelNameEmpty, index, labelIndex)

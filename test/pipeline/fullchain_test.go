@@ -33,6 +33,7 @@ func defaultChain() []processor.Processor {
 			MaxKeys:           0,
 		}),
 		simpleauthzprocessor.New(simpleauthzprocessor.Config{
+			GroupRules:     nil,
 			SubjectHeader:  "X-Scope-User",
 			FromTenant:     false,
 			DefaultSubject: "",

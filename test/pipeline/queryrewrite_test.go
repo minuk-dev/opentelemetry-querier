@@ -75,6 +75,7 @@ func TestQueryRewriteEnforcesScopeDown(t *testing.T) {
 	t.Parallel()
 
 	authz := simpleauthzprocessor.New(simpleauthzprocessor.Config{
+		GroupRules:     nil,
 		SubjectHeader:  "X-Scope-User",
 		FromTenant:     false,
 		DefaultSubject: "",

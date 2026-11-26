@@ -60,7 +60,6 @@ type Rule struct {
 	EnforceLabels []EnforceLabel `mapstructure:"enforce_labels"`
 }
 
-// Config configures subject resolution and the authorization policy.
 // GroupRule grants or denies requests by a verified group name.
 type GroupRule struct {
 	Groups        []string       `mapstructure:"groups"`
@@ -68,6 +67,7 @@ type GroupRule struct {
 	EnforceLabels []EnforceLabel `mapstructure:"enforce_labels"`
 }
 
+// Config configures subject resolution and the authorization policy.
 type Config struct {
 	GroupRules []GroupRule `mapstructure:"group_rules"`
 	// SubjectHeader is the request header carrying the subject id.
@@ -99,27 +99,25 @@ func (p *Processor) SecurityRequirements() processor.SecurityRequirements {
 	requirements.NeedsTenant = p.cfg.FromTenant
 
 	for _, rule := range p.cfg.Rules {
-		if denies(rule.Effect) {
-			continue
-		}
-
-		requirements.RegistersEnforcement = requirements.RegistersEnforcement || len(rule.EnforceLabels) > 0
-
-		for _, label := range rule.EnforceLabels {
-			requirements.NeedsTenant = requirements.NeedsTenant || label.FromTenant
-		}
+		addRequirements(&requirements, rule.Effect, rule.EnforceLabels)
 	}
 
 	for _, rule := range p.cfg.GroupRules {
-		if denies(rule.Effect) {
-			continue
-		}
-		requirements.RegistersEnforcement = requirements.RegistersEnforcement || len(rule.EnforceLabels) > 0
-		for _, label := range rule.EnforceLabels {
-			requirements.NeedsTenant = requirements.NeedsTenant || label.FromTenant
-		}
+		addRequirements(&requirements, rule.Effect, rule.EnforceLabels)
 	}
+
 	return requirements
+}
+
+func addRequirements(requirements *processor.SecurityRequirements, effect string, labels []EnforceLabel) {
+	if denies(effect) {
+		return
+	}
+
+	requirements.RegistersEnforcement = requirements.RegistersEnforcement || len(labels) > 0
+	for _, label := range labels {
+		requirements.NeedsTenant = requirements.NeedsTenant || label.FromTenant
+	}
 }
 
 // New builds the processor, applying defaults. Callers should Validate the
@@ -176,29 +174,37 @@ func (p *Processor) ProcessQuery(ctx context.Context, query *qdata.Query) error 
 
 func (p *Processor) processGroups(ctx context.Context, query *qdata.Query, subject Rule, matched bool) error {
 	identity, _ := qdata.IdentityFromContext(ctx)
+
 	if matched && denies(subject.Effect) {
 		return qerror.New(qerror.CodePermissionDenied, "simpleauthz: subject denied by policy")
 	}
 
 	allowed := false
+
 	var labels []EnforceLabel
+
 	for _, rule := range p.cfg.GroupRules {
 		if !slices.ContainsFunc(rule.Groups, func(group string) bool { return slices.Contains(identity.Groups, group) }) {
 			continue
 		}
+
 		if denies(rule.Effect) {
 			return qerror.New(qerror.CodePermissionDenied, "simpleauthz: group denied by policy")
 		}
+
 		allowed = true
+
 		labels = append(labels, rule.EnforceLabels...)
 	}
 
 	if !allowed {
 		return qerror.New(qerror.CodePermissionDenied, "simpleauthz: no verified group grant")
 	}
+
 	if matched {
 		labels = append(labels, subject.EnforceLabels...)
 	}
+
 	return enforce(query, labels)
 }
 
