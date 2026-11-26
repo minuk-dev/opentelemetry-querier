@@ -17,8 +17,9 @@ import (
 const minGatewaySecretBytes = 32
 
 var (
-	errGatewayIdentityConfig = errors.New("gateway identity requires authority and secret_file")
-	errGatewaySecretSize     = errors.New("gateway identity secret must be at least 32 bytes")
+	errMultipleIdentityVerifiers = errors.New("configure one identity verifier per pipeline")
+	errGatewayIdentityConfig     = errors.New("gateway identity requires authority and secret_file")
+	errGatewaySecretSize         = errors.New("gateway identity secret must be at least 32 bytes")
 )
 
 // IdentityConfig configures identity for one query pipeline.
@@ -38,15 +39,19 @@ func configureIdentity(pipe *pipeline.Pipeline, cfg IdentityConfig) error {
 	pipe.TenantHeader = cfg.TenantHeader
 	if cfg.JWT != nil {
 		if cfg.Gateway != nil {
-			return errors.New("configure one identity verifier per pipeline")
+			return errMultipleIdentityVerifiers
 		}
+
 		authenticate, err := jwtAuthenticator(*cfg.JWT)
 		if err != nil {
 			return err
 		}
+
 		pipe.Authenticate = authenticate
+
 		return nil
 	}
+
 	if cfg.Gateway != nil {
 		authenticate, err := gatewayAuthenticator(*cfg.Gateway)
 		if err != nil {
