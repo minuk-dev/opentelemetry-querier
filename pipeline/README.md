@@ -51,3 +51,25 @@ subject and allowed tenant, then enable identity on the protected pipeline.
 Tenant and authorization processors use the verified identity when available.
 Authenticators can implement `pipeline.Authenticator`. Components can read
 the identity through `qdata.IdentityFromContext`, including in connector leaves.
+
+## Shared tenant quotas
+
+```yaml
+service:
+  shared_quota:
+    redis_url_file: /run/secrets/querier-redis-url
+    namespace: production
+    timeout: 250ms
+    tenant: {rate: 50, burst: 100}
+    deployment: {rate: 500, burst: 1000}
+```
+
+Use one Redis endpoint and namespace for all replicas and pipelines sharing
+the deployment ceiling. The mounted file contains a Redis connection URL.
+Use `rediss://` for TLS. Redis time drives both buckets. The two token
+charges are atomic, and every top-level query consumes one token from each
+bucket before dispatch. Connector operands reuse the parent admission.
+Over-quota requests return HTTP 429 or gRPC RESOURCE_EXHAUSTED.
+Timeout or unavailability returns 502 or UNAVAILABLE and stops dispatch.
+Omit `shared_quota` to use the local `authratelimit` processor where
+configured. Its bucket is scoped to one processor instance.

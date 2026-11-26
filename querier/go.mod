@@ -12,6 +12,7 @@ require (
 	github.com/minuk-dev/opentelemetry-querier/processor v0.1.0
 	github.com/minuk-dev/opentelemetry-querier/qdata v0.1.0
 	github.com/minuk-dev/opentelemetry-querier/qerror v0.1.0
+	github.com/redis/go-redis/v9 v9.22.0
 	github.com/stretchr/testify v1.12.1
 	gopkg.in/yaml.v3 v3.0.1
 )

@@ -46,7 +46,8 @@ type Config struct {
 // the opentelemetry-collector. The type token names the signal the pipeline
 // carries (metrics/logs/traces/profiles).
 type ServiceConfig struct {
-	Pipelines map[string]PipelineConfig `mapstructure:"pipelines"`
+	SharedQuota *SharedQuotaConfig        `mapstructure:"shared_quota"`
+	Pipelines   map[string]PipelineConfig `mapstructure:"pipelines"`
 }
 
 // PipelineConfig references component instances by ID, defining processor order.

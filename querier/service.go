@@ -38,6 +38,7 @@ var (
 type Service struct {
 	buildInfo component.BuildInfo
 	logger    *slog.Logger
+	quota     *sharedQuota
 	pipelines []*pipeline.Pipeline
 	acceptors []acceptor.Acceptor
 	host      component.Host
@@ -64,6 +65,19 @@ func Build(factories Factories, cfg *Config, buildInfo component.BuildInfo) (*Se
 		host:      host{},
 	}
 
+	if cfg.Service.SharedQuota != nil {
+		quota, err := newSharedQuota(*cfg.Service.SharedQuota)
+		if err != nil {
+			return nil, err
+		}
+		svc.quota = quota
+	}
+	builtOK := false
+	defer func() {
+		if !builtOK && svc.quota != nil {
+			_ = svc.quota.client.Close()
+		}
+	}()
 	built := map[string]*pipeline.Pipeline{}
 
 	err := svc.buildLeafPipelines(factories, cfg, built)
@@ -90,6 +104,7 @@ func Build(factories Factories, cfg *Config, buildInfo component.BuildInfo) (*Se
 		return nil, err
 	}
 
+	builtOK = true
 	return svc, nil
 }
 
@@ -130,6 +145,9 @@ func (svc *Service) Shutdown(ctx context.Context) error {
 		}
 	}
 
+	if svc.quota != nil {
+		errs = append(errs, svc.quota.client.Close())
+	}
 	return errors.Join(errs...)
 }
 
@@ -159,6 +177,9 @@ func (svc *Service) buildLeafPipelines(factories Factories, cfg *Config, built m
 		}
 
 		built[name] = pipeline.New(name, procs, disp)
+		if svc.quota != nil {
+			built[name].AdmitQuota = svc.quota.admit
+		}
 		if err := configureIdentity(built[name], pipelineCfg.Identity); err != nil {
 			return fmt.Errorf("pipeline %q: %w", name, err)
 		}
@@ -239,6 +260,9 @@ func (svc *Service) buildConnectorPipelines(
 		}
 
 		built[name] = pipeline.New(name, procs, conn)
+		if svc.quota != nil {
+			built[name].AdmitQuota = svc.quota.admit
+		}
 		if err := configureIdentity(built[name], pipelineCfg.Identity); err != nil {
 			return fmt.Errorf("pipeline %q: %w", name, err)
 		}

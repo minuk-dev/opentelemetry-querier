@@ -31,10 +31,13 @@ func (f HandlerFunc) Handle(ctx context.Context, q *qdata.Query) (*qdata.Result,
 }
 
 // Pipeline is an ordered processor chain terminated by a dispatcher.
+type quotaAdmittedKey struct{}
+
 type Pipeline struct {
 	Name         string
 	Authenticate Authenticator
 	TenantHeader string
+	AdmitQuota   func(context.Context) error
 	Processors   []processor.Processor
 	Dispatcher   dispatcher.Dispatcher
 }
@@ -63,6 +66,12 @@ func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (*qdata.Resul
 		return nil, err
 	}
 
+	if p.AdmitQuota != nil && ctx.Value(quotaAdmittedKey{}) == nil {
+		if err := p.AdmitQuota(ctx); err != nil {
+			return nil, err
+		}
+		ctx = context.WithValue(ctx, quotaAdmittedKey{}, true)
+	}
 	return p.execute(ctx, query, p.Processors)
 }
 
