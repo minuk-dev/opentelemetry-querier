@@ -3,6 +3,7 @@ package querier
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -44,87 +45,155 @@ type athenzIdentity struct {
 	done        chan struct{}
 }
 
-func newAthenzIdentity(cfg AthenzIdentityConfig) (*athenzIdentity, error) {
-	endpoint, err := url.Parse(cfg.ZTSURL)
-	if err != nil || endpoint.Scheme != "https" || endpoint.Hostname() == "" || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" {
-		return nil, errors.New("Athenz zts_url must be an HTTPS ZTS API URL")
-	}
+const (
+	athenzRequestTimeout = 5 * time.Second
+	defaultAthenzRefresh = 15 * time.Minute
+	defaultAthenzMaxAge  = 45 * time.Minute
+	maxAthenzPolicyAge   = 24 * time.Hour
+	maxAthenzTokenBytes  = 8192
+)
+
+var (
+	errAthenzEndpoint      = errors.New("athenz zts_url must be an HTTPS ZTS API URL")
+	errAthenzIdentifier    = errors.New("invalid Athenz domain, action, resource prefix or tenant")
+	errAthenzRefreshBounds = errors.New("athenz policy age must be between the 1s minimum refresh interval and 24h")
+	errAthenzStartup       = errors.New("athenz initial policy refresh failed")
+)
+
+func (cfg *AthenzIdentityConfig) defaults() {
 	if cfg.Action == "" {
 		cfg.Action = "query"
 	}
+
 	if cfg.ResourcePrefix == "" {
 		cfg.ResourcePrefix = "query"
 	}
-	for _, id := range []string{cfg.Domain, cfg.Action, cfg.ResourcePrefix, cfg.Tenant} {
-		if !athenzIdentifier.MatchString(id) {
-			return nil, errors.New("invalid Athenz domain, action, resource prefix or tenant")
-		}
-	}
+
 	if cfg.RefreshInterval == 0 {
-		cfg.RefreshInterval = 15 * time.Minute
-	}
-	if cfg.MaxPolicyAge == 0 {
-		cfg.MaxPolicyAge = 45 * time.Minute
-	}
-	if cfg.RefreshInterval < time.Second || cfg.MaxPolicyAge < cfg.RefreshInterval || cfg.MaxPolicyAge > 24*time.Hour {
-		return nil, errors.New("Athenz refresh interval must be at least 1s and max policy age must be between the refresh interval and 24h")
+		cfg.RefreshInterval = defaultAthenzRefresh
 	}
 
-	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	keys, err := pubkey.New(pubkey.WithAthenzURL(cfg.ZTSURL), pubkey.WithHTTPClient(client))
+	if cfg.MaxPolicyAge == 0 {
+		cfg.MaxPolicyAge = defaultAthenzMaxAge
+	}
+}
+
+func (cfg *AthenzIdentityConfig) validate() error {
+	endpoint, err := url.Parse(cfg.ZTSURL)
+	if err != nil || endpoint.Scheme != "https" || endpoint.Hostname() == "" ||
+		endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" {
+		return errAthenzEndpoint
+	}
+
+	return cfg.validatePolicy()
+}
+
+func (cfg *AthenzIdentityConfig) validatePolicy() error {
+	for _, id := range []string{cfg.Domain, cfg.Action, cfg.ResourcePrefix, cfg.Tenant} {
+		if !athenzIdentifier.MatchString(id) {
+			return errAthenzIdentifier
+		}
+	}
+
+	if cfg.RefreshInterval < time.Second || cfg.MaxPolicyAge < cfg.RefreshInterval ||
+		cfg.MaxPolicyAge > maxAthenzPolicyAge {
+		return errAthenzRefreshBounds
+	}
+
+	return nil
+}
+
+func newAthenzIdentity(cfg AthenzIdentityConfig) (*athenzIdentity, error) {
+	cfg.defaults()
+
+	err := cfg.validate()
 	if err != nil {
 		return nil, err
 	}
+
+	client := &http.Client{
+		Timeout:       athenzRequestTimeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+
+	keys, err := pubkey.New(pubkey.WithAthenzURL(cfg.ZTSURL), pubkey.WithHTTPClient(client))
+	if err != nil {
+		return nil, fmt.Errorf("create Athenz public key provider: %w", err)
+	}
+
 	policies, err := policy.New(policy.WithAthenzURL(cfg.ZTSURL), policy.WithAthenzDomains(cfg.Domain),
 		policy.WithPubKeyProvider(keys.GetProvider()), policy.WithHTTPClient(client))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create Athenz policy provider: %w", err)
 	}
+
 	roles, err := role.New(role.WithPubkeyProvider(keys.GetProvider()))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create Athenz role verifier: %w", err)
 	}
 
 	return &athenzIdentity{
 		cfg: cfg, verify: roles.ParseAndValidateRoleToken, check: policies.CheckPolicy,
+		lastRefresh: atomic.Int64{}, cancel: nil, done: nil,
 		refresh: func(ctx context.Context) error {
-			if err := keys.Update(ctx); err != nil {
-				return err
+			err := keys.Update(ctx)
+			if err != nil {
+				return fmt.Errorf("refresh Athenz keys: %w", err)
 			}
-			return policies.Update(ctx)
+
+			err = policies.Update(ctx)
+			if err != nil {
+				return fmt.Errorf("refresh Athenz policy: %w", err)
+			}
+
+			return nil
 		},
 	}, nil
 }
 
 func (a *athenzIdentity) Start(ctx context.Context, _ component.Host) error {
-	if err := ctx.Err(); err != nil {
-		return err
+	err := ctx.Err()
+	if err != nil {
+		return fmt.Errorf("start Athenz refresh: %w", err)
 	}
+
 	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	if err := a.refresh(ctx); err != nil {
+
+	err = a.refresh(ctx)
+	if err != nil {
 		cancel()
-		return errors.New("Athenz initial policy refresh failed")
+
+		return errAthenzStartup
 	}
+
 	a.lastRefresh.Store(time.Now().UnixNano())
 	a.cancel = cancel
 	a.done = make(chan struct{})
+
 	go func() {
+		defer cancel()
 		defer close(a.done)
+
 		ticker := time.NewTicker(a.cfg.RefreshInterval)
 		defer ticker.Stop()
+
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if err := a.refresh(ctx); err != nil {
+				err := a.refresh(ctx)
+				if err != nil {
 					slog.Warn("Athenz policy refresh failed", "domain", a.cfg.Domain)
+
 					continue
 				}
+
 				a.lastRefresh.Store(time.Now().UnixNano())
 			}
 		}
 	}()
+
 	return nil
 }
 
@@ -132,53 +201,85 @@ func (a *athenzIdentity) Shutdown(ctx context.Context) error {
 	if a.cancel == nil {
 		return nil
 	}
+
 	a.cancel()
+
 	select {
 	case <-a.done:
 		return nil
 	case <-ctx.Done():
-		return ctx.Err()
+		return fmt.Errorf("stop Athenz refresh: %w", ctx.Err())
 	}
 }
 
-func (a *athenzIdentity) authenticate(ctx context.Context, q *qdata.Query) (pipeline.Principal, error) {
-	values := qdata.HeaderValuesFor(q, "Athenz-Role-Auth")
-	if len(values) != 1 || len(values[0]) == 0 || len(values[0]) > 8192 {
+func (a *athenzIdentity) authenticate(ctx context.Context, query *qdata.Query) (pipeline.Principal, error) {
+	values := qdata.HeaderValuesFor(query, "Athenz-Role-Auth")
+	if len(values) != 1 || len(values[0]) == 0 || len(values[0]) > maxAthenzTokenBytes {
 		return pipeline.Principal{}, qerror.New(qerror.CodeUnauthenticated, "missing or malformed Athenz role token")
 	}
+
 	last := time.Unix(0, a.lastRefresh.Load())
 	if time.Since(last) > a.cfg.MaxPolicyAge {
 		return pipeline.Principal{}, qerror.New(qerror.CodeUnavailable, "Athenz policy unavailable")
 	}
+
 	token, err := a.verify(values[0])
-	if err != nil || token == nil || token.Principal == "" || len(token.Roles) == 0 {
+	if err != nil || !validAthenzRole(token) {
 		return pipeline.Principal{}, qerror.New(qerror.CodeUnauthenticated, "invalid Athenz role token")
 	}
+
 	if token.Domain != a.cfg.Domain {
 		return pipeline.Principal{}, qerror.New(qerror.CodePermissionDenied, "Athenz token domain rejected")
 	}
-	signals := qdata.QuerySignals(q)
-	if len(signals) == 0 {
-		return pipeline.Principal{}, qerror.New(qerror.CodePermissionDenied, "missing Athenz query resource")
+
+	err = a.checkResources(ctx, query, token.Roles)
+	if err != nil {
+		return pipeline.Principal{}, err
 	}
+
+	if a.cfg.EnforceLabel != "" {
+		query.EnforcedMatchers = append(query.EnforcedMatchers, &qdata.LabelMatcher{
+			Name: a.cfg.EnforceLabel, Op: qdata.MatchEqual, Value: a.cfg.Tenant,
+		})
+	}
+
+	return pipeline.Principal{
+		Identity: qdata.Identity{
+			Authority: "athenz:" + a.cfg.Domain, Principal: token.Principal,
+			Tenant: "", Groups: nil, Roles: token.Roles, Scopes: nil,
+		},
+		Tenants: []string{a.cfg.Tenant},
+	}, nil
+}
+
+func (a *athenzIdentity) checkResources(ctx context.Context, query *qdata.Query, roles []string) error {
+	signals := qdata.QuerySignals(query)
+	if len(signals) == 0 {
+		return qerror.New(qerror.CodePermissionDenied, "missing Athenz query resource")
+	}
+
 	for _, signal := range signals {
 		if signal == qdata.SignalUnspecified {
-			return pipeline.Principal{}, qerror.New(qerror.CodePermissionDenied, "missing Athenz query resource")
+			return qerror.New(qerror.CodePermissionDenied, "missing Athenz query resource")
 		}
+
 		kind := strings.ToLower(strings.TrimPrefix(signal.String(), "SIGNAL_"))
+
 		resource := a.cfg.Domain + ":" + a.cfg.ResourcePrefix + "." + kind
-		if err := a.check(ctx, a.cfg.Domain, token.Roles, a.cfg.Action, resource); err != nil {
+
+		err := a.check(ctx, a.cfg.Domain, roles, a.cfg.Action, resource)
+		if err != nil {
 			if ctx.Err() != nil {
-				return pipeline.Principal{}, qerror.UpstreamTransportError(ctx.Err())
+				return qerror.UpstreamTransportError(ctx.Err())
 			}
-			return pipeline.Principal{}, qerror.New(qerror.CodePermissionDenied, "Athenz policy denied query")
+
+			return qerror.New(qerror.CodePermissionDenied, "Athenz policy denied query")
 		}
 	}
-	if a.cfg.EnforceLabel != "" {
-		q.EnforcedMatchers = append(q.EnforcedMatchers, &qdata.LabelMatcher{Name: a.cfg.EnforceLabel, Op: qdata.MatchEqual, Value: a.cfg.Tenant})
-	}
-	return pipeline.Principal{
-		Identity: qdata.Identity{Authority: "athenz:" + a.cfg.Domain, Principal: token.Principal, Roles: token.Roles},
-		Tenants:  []string{a.cfg.Tenant},
-	}, nil
+
+	return nil
+}
+
+func validAthenzRole(token *role.Token) bool {
+	return token != nil && token.Principal != "" && len(token.Roles) > 0
 }

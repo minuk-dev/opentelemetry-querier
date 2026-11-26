@@ -43,7 +43,10 @@ type Pipeline struct {
 
 // New builds a pipeline.
 func New(name string, processors []processor.Processor, disp dispatcher.Dispatcher) *Pipeline {
-	return &Pipeline{Name: name, Authenticate: nil, TenantHeader: "", Processors: processors, Dispatcher: disp}
+	return &Pipeline{
+		Name: name, Authenticate: nil, AuthenticationLifecycle: nil, TenantHeader: "",
+		Processors: processors, Dispatcher: disp,
+	}
 }
 
 // Handle validates the client's plan, runs the request path (processors in
@@ -91,10 +94,12 @@ func (p *Pipeline) Start(ctx context.Context, host component.Host) error {
 	}
 
 	if p.AuthenticationLifecycle != nil {
-		if err := p.AuthenticationLifecycle.Start(ctx, host); err != nil {
+		err := p.AuthenticationLifecycle.Start(ctx, host)
+		if err != nil {
 			return fmt.Errorf("pipeline %q: start authentication: %w", p.Name, err)
 		}
 	}
+
 	return nil
 }
 
@@ -108,10 +113,12 @@ func (p *Pipeline) Shutdown(ctx context.Context) error {
 	if p.AuthenticationLifecycle != nil {
 		authErr = p.AuthenticationLifecycle.Shutdown(ctx)
 	}
+
 	err := p.Dispatcher.Shutdown(ctx)
 	if err != nil {
 		err = fmt.Errorf("pipeline %q: shutdown dispatcher: %w", p.Name, err)
 	}
+
 	return errors.Join(authErr, err)
 }
 
