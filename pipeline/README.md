@@ -71,3 +71,14 @@ The parent holds one verified-tenant slot through connector execution.
 Each storage call takes its configured backend slot. Cache hits only
 take a tenant slot. Slots release after active work ends. Waiters
 compete for a freed slot.
+
+## Query telemetry
+
+Set `service.telemetry: true` to export traces and metrics through OTLP
+gRPC. Configure the collector with `OTEL_EXPORTER_OTLP_ENDPOINT` and the
+standard OTLP exporter variables. Metrics include `querier.query.requests`,
+`querier.query.stage.duration` (seconds, including tenant and backend
+admission latency when configured), `querier.query.in_flight`, and
+`querier.query.cache.lookups`. Only fixed stage and outcome labels are used.
+Inbound W3C trace context is propagated into pipeline and connector spans.
+Query payloads, identity values and error strings are omitted from telemetry.

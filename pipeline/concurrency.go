@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 
 	"github.com/minuk-dev/opentelemetry-querier/dispatcher"
@@ -91,7 +92,17 @@ func admissionContextError(ctx context.Context) error {
 	return qerror.New(qerror.CodeCanceled, "query canceled during admission")
 }
 
-func (c *Concurrency) acquire(ctx context.Context, key string, limit int) (func(), error) {
+func (c *Concurrency) acquire(ctx context.Context, key string, limit int) (_ func(), admissionErr error) {
+	telemetry, _ := ctx.Value(telemetryKey{}).(*Telemetry)
+	if telemetry != nil {
+		stage := "tenant_admission"
+		if strings.HasPrefix(key, "backend:") {
+			stage = "backend_admission"
+		}
+		var done func(error)
+		ctx, done = telemetry.stage(ctx, stage)
+		defer func() { done(admissionErr) }()
+	}
 	queued := false
 	for {
 		c.mu.Lock()

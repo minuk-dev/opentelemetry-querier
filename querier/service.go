@@ -36,12 +36,14 @@ var (
 // Service is a fully assembled, runnable querier: a set of pipelines and the
 // acceptors that feed them.
 type Service struct {
-	buildInfo   component.BuildInfo
-	logger      *slog.Logger
-	concurrency *pipeline.Concurrency
-	pipelines   []*pipeline.Pipeline
-	acceptors   []acceptor.Acceptor
-	host        component.Host
+	buildInfo     component.BuildInfo
+	logger        *slog.Logger
+	concurrency   *pipeline.Concurrency
+	telemetry     *pipeline.Telemetry
+	stopTelemetry func(context.Context) error
+	pipelines     []*pipeline.Pipeline
+	acceptors     []acceptor.Acceptor
+	host          component.Host
 }
 
 // host is a minimal component.Host implementation.
@@ -101,6 +103,16 @@ func Build(factories Factories, cfg *Config, buildInfo component.BuildInfo) (*Se
 		return nil, err
 	}
 
+	if cfg.Service.Telemetry {
+		telemetry, stop, err := newTelemetry(context.Background())
+		if err != nil {
+			return nil, fmt.Errorf("query telemetry: %w", err)
+		}
+		svc.telemetry, svc.stopTelemetry = telemetry, stop
+		for _, pipe := range built {
+			pipe.Telemetry = svc.telemetry
+		}
+	}
 	return svc, nil
 }
 
@@ -141,6 +153,9 @@ func (svc *Service) Shutdown(ctx context.Context) error {
 		}
 	}
 
+	if svc.stopTelemetry != nil {
+		errs = append(errs, svc.stopTelemetry(ctx))
+	}
 	return errors.Join(errs...)
 }
 
@@ -251,6 +266,7 @@ func (svc *Service) buildConnectorPipelines(
 		}
 
 		built[name] = pipeline.New(name, procs, conn)
+		built[name].Connector = true
 		built[name].Concurrency = svc.concurrency
 		if err := configureIdentity(built[name], pipelineCfg.Identity); err != nil {
 			return fmt.Errorf("pipeline %q: %w", name, err)

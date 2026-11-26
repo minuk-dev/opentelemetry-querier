@@ -47,6 +47,7 @@ type Config struct {
 // the opentelemetry-collector. The type token names the signal the pipeline
 // carries (metrics/logs/traces/profiles).
 type ServiceConfig struct {
+	Telemetry   bool                       `mapstructure:"telemetry"`
 	Concurrency pipeline.ConcurrencyConfig `mapstructure:"concurrency"`
 	Pipelines   map[string]PipelineConfig  `mapstructure:"pipelines"`
 }
