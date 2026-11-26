@@ -135,7 +135,10 @@ func (store basicCredentials) authenticate(_ context.Context, query *qdata.Query
 	}
 
 	return pipeline.Principal{
-		Identity: qdata.Identity{Authority: store.authority, Principal: username, Tenant: "", Groups: nil, Roles: nil, Scopes: nil},
-		Tenants:  record.tenants,
+		Identity: qdata.Identity{
+			Authority: store.authority, Principal: username, Tenant: "",
+			Groups: nil, Roles: nil, Scopes: nil,
+		},
+		Tenants: record.tenants,
 	}, nil
 }
