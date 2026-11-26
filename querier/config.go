@@ -16,6 +16,7 @@ import (
 )
 
 var (
+	errNegativeQueryTimeout = errors.New("query_timeout must be non-negative")
 	// errEmptyPipelines is returned when no pipelines are configured.
 	errEmptyPipelines = errors.New("querier: service.pipelines is empty")
 	// errNoAcceptors is returned when a pipeline lists no acceptors.
@@ -110,8 +111,9 @@ func (c *Config) validate() error {
 
 	for name, pipe := range c.Service.Pipelines {
 		if pipe.QueryTimeout < 0 {
-			return fmt.Errorf("pipeline %q: query_timeout must be non-negative", name)
+			return fmt.Errorf("pipeline %q: %w", name, errNegativeQueryTimeout)
 		}
+
 		_, err := pipelineSignal(name)
 		if err != nil {
 			return err

@@ -259,6 +259,7 @@ func TestHandleRejectsUnappliedConstraints(t *testing.T) {
 
 type deadlineDispatcher struct {
 	dispatcher.Base
+
 	run func(context.Context) (*qdata.Result, error)
 }
 
@@ -269,34 +270,55 @@ func (d deadlineDispatcher) Dispatch(ctx context.Context, _ *qdata.Query) (*qdat
 func TestHandleQueryDeadline(t *testing.T) {
 	t.Parallel()
 	t.Run("expired before dispatch", func(t *testing.T) {
-		pipe := pipeline.New("test", nil, deadlineDispatcher{run: func(context.Context) (*qdata.Result, error) {
-			t.Fatal("expired query reached backend")
-			return nil, nil
-		}})
+		t.Parallel()
+
+		pipe := pipeline.New("test", nil, deadlineDispatcher{
+			Base: dispatcher.Base{},
+			run: func(context.Context) (*qdata.Result, error) {
+				t.Fatal("expired query reached backend")
+
+				return nil, context.DeadlineExceeded
+			},
+		})
 		pipe.Timeout = time.Hour
+
 		ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
 		defer cancel()
+
 		_, err := pipe.Handle(ctx, &qdata.Query{})
 		require.Equal(t, qerror.CodeDeadlineExceeded, qerror.CodeOf(err))
 	})
 	t.Run("backend observes expiration", func(t *testing.T) {
-		pipe := pipeline.New("test", nil, deadlineDispatcher{run: func(ctx context.Context) (*qdata.Result, error) {
-			<-ctx.Done()
-			require.ErrorIs(t, ctx.Err(), context.DeadlineExceeded)
-			return nil, ctx.Err()
-		}})
+		t.Parallel()
+
+		pipe := pipeline.New("test", nil, deadlineDispatcher{
+			Base: dispatcher.Base{},
+			run: func(ctx context.Context) (*qdata.Result, error) {
+				<-ctx.Done()
+				require.ErrorIs(t, ctx.Err(), context.DeadlineExceeded)
+
+				return nil, ctx.Err()
+			},
+		})
 		pipe.Timeout = 25 * time.Millisecond
 		_, err := pipe.Handle(t.Context(), &qdata.Query{})
 		require.Equal(t, qerror.CodeDeadlineExceeded, qerror.CodeOf(err))
 	})
 	t.Run("caller cancellation", func(t *testing.T) {
+		t.Parallel()
+
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
-		pipe := pipeline.New("test", nil, deadlineDispatcher{run: func(ctx context.Context) (*qdata.Result, error) {
-			cancel()
-			<-ctx.Done()
-			return nil, ctx.Err()
-		}})
+
+		pipe := pipeline.New("test", nil, deadlineDispatcher{
+			Base: dispatcher.Base{},
+			run: func(ctx context.Context) (*qdata.Result, error) {
+				cancel()
+				<-ctx.Done()
+
+				return nil, ctx.Err()
+			},
+		})
 		_, err := pipe.Handle(ctx, &qdata.Query{})
 		require.Equal(t, qerror.CodeCanceled, qerror.CodeOf(err))
 	})
