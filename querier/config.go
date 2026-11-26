@@ -3,9 +3,10 @@ package querier
 import (
 	"errors"
 	"fmt"
-	"github.com/minuk-dev/opentelemetry-querier/pipeline"
 	"os"
 	"path/filepath"
+
+	"github.com/minuk-dev/opentelemetry-querier/pipeline"
 
 	"github.com/go-viper/mapstructure/v2"
 	"gopkg.in/yaml.v3"
@@ -99,10 +100,12 @@ func (c *Config) validate() error {
 	}
 
 	for name, pipe := range c.Service.Pipelines {
-		if err := pipe.QueryBudget.Validate(); err != nil {
+		err := pipe.QueryBudget.Validate()
+		if err != nil {
 			return fmt.Errorf("pipeline %q: %w", name, err)
 		}
-		_, err := pipelineSignal(name)
+
+		_, err = pipelineSignal(name)
 		if err != nil {
 			return err
 		}

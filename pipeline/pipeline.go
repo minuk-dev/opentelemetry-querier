@@ -40,7 +40,9 @@ type Pipeline struct {
 
 // New builds a pipeline.
 func New(name string, processors []processor.Processor, disp dispatcher.Dispatcher) *Pipeline {
-	return &Pipeline{Name: name, Processors: processors, Dispatcher: disp}
+	var budget CostBudget
+
+	return &Pipeline{Name: name, Cost: budget, Processors: processors, Dispatcher: disp}
 }
 
 // Handle validates the client's plan, runs the request path (processors in
@@ -58,9 +60,11 @@ func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (*qdata.Resul
 		return nil, err
 	}
 
-	if err := p.Cost.check(query); err != nil {
+	err = p.Cost.check(query)
+	if err != nil {
 		return nil, err
 	}
+
 	return p.execute(ctx, query, p.Processors)
 }
 

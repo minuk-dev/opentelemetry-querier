@@ -9,6 +9,8 @@ import (
 	"github.com/minuk-dev/opentelemetry-querier/qerror"
 )
 
+var errNegativeCostBudget = errors.New("query budgets must be non-negative")
+
 // CostBudget limits estimated work before dispatch. Zero disables a limit.
 type CostBudget struct {
 	MaxRange     time.Duration `mapstructure:"max_range"`
@@ -19,57 +21,82 @@ type CostBudget struct {
 // Validate rejects negative query budgets.
 func (b CostBudget) Validate() error {
 	if b.MaxRange < 0 || b.MaxPoints < 0 || b.MaxPlanNodes < 0 {
-		return errors.New("query budgets must be non-negative")
+		return errNegativeCostBudget
 	}
+
 	return nil
 }
 
 func (b CostBudget) check(query *qdata.Query) error {
-	if b == (CostBudget{}) {
+	var disabled CostBudget
+	if b == disabled {
 		return nil
 	}
+
 	nodes, selectors := planCost(query.GetPlan().GetRoot())
 	if b.MaxPlanNodes > 0 && nodes > b.MaxPlanNodes {
 		return exceededBudget("max_plan_nodes")
 	}
 
-	evaluations := big.NewInt(1)
-	if query.GetContext() == qdata.ContextRange {
+	if b.MaxRange > 0 && query.GetContext() == qdata.ContextRange {
 		window := query.GetRange()
-		start, end := window.GetStart().AsTime(), window.GetEnd().AsTime()
-		if b.MaxRange > 0 && start.Add(b.MaxRange).Before(end) {
+		if window.GetStart().AsTime().Add(b.MaxRange).Before(window.GetEnd().AsTime()) {
 			return exceededBudget("max_range")
 		}
-		if step := query.GetStep().AsDuration(); step > 0 {
-			// Protobuf timestamps can describe windows wider than time.Duration.
-			evaluations.SetInt64(end.Unix() - start.Unix())
-			evaluations.Mul(evaluations, big.NewInt(int64(time.Second)))
-			evaluations.Add(evaluations, big.NewInt(int64(end.Nanosecond()-start.Nanosecond())))
-			evaluations.Quo(evaluations, big.NewInt(int64(step)))
-			evaluations.Add(evaluations, big.NewInt(1))
-		}
 	}
+
+	if b.MaxPoints == 0 {
+		return nil
+	}
+
+	evaluations := evaluationPoints(query)
+
 	evaluations.Mul(evaluations, big.NewInt(max(1, selectors)))
-	if b.MaxPoints > 0 && (!evaluations.IsInt64() || evaluations.Int64() > b.MaxPoints) {
+
+	if !evaluations.IsInt64() || evaluations.Int64() > b.MaxPoints {
 		return exceededBudget("max_points")
 	}
+
 	return nil
+}
+
+func evaluationPoints(query *qdata.Query) *big.Int {
+	step := query.GetStep().AsDuration()
+	if query.GetContext() != qdata.ContextRange || step <= 0 {
+		return big.NewInt(1)
+	}
+
+	window := query.GetRange()
+	start, end := window.GetStart().AsTime(), window.GetEnd().AsTime()
+
+	// Protobuf timestamps can describe windows wider than time.Duration.
+	points := big.NewInt(end.Unix() - start.Unix())
+	points.Mul(points, big.NewInt(int64(time.Second)))
+	points.Add(points, big.NewInt(int64(end.Nanosecond()-start.Nanosecond())))
+	points.Quo(points, big.NewInt(int64(step)))
+
+	return points.Add(points, big.NewInt(1))
 }
 
 func exceededBudget(limit string) error {
 	return qerror.New(qerror.CodeResourceExhausted, "query cost exceeds %s", limit)
 }
 
-func planCost(node *qdata.Node) (nodes, selectors int64) {
+func planCost(node *qdata.Node) (int64, int64) {
 	if node == nil {
 		return 0, 0
 	}
-	nodes = 1
+
+	nodes := int64(1)
+
+	var selectors int64
+
 	visit := func(child *qdata.Node) {
 		childNodes, childSelectors := planCost(child)
 		nodes += childNodes
 		selectors += childSelectors
 	}
+
 	switch {
 	case node.GetSelect() != nil:
 		selectors++
@@ -85,5 +112,6 @@ func planCost(node *qdata.Node) (nodes, selectors int64) {
 			visit(arg)
 		}
 	}
+
 	return nodes, selectors
 }
