@@ -51,3 +51,31 @@ subject and allowed tenant, then enable identity on the protected pipeline.
 Tenant and authorization processors use the verified identity when available.
 Authenticators can implement `pipeline.Authenticator`. Components can read
 the identity through `qdata.IdentityFromContext`, including in connector leaves.
+
+### Athenz policy
+
+```yaml
+identity:
+  athenz:
+    zts_url: https://zts.example.com/zts/v1
+    domain: team
+    action: query
+    resource_prefix: queries
+    tenant: team-a
+    enforce_label: tenant
+    refresh_interval: 15m
+    max_policy_age: 45m
+```
+
+Send a signed Athenz role token in `Athenz-Role-Auth`. This mode uses the
+Athenz Go role verifier and signed policy evaluator. A metrics operation in
+the example checks action `query` on `team:queries.metrics`. Each signal
+in a connector plan must be allowed. The pipeline selects its configured
+tenant. When `enforce_label` is set, configure query rewrite on the same
+pipeline to apply the tenant selector.
+
+Startup requires a successful key and policy refresh. Later refresh
+failures retain previously verified policy until the signed expiry or the
+configured maximum age since a successful refresh. Authorization resumes
+when refresh succeeds. Unavailable policy, invalid credentials and denied
+queries stop before dispatch.

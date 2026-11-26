@@ -16,6 +16,7 @@ import (
 
 // IdentityConfig configures identity for one query pipeline.
 type IdentityConfig struct {
+	Athenz       *AthenzIdentityConfig  `mapstructure:"athenz"`
 	TenantHeader string                 `mapstructure:"tenant_header"`
 	Gateway      *GatewayIdentityConfig `mapstructure:"gateway"`
 }
@@ -28,6 +29,18 @@ type GatewayIdentityConfig struct {
 
 func configureIdentity(pipe *pipeline.Pipeline, cfg IdentityConfig) error {
 	pipe.TenantHeader = cfg.TenantHeader
+	if cfg.Athenz != nil {
+		if cfg.Gateway != nil {
+			return errors.New("configure one identity verifier per pipeline")
+		}
+		auth, err := newAthenzIdentity(*cfg.Athenz)
+		if err != nil {
+			return err
+		}
+		pipe.Authenticate = auth.authenticate
+		pipe.AuthenticationLifecycle = auth
+		return nil
+	}
 	if cfg.Gateway != nil {
 		authenticate, err := gatewayAuthenticator(*cfg.Gateway)
 		if err != nil {

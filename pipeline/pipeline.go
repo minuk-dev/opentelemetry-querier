@@ -6,6 +6,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -32,11 +33,12 @@ func (f HandlerFunc) Handle(ctx context.Context, q *qdata.Query) (*qdata.Result,
 
 // Pipeline is an ordered processor chain terminated by a dispatcher.
 type Pipeline struct {
-	Name         string
-	Authenticate Authenticator
-	TenantHeader string
-	Processors   []processor.Processor
-	Dispatcher   dispatcher.Dispatcher
+	Name                    string
+	Authenticate            Authenticator
+	AuthenticationLifecycle component.Component
+	TenantHeader            string
+	Processors              []processor.Processor
+	Dispatcher              dispatcher.Dispatcher
 }
 
 // New builds a pipeline.
@@ -87,6 +89,11 @@ func (p *Pipeline) Start(ctx context.Context, host component.Host) error {
 		}
 	}
 
+	if p.AuthenticationLifecycle != nil {
+		if err := p.AuthenticationLifecycle.Start(ctx, host); err != nil {
+			return fmt.Errorf("pipeline %q: start authentication: %w", p.Name, err)
+		}
+	}
 	return nil
 }
 
@@ -96,12 +103,15 @@ func (p *Pipeline) Shutdown(ctx context.Context) error {
 		_ = proc.Shutdown(ctx)
 	}
 
+	var authErr error
+	if p.AuthenticationLifecycle != nil {
+		authErr = p.AuthenticationLifecycle.Shutdown(ctx)
+	}
 	err := p.Dispatcher.Shutdown(ctx)
 	if err != nil {
-		return fmt.Errorf("pipeline %q: shutdown dispatcher: %w", p.Name, err)
+		err = fmt.Errorf("pipeline %q: shutdown dispatcher: %w", p.Name, err)
 	}
-
-	return nil
+	return errors.Join(authErr, err)
 }
 
 // execute builds the response chain around each dispatch processor's position.
