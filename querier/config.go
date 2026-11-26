@@ -80,8 +80,9 @@ func LoadConfig(path string) (*Config, error) {
 		Processors:  nil,
 		Dispatchers: nil,
 		Connectors:  nil,
-		Service: ServiceConfig{Concurrency: pipeline.ConcurrencyConfig{PerTenant: 0, Backends: nil, QueueSize: 0},
-			Pipelines: nil},
+		Service: ServiceConfig{Telemetry: false,
+			Concurrency: pipeline.ConcurrencyConfig{PerTenant: 0, Backends: nil, QueueSize: 0},
+			Pipelines:   nil},
 	}
 
 	err = decodeStrict(tree, cfg)

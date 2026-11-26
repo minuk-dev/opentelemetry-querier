@@ -33,32 +33,45 @@ func NewTelemetry(meters metric.MeterProvider, tracers trace.TracerProvider) (*T
 	requests, requestErr := meter.Int64Counter("querier.query.requests")
 	inflight, inflightErr := meter.Int64UpDownCounter("querier.query.in_flight")
 	duration, durationErr := meter.Float64Histogram("querier.query.stage.duration", metric.WithUnit("s"))
+
 	cache, cacheErr := meter.Int64Counter("querier.query.cache.lookups")
-	if err := errors.Join(requestErr, inflightErr, durationErr, cacheErr); err != nil {
+
+	err := errors.Join(requestErr, inflightErr, durationErr, cacheErr)
+	if err != nil {
 		return nil, err
 	}
-	return &Telemetry{tracer: tracers.Tracer("opentelemetry-querier/query"), requests: requests, inFlight: inflight, duration: duration, cacheLookups: cache}, nil
+
+	return &Telemetry{
+		tracer:   tracers.Tracer("opentelemetry-querier/query"),
+		requests: requests, inFlight: inflight, duration: duration, cacheLookups: cache,
+	}, nil
 }
 
 func (t *Telemetry) request(ctx context.Context, q *qdata.Query) (context.Context, func(error)) {
 	if !trace.SpanContextFromContext(ctx).IsValid() {
 		header := make(http.Header)
+
 		for _, key := range []string{"Traceparent", "Tracestate"} {
 			values := qdata.HeaderValuesFor(q, key)
 			if len(values) == 1 {
 				header.Set(key, values[0])
 			}
 		}
+
 		ctx = propagation.TraceContext{}.Extract(ctx, propagation.HeaderCarrier(header))
 	}
+
 	_, nested := ctx.Value(telemetryKey{}).(*Telemetry)
 	ctx = context.WithValue(ctx, telemetryKey{}, t)
 	ctx = processor.WithCacheObserver(ctx, t.cache)
+
 	ctx, done := t.stage(ctx, "request")
 	if nested {
 		return ctx, done
 	}
+
 	t.inFlight.Add(ctx, 1)
+
 	return ctx, func(err error) {
 		t.requests.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", queryOutcome(err))))
 		t.inFlight.Add(ctx, -1)
@@ -71,6 +84,7 @@ func (t *Telemetry) cache(ctx context.Context, hit bool) {
 	if hit {
 		outcome = "hit"
 	}
+
 	t.cacheLookups.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", outcome)))
 }
 
@@ -78,8 +92,10 @@ func (t *Telemetry) stage(ctx context.Context, name string) (context.Context, fu
 	if t == nil {
 		return ctx, func(error) {}
 	}
+
 	started := time.Now()
 	ctx, span := t.tracer.Start(ctx, "query."+name)
+
 	return ctx, func(err error) {
 		outcome := attribute.String("outcome", queryOutcome(err))
 		t.duration.Record(ctx, time.Since(started).Seconds(), metric.WithAttributes(attribute.String("stage", name), outcome))
@@ -92,7 +108,14 @@ func queryOutcome(err error) string {
 	if err == nil {
 		return "success"
 	}
-	switch qerror.CodeOf(err) {
+
+	return failedQueryOutcome(qerror.CodeOf(err))
+}
+
+func failedQueryOutcome(code qerror.Code) string {
+	switch code {
+	case qerror.CodeInternal:
+		return "error"
 	case qerror.CodeInvalidArgument:
 		return "invalid"
 	case qerror.CodeUnauthenticated:
@@ -109,7 +132,7 @@ func queryOutcome(err error) string {
 		return "backend_unavailable"
 	case qerror.CodeQueryExecution:
 		return "backend_execution_error"
-	default:
-		return "error"
 	}
+
+	return "error"
 }

@@ -40,7 +40,6 @@ type Service struct {
 	buildInfo     component.BuildInfo
 	logger        *slog.Logger
 	concurrency   *pipeline.Concurrency
-	telemetry     *pipeline.Telemetry
 	stopTelemetry func(context.Context) error
 	pipelines     []*pipeline.Pipeline
 	acceptors     []acceptor.Acceptor
@@ -61,12 +60,13 @@ func (host) GetComponent(string, string) any { return nil }
 // resolved as a target binding rather than a listener.
 func Build(factories Factories, cfg *Config, buildInfo component.BuildInfo) (*Service, error) {
 	svc := &Service{
-		buildInfo: buildInfo,
-		logger:    slog.Default(),
-		concurrency: nil,
-		pipelines: nil,
-		acceptors: nil,
-		host:      host{},
+		buildInfo:     buildInfo,
+		logger:        slog.Default(),
+		concurrency:   nil,
+		stopTelemetry: nil,
+		pipelines:     nil,
+		acceptors:     nil,
+		host:          host{},
 	}
 
 	for backend := range cfg.Service.Concurrency.Backends {
@@ -107,16 +107,11 @@ func Build(factories Factories, cfg *Config, buildInfo component.BuildInfo) (*Se
 		return nil, err
 	}
 
-	if cfg.Service.Telemetry {
-		telemetry, stop, err := newTelemetry(context.Background())
-		if err != nil {
-			return nil, fmt.Errorf("query telemetry: %w", err)
-		}
-		svc.telemetry, svc.stopTelemetry = telemetry, stop
-		for _, pipe := range built {
-			pipe.Telemetry = svc.telemetry
-		}
+	err = svc.configureTelemetry(cfg.Service.Telemetry)
+	if err != nil {
+		return nil, err
 	}
+
 	return svc, nil
 }
 
@@ -160,6 +155,7 @@ func (svc *Service) Shutdown(ctx context.Context) error {
 	if svc.stopTelemetry != nil {
 		errs = append(errs, svc.stopTelemetry(ctx))
 	}
+
 	return errors.Join(errs...)
 }
 

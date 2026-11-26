@@ -45,7 +45,8 @@ type Pipeline struct {
 // New builds a pipeline.
 func New(name string, processors []processor.Processor, disp dispatcher.Dispatcher) *Pipeline {
 	return &Pipeline{
-		Name: name, Authenticate: nil, TenantHeader: "", Concurrency: nil, Processors: processors, Dispatcher: disp,
+		Name: name, Authenticate: nil, TenantHeader: "", Concurrency: nil,
+		Telemetry: nil, Connector: false, Processors: processors, Dispatcher: disp,
 	}
 }
 
@@ -53,51 +54,20 @@ func New(name string, processors []processor.Processor, disp dispatcher.Dispatch
 // order), dispatches to storage, then runs the response path (processors in
 // reverse order). A validation or processor error on the request path
 // short-circuits before the dispatcher is reached.
-func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (_ *qdata.Result, handleErr error) {
-	if p.Telemetry != nil {
-		var end func(error)
-		ctx, end = p.Telemetry.request(ctx, query)
-		defer func() { end(handleErr) }()
-	}
-	_, finishValidation := p.Telemetry.stage(ctx, "validation")
-	err := qdata.ValidateQueryTime(query)
-	if err != nil {
-		finishValidation(qerror.New(qerror.CodeInvalidArgument, "invalid query time"))
-	} else {
-		finishValidation(nil)
-	}
-	if err != nil {
-		return nil, qerror.New(qerror.CodeInvalidArgument, "pipeline %q: %v", p.Name, err)
+func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (*qdata.Result, error) {
+	if p.Telemetry == nil {
+		return p.handle(ctx, query)
 	}
 
-	authCtx, finishAuth := p.Telemetry.stage(ctx, "identity")
-	var authorized context.Context
-	authorized, err = p.authorizeIdentity(authCtx, query)
-	finishAuth(err)
-	if identity, ok := qdata.IdentityFromContext(authorized); ok {
-		ctx = qdata.WithIdentity(ctx, identity)
-	}
-	if err != nil {
-		return nil, err
-	}
-	processCtx, finishProcess := p.Telemetry.stage(ctx, "request_processing")
-	err = p.processQuery(processCtx, query)
-	finishProcess(err)
-	if err != nil {
-		return nil, err
-	}
+	ctx, finish := p.Telemetry.request(ctx, query)
 
-	if p.Concurrency != nil {
-		var release func()
+	var err error
 
-		ctx, release, err = p.Concurrency.admitTenant(ctx)
-		if err != nil {
-			return nil, err
-		}
-		defer release()
-	}
+	defer func() { finish(err) }()
 
-	return p.execute(ctx, query, p.Processors)
+	result, err := p.handle(ctx, query)
+
+	return result, err
 }
 
 // Start starts the processor chain and the dispatcher (acceptors are started
@@ -138,6 +108,56 @@ func (p *Pipeline) Shutdown(ctx context.Context) error {
 	return nil
 }
 
+func (p *Pipeline) handle(ctx context.Context, query *qdata.Query) (*qdata.Result, error) {
+	_, finishValidation := p.Telemetry.stage(ctx, "validation")
+
+	err := qdata.ValidateQueryTime(query)
+	if err != nil {
+		finishValidation(qerror.New(qerror.CodeInvalidArgument, "invalid query time"))
+	} else {
+		finishValidation(nil)
+	}
+
+	if err != nil {
+		return nil, qerror.New(qerror.CodeInvalidArgument, "pipeline %q: %v", p.Name, err)
+	}
+
+	authCtx, finishAuth := p.Telemetry.stage(ctx, "identity")
+
+	var authorized context.Context
+
+	authorized, err = p.authorizeIdentity(authCtx, query)
+	finishAuth(err)
+
+	if identity, ok := qdata.IdentityFromContext(authorized); ok {
+		ctx = qdata.WithIdentity(ctx, identity)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	processCtx, finishProcess := p.Telemetry.stage(ctx, "request_processing")
+	err = p.processQuery(processCtx, query)
+	finishProcess(err)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if p.Concurrency != nil {
+		var release func()
+
+		ctx, release, err = p.Concurrency.admitTenant(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer release()
+	}
+
+	return p.execute(ctx, query, p.Processors)
+}
+
 // execute builds the response chain around each dispatch processor's position.
 func (p *Pipeline) execute(
 	ctx context.Context, query *qdata.Query, processors []processor.Processor,
@@ -166,13 +186,16 @@ func (p *Pipeline) execute(
 	if identity, ok := qdata.IdentityFromContext(ctx); ok {
 		qdata.SetTenantID(query, identity.Tenant)
 	}
+
 	stage := "backend"
 	if p.Connector {
 		stage = "connector"
 	}
+
 	dispatchCtx, finishDispatch := p.Telemetry.stage(ctx, stage)
 	result, err := p.Dispatcher.Dispatch(dispatchCtx, query)
 	finishDispatch(err)
+
 	if err != nil {
 		return nil, fmt.Errorf("pipeline %q: %w", p.Name, err)
 	}
@@ -185,6 +208,7 @@ func (p *Pipeline) execute(
 	responseCtx, finishResponse := p.Telemetry.stage(ctx, "response_processing")
 	result, err = p.processResult(responseCtx, query, result, processors)
 	finishResponse(err)
+
 	return result, err
 }
 
