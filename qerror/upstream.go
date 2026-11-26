@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
+	"syscall"
 )
 
 // UpstreamTransportError distinguishes canceled and timed-out requests from unavailable backends.
@@ -23,7 +25,10 @@ func UpstreamTransportError(err error) *Error {
 		code = CodeDeadlineExceeded
 	}
 
-	return New(code, "upstream request: %v", err)
+	out := New(code, "upstream request: %v", err)
+	out.retryable = transientTransportFailure(err)
+
+	return out
 }
 
 // UpstreamHTTPError classifies backend errors without attributing configured credentials to the caller.
@@ -51,7 +56,12 @@ func UpstreamHTTPError(status int, body []byte) *Error {
 		}
 	}
 
-	return New(code, "upstream status %d: %s", status, string(body))
+	out := New(code, "upstream status %d: %s", status, string(body))
+	if code == CodeUnavailable || code == CodeDeadlineExceeded {
+		out.retryable = transientHTTPStatus(status)
+	}
+
+	return out
 }
 
 func upstreamStatusCode(status int) Code {
@@ -67,4 +77,29 @@ func upstreamStatusCode(status int) Code {
 	default:
 		return CodeUnavailable
 	}
+}
+
+// RetryableRead reports whether a dispatcher classified a read failure as transient.
+func RetryableRead(err error) bool {
+	var coded *Error
+
+	return errors.As(err, &coded) && coded.retryable
+}
+
+func transientTransportFailure(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+
+	var timeout net.Error
+
+	return (errors.As(err, &timeout) && timeout.Timeout()) ||
+		errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) ||
+		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ECONNREFUSED) ||
+		errors.Is(err, syscall.EPIPE)
+}
+
+func transientHTTPStatus(status int) bool {
+	return status == http.StatusBadGateway || status == http.StatusServiceUnavailable ||
+		status == http.StatusGatewayTimeout
 }

@@ -40,3 +40,14 @@ Set `query_timeout: 10s` under a service pipeline to bound query processing
 through response handling. The default is zero, which uses any caller
 deadline. Connector operands share the parent deadline, and a leaf can
 shorten it. Expiration returns HTTP 504 or gRPC DEADLINE_EXCEEDED.
+
+## Backend retries
+
+Configure `service.backend_retries` by dispatcher ID, for example
+`prometheus/primary: {max_attempts: 3, backoff: 100ms}`. One attempt
+is the default. A retry is eligible for HTTP 502, 503 and 504 upstream
+failures or a classified transient transport error. Validation, access
+denials, other statuses, streaming queries and canceled requests are
+excluded. The fixed wait and attempts share the original query context.
+Executor slots should enclose the full retry loop. Debug logs report
+attempt counts and final success without query data.
