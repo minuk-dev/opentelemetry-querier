@@ -68,7 +68,11 @@ func recordingConnFactory(captured *map[qdata.Signal]pipeline.Handler) connector
 
 // pipe builds a PipelineConfig terminated by terminal, fed by acceptors.
 func pipe(terminal string, acceptors ...string) querier.PipelineConfig {
-	return querier.PipelineConfig{Acceptors: acceptors, Processors: nil, Dispatchers: []string{terminal}}
+	var identity querier.IdentityConfig
+
+	return querier.PipelineConfig{
+		Identity: identity, Acceptors: acceptors, Processors: nil, Dispatchers: []string{terminal},
+	}
 }
 
 func buildInfo() component.BuildInfo { return component.BuildInfo{Command: "test", Version: "test"} }
@@ -169,12 +173,15 @@ func TestBuildRejectsNamedSecurityDependency(t *testing.T) {
 		},
 		Connectors: nil,
 	}
+
+	var identity querier.IdentityConfig
+
 	cfg := &querier.Config{
 		Acceptors:   map[string]map[string]any{"otqp": {}},
 		Processors:  map[string]map[string]any{"consumer/tenant-quota": {}},
 		Dispatchers: map[string]map[string]any{"prometheus": {}}, Connectors: nil,
 		Service: querier.ServiceConfig{Pipelines: map[string]querier.PipelineConfig{
-			"metrics/private": {Acceptors: []string{"otqp"}, Processors: []string{"consumer/tenant-quota"},
+			"metrics/private": {Identity: identity, Acceptors: []string{"otqp"}, Processors: []string{"consumer/tenant-quota"},
 				Dispatchers: []string{"prometheus"}},
 		}},
 	}
