@@ -160,6 +160,7 @@ func (p *Processor) resolveSubject(ctx context.Context, query *qdata.Query) stri
 		if p.cfg.FromTenant {
 			return identity.Tenant
 		}
+
 		return identity.Principal
 	}
 

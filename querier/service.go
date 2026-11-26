@@ -180,7 +180,8 @@ func (svc *Service) buildLeafPipelines(factories Factories, cfg *Config, built m
 		if svc.quota != nil {
 			built[name].AdmitQuota = svc.quota.admit
 		}
-		if err := configureIdentity(built[name], pipelineCfg.Identity); err != nil {
+		err = configureIdentity(built[name], pipelineCfg.Identity)
+		if err != nil {
 			return fmt.Errorf("pipeline %q: %w", name, err)
 		}
 	}
@@ -263,7 +264,8 @@ func (svc *Service) buildConnectorPipelines(
 		if svc.quota != nil {
 			built[name].AdmitQuota = svc.quota.admit
 		}
-		if err := configureIdentity(built[name], pipelineCfg.Identity); err != nil {
+		err = configureIdentity(built[name], pipelineCfg.Identity)
+		if err != nil {
 			return fmt.Errorf("pipeline %q: %w", name, err)
 		}
 	}
