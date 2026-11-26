@@ -17,6 +17,7 @@ import (
 	prometheusdispatcher "github.com/minuk-dev/opentelemetry-querier/dispatcher/prometheusdispatcher"
 	bearertokenauthextension "github.com/minuk-dev/opentelemetry-querier/extension/bearertokenauthextension"
 	gatewayauthextension "github.com/minuk-dev/opentelemetry-querier/extension/gatewayauthextension"
+	jwtauthextension "github.com/minuk-dev/opentelemetry-querier/extension/jwtauthextension"
 	"github.com/minuk-dev/opentelemetry-querier/processor"
 	authratelimitprocessor "github.com/minuk-dev/opentelemetry-querier/processor/authratelimitprocessor"
 	cacheprocessor "github.com/minuk-dev/opentelemetry-querier/processor/cacheprocessor"
@@ -66,6 +67,7 @@ func components() (querier.Factories, error) {
 		return factories, err
 	}
 	if factories.Extensions, err = extension.MakeFactoryMap(
+		jwtauthextension.NewFactory(),
 		bearertokenauthextension.NewFactory(),
 		gatewayauthextension.NewFactory(),
 	); err != nil {

@@ -20,6 +20,7 @@ acceptors:
   - gomod: github.com/minuk-dev/opentelemetry-querier/acceptor/elasticsearchacceptor
 
 extensions:
+  - gomod: github.com/minuk-dev/opentelemetry-querier/extension/jwtauthextension
   - gomod: github.com/minuk-dev/opentelemetry-querier/extension/bearertokenauthextension
   - gomod: github.com/minuk-dev/opentelemetry-querier/extension/gatewayauthextension
 
