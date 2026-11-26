@@ -42,7 +42,7 @@ type Pipeline struct {
 
 // New builds a pipeline.
 func New(name string, processors []processor.Processor, disp dispatcher.Dispatcher) *Pipeline {
-	return &Pipeline{Name: name, Processors: processors, Dispatcher: disp}
+	return &Pipeline{Name: name, Authenticate: nil, TenantHeader: "", Processors: processors, Dispatcher: disp}
 }
 
 // Handle validates the client's plan, runs the request path (processors in
@@ -59,6 +59,7 @@ func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (*qdata.Resul
 	if err != nil {
 		return nil, err
 	}
+
 	err = p.processQuery(ctx, query)
 	if err != nil {
 		return nil, err
@@ -141,6 +142,7 @@ func (p *Pipeline) execute(
 	if identity, ok := qdata.IdentityFromContext(ctx); ok {
 		qdata.SetTenantID(query, identity.Tenant)
 	}
+
 	result, err := p.Dispatcher.Dispatch(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("pipeline %q: %w", p.Name, err)

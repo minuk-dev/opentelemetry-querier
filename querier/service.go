@@ -171,7 +171,8 @@ func (svc *Service) buildLeafPipelines(factories Factories, cfg *Config, built m
 
 		built[name] = pipeline.New(name, procs, disp)
 		built[name].Concurrency = svc.concurrency
-		if err := configureIdentity(built[name], pipelineCfg.Identity); err != nil {
+		err = configureIdentity(built[name], pipelineCfg.Identity)
+		if err != nil {
 			return fmt.Errorf("pipeline %q: %w", name, err)
 		}
 	}
@@ -252,7 +253,8 @@ func (svc *Service) buildConnectorPipelines(
 
 		built[name] = pipeline.New(name, procs, conn)
 		built[name].Concurrency = svc.concurrency
-		if err := configureIdentity(built[name], pipelineCfg.Identity); err != nil {
+		err = configureIdentity(built[name], pipelineCfg.Identity)
+		if err != nil {
 			return fmt.Errorf("pipeline %q: %w", name, err)
 		}
 	}
