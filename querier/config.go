@@ -77,7 +77,7 @@ func LoadConfig(path string) (*Config, error) {
 		Processors:  nil,
 		Dispatchers: nil,
 		Connectors:  nil,
-		Service:     ServiceConfig{Pipelines: nil},
+		Service:     ServiceConfig{SharedQuota: nil, Pipelines: nil},
 	}
 
 	err = decodeStrict(tree, cfg)

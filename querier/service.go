@@ -60,6 +60,7 @@ func Build(factories Factories, cfg *Config, buildInfo component.BuildInfo) (*Se
 	svc := &Service{
 		buildInfo: buildInfo,
 		logger:    slog.Default(),
+		quota:     nil,
 		pipelines: nil,
 		acceptors: nil,
 		host:      host{},
@@ -70,14 +71,18 @@ func Build(factories Factories, cfg *Config, buildInfo component.BuildInfo) (*Se
 		if err != nil {
 			return nil, err
 		}
+
 		svc.quota = quota
 	}
+
 	builtOK := false
+
 	defer func() {
 		if !builtOK && svc.quota != nil {
 			_ = svc.quota.client.Close()
 		}
 	}()
+
 	built := map[string]*pipeline.Pipeline{}
 
 	err := svc.buildLeafPipelines(factories, cfg, built)
@@ -105,6 +110,7 @@ func Build(factories Factories, cfg *Config, buildInfo component.BuildInfo) (*Se
 	}
 
 	builtOK = true
+
 	return svc, nil
 }
 
@@ -148,6 +154,7 @@ func (svc *Service) Shutdown(ctx context.Context) error {
 	if svc.quota != nil {
 		errs = append(errs, svc.quota.client.Close())
 	}
+
 	return errors.Join(errs...)
 }
 
@@ -180,6 +187,7 @@ func (svc *Service) buildLeafPipelines(factories Factories, cfg *Config, built m
 		if svc.quota != nil {
 			built[name].AdmitQuota = svc.quota.admit
 		}
+
 		err = configureIdentity(built[name], pipelineCfg.Identity)
 		if err != nil {
 			return fmt.Errorf("pipeline %q: %w", name, err)
@@ -264,6 +272,7 @@ func (svc *Service) buildConnectorPipelines(
 		if svc.quota != nil {
 			built[name].AdmitQuota = svc.quota.admit
 		}
+
 		err = configureIdentity(built[name], pipelineCfg.Identity)
 		if err != nil {
 			return fmt.Errorf("pipeline %q: %w", name, err)

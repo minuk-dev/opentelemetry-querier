@@ -30,9 +30,9 @@ func (f HandlerFunc) Handle(ctx context.Context, q *qdata.Query) (*qdata.Result,
 	return f(ctx, q)
 }
 
-// Pipeline is an ordered processor chain terminated by a dispatcher.
 type quotaAdmittedKey struct{}
 
+// Pipeline is an ordered processor chain terminated by a dispatcher.
 type Pipeline struct {
 	Name         string
 	Authenticate Authenticator
@@ -44,7 +44,9 @@ type Pipeline struct {
 
 // New builds a pipeline.
 func New(name string, processors []processor.Processor, disp dispatcher.Dispatcher) *Pipeline {
-	return &Pipeline{Name: name, Authenticate: nil, TenantHeader: "", Processors: processors, Dispatcher: disp}
+	return &Pipeline{
+		Name: name, Authenticate: nil, TenantHeader: "", AdmitQuota: nil, Processors: processors, Dispatcher: disp,
+	}
 }
 
 // Handle validates the client's plan, runs the request path (processors in
@@ -68,11 +70,14 @@ func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (*qdata.Resul
 	}
 
 	if p.AdmitQuota != nil && ctx.Value(quotaAdmittedKey{}) == nil {
-		if err := p.AdmitQuota(ctx); err != nil {
+		err := p.AdmitQuota(ctx)
+		if err != nil {
 			return nil, err
 		}
+
 		ctx = context.WithValue(ctx, quotaAdmittedKey{}, true)
 	}
+
 	return p.execute(ctx, query, p.Processors)
 }
 
