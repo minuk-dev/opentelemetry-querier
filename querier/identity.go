@@ -40,15 +40,19 @@ func configureIdentity(pipe *pipeline.Pipeline, cfg IdentityConfig) error {
 	pipe.TenantHeader = cfg.TenantHeader
 	if cfg.OAuth != nil {
 		if cfg.Gateway != nil || cfg.JWT != nil {
-			return errors.New("configure one identity verifier per pipeline")
+			return errMultipleIdentityVerifiers
 		}
+
 		authenticate, err := oauthAuthenticator(*cfg.OAuth)
 		if err != nil {
 			return err
 		}
+
 		pipe.Authenticate = authenticate
+
 		return nil
 	}
+
 	if cfg.JWT != nil {
 		if cfg.Gateway != nil {
 			return errMultipleIdentityVerifiers

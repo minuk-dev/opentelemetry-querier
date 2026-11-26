@@ -58,15 +58,15 @@ var (
 	errJWKSEmpty         = errors.New("no usable JWKS verification keys")
 )
 
-func jwtAuthenticator(cfg JWTIdentityConfig) (pipeline.Authenticator,error) {
- return newJWTAuthenticator(cfg,func(_ *jwt.Token,claims jwt.MapClaims)(pipeline.Principal,error){
-  return principalFromJWT(cfg,claims)
- })
+func jwtAuthenticator(cfg JWTIdentityConfig) (pipeline.Authenticator, error) {
+	return newJWTAuthenticator(cfg, func(_ *jwt.Token, claims jwt.MapClaims) (pipeline.Principal, error) {
+		return principalFromJWT(cfg, claims)
+	})
 }
 
-type jwtClaimsReader func(*jwt.Token,jwt.MapClaims)(pipeline.Principal,error)
+type jwtClaimsReader func(*jwt.Token, jwt.MapClaims) (pipeline.Principal, error)
 
-func newJWTAuthenticator(cfg JWTIdentityConfig, read jwtClaimsReader)(pipeline.Authenticator,error){
+func newJWTAuthenticator(cfg JWTIdentityConfig, read jwtClaimsReader) (pipeline.Authenticator, error) {
 	err := validateJWTConfig(cfg)
 	if err != nil {
 		return nil, err

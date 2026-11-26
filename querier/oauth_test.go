@@ -1,4 +1,4 @@
-package querier
+package querier //nolint:testpackage // Exercises the internal introspection client with a TLS identity provider.
 
 import (
 	"fmt"
@@ -13,34 +13,45 @@ import (
 
 func TestIntrospection(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []struct {
+
+	for _, scenario := range []struct {
 		name, response string
 		status         int
 		code           qerror.Code
 	}{
-		{"active", `{"active":true,"iss":"idp","aud":"querier","sub":"alice","tenant":"team","scope":"query read","exp":%d}`, 200, qerror.CodeInternal},
-		{"inactive", `{"active":false,"exp":%d}`, 200, qerror.CodeUnauthenticated},
-		{"endpoint error", "", 503, qerror.CodeUnavailable},
+		{"active",
+			`{"active":true,"iss":"idp","aud":"querier","sub":"alice","tenant":"team",` +
+				`"scope":"query read","exp":%d}`, http.StatusOK, qerror.CodeInternal},
+		{"inactive", `{"active":false,"exp":%d}`, http.StatusOK, qerror.CodeUnauthenticated},
+		{"endpoint error", "", http.StatusServiceUnavailable, qerror.CodeUnavailable},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			stub := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method != http.MethodPost || r.FormValue("token") != "opaque" {
+		t.Run(scenario.name, func(t *testing.T) {
+			t.Parallel()
+
+			stub := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				request.Body = http.MaxBytesReader(writer, request.Body, 1024)
+
+				if request.Method != http.MethodPost || request.FormValue("token") != "opaque" {
 					t.Error("unexpected introspection request")
 				}
-				w.WriteHeader(tc.status)
-				if tc.response != "" {
-					_, _ = fmt.Fprintf(w, tc.response, time.Now().Add(time.Minute).Unix())
+
+				writer.WriteHeader(scenario.status)
+
+				if scenario.response != "" {
+					_, _ = fmt.Fprintf(writer, scenario.response, time.Now().Add(time.Minute).Unix())
 				}
 			}))
 			defer stub.Close()
+
 			principal, err := introspect(t.Context(), stub.Client(), IntrospectionConfig{
 				Endpoint: stub.URL, Issuer: "idp", Audience: "querier", TenantClaim: "tenant", ClientID: "querier",
+				ClientSecretFile: "", Timeout: 0,
 			}, "secret", "opaque")
-			if tc.code == qerror.CodeInternal {
+			if scenario.code == qerror.CodeInternal {
 				require.NoError(t, err)
 				require.Equal(t, []string{"query", "read"}, principal.Scopes)
 			} else {
-				require.Equal(t, tc.code, qerror.CodeOf(err))
+				require.Equal(t, scenario.code, qerror.CodeOf(err))
 			}
 		})
 	}
