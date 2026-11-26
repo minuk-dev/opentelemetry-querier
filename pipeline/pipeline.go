@@ -43,39 +43,30 @@ type Pipeline struct {
 
 // New builds a pipeline.
 func New(name string, processors []processor.Processor, disp dispatcher.Dispatcher) *Pipeline {
-	return &Pipeline{Name: name, Authenticate: nil, TenantHeader: "", Processors: processors, Dispatcher: disp}
+	return &Pipeline{
+		Name: name, Authenticate: nil, TenantHeader: "", AuditLogger: nil, Processors: processors, Dispatcher: disp,
+	}
 }
 
 // Handle validates the client's plan, runs the request path (processors in
 // order), dispatches to storage, then runs the response path (processors in
 // reverse order). A validation or processor error on the request path
 // short-circuits before the dispatcher is reached.
-func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (_ *qdata.Result, handleErr error) {
-	decision := auditDecision{ctx: ctx, decision: "not_evaluated", reason: "validation"}
+func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (*qdata.Result, error) {
+	var identity qdata.Identity
+
+	decision := auditDecision{identity: identity, verified: false, decision: "not_evaluated", reason: "validation"}
+
 	if p.AuditLogger != nil {
-		decision.ctx = withAuditRequestID(ctx)
-		ctx = decision.ctx
-		defer func() { p.audit(decision, handleErr) }()
-	}
-	err := qdata.ValidateQueryTime(query)
-	if err != nil {
-		return nil, qerror.New(qerror.CodeInvalidArgument, "pipeline %q: %v", p.Name, err)
+		ctx = withAuditRequestID(ctx)
 	}
 
-	ctx, err = p.authorizeIdentity(ctx, query)
-	if err != nil {
-		decision.recordDenial(err, "authentication")
-		return nil, err
+	result, err := p.handle(ctx, query, &decision)
+	if p.AuditLogger != nil {
+		p.audit(ctx, decision, err)
 	}
-	decision.ctx = ctx
-	err = p.processQuery(ctx, query)
-	if err != nil {
-		decision.recordDenial(err, "request_policy")
-		return nil, err
-	}
-	decision.decision = "allow"
-	decision.reason = "request_policy"
-	return p.execute(ctx, query, p.Processors)
+
+	return result, err
 }
 
 // Start starts the processor chain and the dispatcher (acceptors are started
@@ -114,6 +105,34 @@ func (p *Pipeline) Shutdown(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (p *Pipeline) handle(ctx context.Context, query *qdata.Query, decision *auditDecision) (*qdata.Result, error) {
+	err := qdata.ValidateQueryTime(query)
+	if err != nil {
+		return nil, qerror.New(qerror.CodeInvalidArgument, "pipeline %q: %v", p.Name, err)
+	}
+
+	ctx, err = p.authorizeIdentity(ctx, query)
+	if err != nil {
+		decision.recordDenial(err, "authentication")
+
+		return nil, err
+	}
+
+	decision.identity, decision.verified = qdata.IdentityFromContext(ctx)
+
+	err = p.processQuery(ctx, query)
+	if err != nil {
+		decision.recordDenial(err, "request_policy")
+
+		return nil, err
+	}
+
+	decision.decision = "allow"
+	decision.reason = "request_policy"
+
+	return p.execute(ctx, query, p.Processors)
 }
 
 // execute builds the response chain around each dispatch processor's position.

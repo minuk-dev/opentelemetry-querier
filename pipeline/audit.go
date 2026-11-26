@@ -12,7 +12,8 @@ import (
 type auditIDKey struct{}
 
 type auditDecision struct {
-	ctx      context.Context
+	identity qdata.Identity
+	verified bool
 	decision string
 	reason   string
 }
@@ -21,35 +22,43 @@ func withAuditRequestID(ctx context.Context) context.Context {
 	if ctx.Value(auditIDKey{}) != nil {
 		return ctx
 	}
+
 	return context.WithValue(ctx, auditIDKey{}, rand.Text())
 }
 
 func (d *auditDecision) recordDenial(err error, reason string) {
-	switch qerror.CodeOf(err) {
-	case qerror.CodePermissionDenied, qerror.CodeUnauthenticated:
+	code := qerror.CodeOf(err)
+	if code == qerror.CodePermissionDenied || code == qerror.CodeUnauthenticated {
 		d.decision = "deny"
 		d.reason = reason
 	}
 }
 
-func (p *Pipeline) audit(d auditDecision, err error) {
+func (p *Pipeline) audit(ctx context.Context, decision auditDecision, err error) {
 	outcome := "success"
 	if err != nil {
 		outcome = "error"
 	}
+
 	args := []slog.Attr{
 		slog.String("event", "query.authorization"),
-		slog.Any("request_id", d.ctx.Value(auditIDKey{})),
+		slog.Any("request_id", ctx.Value(auditIDKey{})),
 		slog.String("pipeline", p.Name),
-		slog.String("decision", d.decision),
-		slog.String("reason", d.reason),
+		slog.String("decision", decision.decision),
+		slog.String("reason", decision.reason),
 		slog.String("outcome", outcome),
 	}
 	if err != nil {
 		args = append(args, slog.Int("error_code", int(qerror.CodeOf(err))))
 	}
-	if identity, ok := qdata.IdentityFromContext(d.ctx); ok {
-		args = append(args, slog.String("authority", identity.Authority), slog.String("principal", identity.Principal), slog.String("tenant", identity.Tenant))
+
+	if decision.verified {
+		args = append(args,
+			slog.String("authority", decision.identity.Authority),
+			slog.String("principal", decision.identity.Principal),
+			slog.String("tenant", decision.identity.Tenant),
+		)
 	}
-	p.AuditLogger.LogAttrs(d.ctx, slog.LevelInfo, "query authorization", args...)
+
+	p.AuditLogger.LogAttrs(ctx, slog.LevelInfo, "query authorization", args...)
 }

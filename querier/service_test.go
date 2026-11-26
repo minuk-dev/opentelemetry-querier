@@ -71,7 +71,8 @@ func pipe(terminal string, acceptors ...string) querier.PipelineConfig {
 	var identity querier.IdentityConfig
 
 	return querier.PipelineConfig{
-		Identity: identity, Acceptors: acceptors, Processors: nil, Dispatchers: []string{terminal},
+		Identity: identity, AuthorizationAudit: false,
+		Acceptors: acceptors, Processors: nil, Dispatchers: []string{terminal},
 	}
 }
 
@@ -181,7 +182,8 @@ func TestBuildRejectsNamedSecurityDependency(t *testing.T) {
 		Processors:  map[string]map[string]any{"consumer/tenant-quota": {}},
 		Dispatchers: map[string]map[string]any{"prometheus": {}}, Connectors: nil,
 		Service: querier.ServiceConfig{Pipelines: map[string]querier.PipelineConfig{
-			"metrics/private": {Identity: identity, Acceptors: []string{"otqp"}, Processors: []string{"consumer/tenant-quota"},
+			"metrics/private": {Identity: identity, AuthorizationAudit: false,
+				Acceptors: []string{"otqp"}, Processors: []string{"consumer/tenant-quota"},
 				Dispatchers: []string{"prometheus"}},
 		}},
 	}

@@ -15,7 +15,8 @@ import (
 
 func TestAuthorizationAudit(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []struct {
+
+	for _, scenario := range []struct {
 		name          string
 		authenticated bool
 		decision      string
@@ -23,32 +24,44 @@ func TestAuthorizationAudit(t *testing.T) {
 		{"allowed", true, "allow"},
 		{"credentials denied", false, "deny"},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run(scenario.name, func(t *testing.T) {
+			t.Parallel()
+
 			var output bytes.Buffer
-			backend := &identityBackend{}
-			pipe := pipeline.New("test", nil, backend)
+
+			var backend identityBackend
+
+			pipe := pipeline.New("test", nil, &backend)
 			pipe.AuditLogger = slog.New(slog.NewJSONHandler(&output, nil))
 			pipe.Authenticate = func(context.Context, *qdata.Query) (pipeline.Principal, error) {
-				if !tc.authenticated {
+				if !scenario.authenticated {
 					return pipeline.Principal{}, qerror.New(qerror.CodeUnauthenticated, "credential secret-token")
 				}
-				return pipeline.Principal{Identity: qdata.Identity{Authority: "idp", Principal: "alice"}, Tenants: []string{"a"}}, nil
+
+				return pipeline.Principal{
+					Identity: qdata.Identity{Authority: "idp", Principal: "alice", Tenant: "", Groups: nil, Roles: nil, Scopes: nil},
+					Tenants:  []string{"a"},
+				}, nil
 			}
 			query := &qdata.Query{Header: map[string]*qdata.HeaderValues{"Authorization": {Values: []string{"secret-token"}}}}
 			qdata.SetMetadata(query, "client-principal", "spoofed-user")
+
 			_, err := pipe.Handle(t.Context(), query)
-			if tc.authenticated {
+			if scenario.authenticated {
 				require.NoError(t, err)
 			} else {
 				require.Error(t, err)
 			}
+
 			require.NotContains(t, output.String(), "secret-token")
 			require.NotContains(t, output.String(), "spoofed-user")
+
 			var event map[string]any
 			require.NoError(t, json.Unmarshal(output.Bytes(), &event))
-			require.Equal(t, tc.decision, event["decision"])
+			require.Equal(t, scenario.decision, event["decision"])
 			require.NotEmpty(t, event["request_id"])
-			if tc.authenticated {
+
+			if scenario.authenticated {
 				require.Equal(t, "alice", event["principal"])
 				require.Equal(t, "a", event["tenant"])
 			} else {
