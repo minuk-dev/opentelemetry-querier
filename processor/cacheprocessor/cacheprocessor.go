@@ -112,22 +112,17 @@ func (c *Processor) ProcessDispatch(
 	}
 
 	identity, verified := qdata.IdentityFromContext(ctx)
-	if c.cfg.RequireVerifiedIdentity && (!verified || identity.Authority == "" || identity.Principal == "" || identity.Tenant != qdata.TenantID(query)) {
+	if c.cfg.RequireVerifiedIdentity && !matchesVerifiedTenant(query, identity, verified) {
 		return runDirect(ctx, query, next, respond)
 	}
+
 	snapshot := proto.CloneOf(query)
 
-	key, err := c.key(snapshot)
+	key, err := c.keyWithIdentity(snapshot, identity, verified)
 	if err != nil {
 		return runDirect(ctx, query, next, respond)
 	}
 
-	if verified {
-		key, err = verifiedKey(key, identity)
-		if err != nil {
-			return runDirect(ctx, query, next, respond)
-		}
-	}
 	err = ctx.Err()
 	if err != nil {
 		return nil, fmt.Errorf("wait for cache result: %w", qerror.UpstreamTransportError(err))
@@ -143,22 +138,39 @@ func (c *Processor) ProcessDispatch(
 	return c.finishFlight(ctx, key, flight, respond)
 }
 
+func matchesVerifiedTenant(query *qdata.Query, identity qdata.Identity, verified bool) bool {
+	return verified && identity.Authority != "" && identity.Principal != "" && identity.Tenant == qdata.TenantID(query)
+}
+
+func (c *Processor) keyWithIdentity(query *qdata.Query, identity qdata.Identity, verified bool) (cacheKey, error) {
+	key, err := c.key(query)
+	if err != nil || !verified {
+		return key, err
+	}
+
+	return verifiedKey(key, identity)
+}
+
 func verifiedKey(key cacheKey, identity qdata.Identity) (cacheKey, error) {
 	normalize := func(values []string) []string {
 		out := append([]string(nil), values...)
 		slices.Sort(out)
+
 		return slices.Compact(out)
 	}
 	identity.Groups = normalize(identity.Groups)
 	identity.Roles = normalize(identity.Roles)
 	identity.Scopes = normalize(identity.Scopes)
+
 	encoded, err := json.Marshal(identity)
 	if err != nil {
-		return cacheKey{}, err
+		return cacheKey{}, fmt.Errorf("encode verified identity: %w", err)
 	}
+
 	hash := sha256.New()
 	_, _ = hash.Write(key[:])
 	_, _ = hash.Write(encoded)
+
 	return cacheKey(hash.Sum(nil)), nil
 }
 

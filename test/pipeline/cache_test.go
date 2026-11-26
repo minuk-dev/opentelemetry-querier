@@ -96,7 +96,8 @@ func cacheQuery() *qdata.Query {
 func newCache(t *testing.T, maxBytes int, key string) *cacheprocessor.Processor {
 	t.Helper()
 
-	cache, err := cacheprocessor.New(cacheprocessor.Config{TTL: time.Minute, MaxBytes: maxBytes, Key: key})
+	cache, err := cacheprocessor.New(cacheprocessor.Config{RequireVerifiedIdentity: false,
+		TTL: time.Minute, MaxBytes: maxBytes, Key: key})
 	require.NoError(t, err)
 
 	return cache
@@ -552,7 +553,8 @@ func TestCacheCustomKeySelectsVariantsWithoutAliasingTenantOrCredentials(t *test
 func TestCacheInvalidKeyTemplateAndExecutionFallback(t *testing.T) {
 	t.Parallel()
 
-	_, err := cacheprocessor.New(cacheprocessor.Config{TTL: time.Minute, MaxBytes: 4096, Key: "{{"})
+	_, err := cacheprocessor.New(cacheprocessor.Config{RequireVerifiedIdentity: false,
+		TTL: time.Minute, MaxBytes: 4096, Key: "{{"})
 	require.ErrorContains(t, err, "parse cache key")
 
 	var calls atomic.Int32
