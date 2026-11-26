@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/go-viper/mapstructure/v2"
 	"gopkg.in/yaml.v3"
@@ -14,6 +15,7 @@ import (
 )
 
 var (
+	errNegativeQueryTimeout = errors.New("query_timeout must be non-negative")
 	// errEmptyPipelines is returned when no pipelines are configured.
 	errEmptyPipelines = errors.New("querier: service.pipelines is empty")
 	// errNoAcceptors is returned when a pipeline lists no acceptors.
@@ -51,9 +53,10 @@ type ServiceConfig struct {
 
 // PipelineConfig references component instances by ID, defining processor order.
 type PipelineConfig struct {
-	Acceptors   []string `mapstructure:"acceptors"`
-	Processors  []string `mapstructure:"processors"`
-	Dispatchers []string `mapstructure:"dispatchers"`
+	QueryTimeout time.Duration `mapstructure:"query_timeout"`
+	Acceptors    []string      `mapstructure:"acceptors"`
+	Processors   []string      `mapstructure:"processors"`
+	Dispatchers  []string      `mapstructure:"dispatchers"`
 }
 
 // LoadConfig reads a YAML config file and structurally decodes it.
@@ -97,6 +100,10 @@ func (c *Config) validate() error {
 	}
 
 	for name, pipe := range c.Service.Pipelines {
+		if pipe.QueryTimeout < 0 {
+			return fmt.Errorf("pipeline %q: %w", name, errNegativeQueryTimeout)
+		}
+
 		_, err := pipelineSignal(name)
 		if err != nil {
 			return err
