@@ -6,6 +6,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -42,7 +43,7 @@ type Pipeline struct {
 
 // New builds a pipeline.
 func New(name string, processors []processor.Processor, disp dispatcher.Dispatcher) *Pipeline {
-	return &Pipeline{Name: name, Processors: processors, Dispatcher: disp}
+	return &Pipeline{Name: name, Timeout: 0, Processors: processors, Dispatcher: disp}
 }
 
 // Handle validates the client's plan, runs the request path (processors in
@@ -52,6 +53,7 @@ func New(name string, processors []processor.Processor, disp dispatcher.Dispatch
 func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (*qdata.Result, error) {
 	if p.Timeout > 0 {
 		var cancel context.CancelFunc
+
 		ctx, cancel = context.WithTimeout(ctx, p.Timeout)
 		defer cancel()
 	}
@@ -60,32 +62,16 @@ func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (*qdata.Resul
 	if ctx.Err() != nil {
 		return nil, queryContextError(ctx)
 	}
+
 	return result, err
 }
 
 func queryContextError(ctx context.Context) error {
-	if ctx.Err() == context.DeadlineExceeded {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return qerror.New(qerror.CodeDeadlineExceeded, "query deadline exceeded")
 	}
+
 	return qerror.New(qerror.CodeCanceled, "query canceled")
-}
-
-func (p *Pipeline) handle(ctx context.Context, query *qdata.Query) (*qdata.Result, error) {
-	if ctx.Err() != nil {
-		return nil, queryContextError(ctx)
-	}
-
-	err := qdata.ValidateQueryTime(query)
-	if err != nil {
-		return nil, qerror.New(qerror.CodeInvalidArgument, "pipeline %q: %v", p.Name, err)
-	}
-
-	err = p.processQuery(ctx, query)
-	if err != nil {
-		return nil, err
-	}
-
-	return p.execute(ctx, query, p.Processors)
 }
 
 // Start starts the processor chain and the dispatcher (acceptors are started
@@ -126,6 +112,24 @@ func (p *Pipeline) Shutdown(ctx context.Context) error {
 	return nil
 }
 
+func (p *Pipeline) handle(ctx context.Context, query *qdata.Query) (*qdata.Result, error) {
+	if ctx.Err() != nil {
+		return nil, queryContextError(ctx)
+	}
+
+	err := qdata.ValidateQueryTime(query)
+	if err != nil {
+		return nil, qerror.New(qerror.CodeInvalidArgument, "pipeline %q: %v", p.Name, err)
+	}
+
+	err = p.processQuery(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+
+	return p.execute(ctx, query, p.Processors)
+}
+
 // execute builds the response chain around each dispatch processor's position.
 func (p *Pipeline) execute(
 	ctx context.Context, query *qdata.Query, processors []processor.Processor,
@@ -133,6 +137,7 @@ func (p *Pipeline) execute(
 	if ctx.Err() != nil {
 		return nil, queryContextError(ctx)
 	}
+
 	for index, proc := range processors {
 		middleware, ok := proc.(processor.DispatchProcessor)
 		if !ok {
@@ -201,6 +206,7 @@ func (p *Pipeline) processQuery(ctx context.Context, query *qdata.Query) error {
 		if ctx.Err() != nil {
 			return queryContextError(ctx)
 		}
+
 		err = proc.ProcessQuery(ctx, query)
 		if err != nil {
 			return fmt.Errorf("pipeline %q: %w", p.Name, err)
