@@ -28,62 +28,114 @@ type BasicAccount struct {
 	Tenants  []string `mapstructure:"tenants"`
 }
 
+var (
+	errBasicConfig  = errors.New("basic identity requires authority, realm and accounts")
+	errBasicRealm   = errors.New("basic realm must contain printable ASCII")
+	errBasicAccount = errors.New("each basic account needs a valid username and tenant scope")
+	errBasicHash    = errors.New("basic hash must be bcrypt with cost between 10 and 16")
+)
+
+const (
+	maxBasicHeaderBytes    = 8192
+	maxBcryptPasswordBytes = 72
+	minBcryptCost          = 10
+	maxBcryptCost          = 16
+)
+
+type basicAccountRecord struct {
+	hash    []byte
+	tenants []string
+}
+
+type basicCredentials struct {
+	authority string
+	challenge string
+	accounts  map[string]basicAccountRecord
+	fallback  basicAccountRecord
+}
+
 func basicAuthenticator(cfg BasicIdentityConfig) (pipeline.Authenticator, error) {
 	if cfg.Authority == "" || cfg.Realm == "" || len(cfg.Accounts) == 0 {
-		return nil, errors.New("basic identity requires authority, realm and accounts")
-	}
-	if strings.ContainsFunc(cfg.Realm, func(r rune) bool { return r < 32 || r > 126 }) {
-		return nil, errors.New("basic realm must contain printable ASCII")
+		return nil, errBasicConfig
 	}
 
-	type account struct {
-		hash    []byte
-		tenants []string
+	if strings.ContainsFunc(cfg.Realm, func(character rune) bool { return character < ' ' || character > '~' }) {
+		return nil, errBasicRealm
 	}
-	var fallback account
-	accounts := make(map[string]account, len(cfg.Accounts))
+
+	store := basicCredentials{
+		authority: cfg.Authority,
+		challenge: "Basic realm=" + strconv.Quote(cfg.Realm),
+		accounts:  make(map[string]basicAccountRecord, len(cfg.Accounts)),
+		fallback:  basicAccountRecord{hash: nil, tenants: nil},
+	}
 	for name, values := range cfg.Accounts {
-		if name == "" || strings.Contains(name, ":") || len(values.Tenants) == 0 {
-			return nil, errors.New("each basic account needs a valid username and tenant scope")
-		}
-		data, err := os.ReadFile(values.HashFile)
+		record, err := loadBasicAccount(name, values)
 		if err != nil {
-			return nil, fmt.Errorf("basic hash file: %w", err)
+			return nil, err
 		}
-		hash := []byte(strings.TrimSpace(string(data)))
-		cost, err := bcrypt.Cost(hash)
-		if err != nil || cost < 10 || cost > 16 {
-			return nil, errors.New("basic hash must be bcrypt with cost between 10 and 16")
-		}
-		fallback = account{hash: hash, tenants: values.Tenants}
-		accounts[name] = fallback
+
+		store.accounts[name] = record
+		store.fallback = record
 	}
-	challenge := "Basic realm=" + strconv.Quote(cfg.Realm)
-	return func(_ context.Context, query *qdata.Query) (pipeline.Principal, error) {
-		denied := func() (pipeline.Principal, error) {
-			err := qerror.New(qerror.CodeUnauthenticated, "invalid basic credentials")
-			err.Challenge = challenge
-			return pipeline.Principal{}, err
-		}
-		values := qdata.HeaderValuesFor(query, "Authorization")
-		if len(values) != 1 || len(values[0]) > 8192 {
-			return denied()
-		}
-		request := http.Request{Header: http.Header{"Authorization": values}}
-		username, password, ok := request.BasicAuth()
-		if !ok || len(password) > 72 {
-			return denied()
-		}
-		record, found := accounts[username]
-		if !found {
-			record = fallback
-		}
-		if bcrypt.CompareHashAndPassword(record.hash, []byte(password)) != nil || !found {
-			return denied()
-		}
-		return pipeline.Principal{
-			Identity: qdata.Identity{Authority: cfg.Authority, Principal: username},
-			Tenants:  record.tenants,
-		}, nil
+
+	return store.authenticate, nil
+}
+
+func loadBasicAccount(name string, values BasicAccount) (basicAccountRecord, error) {
+	var empty basicAccountRecord
+	if name == "" || strings.Contains(name, ":") || len(values.Tenants) == 0 {
+		return empty, errBasicAccount
+	}
+
+	data, err := os.ReadFile(values.HashFile)
+	if err != nil {
+		return empty, fmt.Errorf("basic hash file: %w", err)
+	}
+
+	hash := []byte(strings.TrimSpace(string(data)))
+
+	cost, err := bcrypt.Cost(hash)
+	if err != nil || cost < minBcryptCost || cost > maxBcryptCost {
+		return empty, errBasicHash
+	}
+
+	return basicAccountRecord{hash: hash, tenants: values.Tenants}, nil
+}
+
+func (store basicCredentials) authenticate(_ context.Context, query *qdata.Query) (pipeline.Principal, error) {
+	denied := func() (pipeline.Principal, error) {
+		err := qerror.New(qerror.CodeUnauthenticated, "invalid basic credentials")
+		err.Challenge = store.challenge
+
+		return pipeline.Principal{}, err
+	}
+
+	values := qdata.HeaderValuesFor(query, "Authorization")
+	if len(values) != 1 || len(values[0]) > maxBasicHeaderBytes {
+		return denied()
+	}
+
+	var request http.Request
+
+	request.Header = http.Header{"Authorization": values}
+
+	username, password, ok := request.BasicAuth()
+	if !ok || len(password) > maxBcryptPasswordBytes {
+		return denied()
+	}
+
+	record, found := store.accounts[username]
+	if !found {
+		record = store.fallback
+	}
+
+	if bcrypt.CompareHashAndPassword(record.hash, []byte(password)) != nil || !found {
+		return denied()
+	}
+
+	return pipeline.Principal{
+		Identity: qdata.Identity{Authority: store.authority, Principal: username, Tenant: "", Groups: nil, Roles: nil, Scopes: nil},
+		Tenants:  record.tenants,
 	}, nil
 }

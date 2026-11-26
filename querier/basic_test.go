@@ -1,4 +1,4 @@
-package querier
+package querier //nolint:testpackage // Exercises the internal credential verifier with a mounted hash.
 
 import (
 	"net/http"
@@ -14,6 +14,7 @@ import (
 
 func TestBasicAuthenticator(t *testing.T) {
 	t.Parallel()
+
 	hash, err := bcrypt.GenerateFromPassword([]byte("valid-password"), 10)
 	require.NoError(t, err)
 	path := filepath.Join(t.TempDir(), "hash")
@@ -23,25 +24,36 @@ func TestBasicAuthenticator(t *testing.T) {
 		Accounts: map[string]BasicAccount{"alice": {HashFile: path, Tenants: []string{"tenant"}}},
 	})
 	require.NoError(t, err)
-	request := http.Request{Header: make(http.Header)}
+
+	var request http.Request
+
+	request.Header = make(http.Header)
 	request.SetBasicAuth("alice", "valid-password")
-	query := &qdata.Query{Header: map[string]*qdata.HeaderValues{"Authorization": {Values: request.Header.Values("Authorization")}}}
+	query := &qdata.Query{Header: map[string]*qdata.HeaderValues{
+		"Authorization": {Values: request.Header.Values("Authorization")},
+	}}
 	principal, err := authenticate(t.Context(), query)
 	require.NoError(t, err)
 	require.Equal(t, "alice", principal.Principal)
 	require.Equal(t, []string{"tenant"}, principal.Tenants)
 	request.SetBasicAuth("alice", "wrong-password")
-	for _, tc := range []struct {
+
+	for _, scenario := range []struct {
 		name   string
 		values []string
 	}{
 		{"missing", nil}, {"malformed", []string{"Basic bad!"}}, {"invalid", request.Header.Values("Authorization")},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			query.Header["Authorization"] = &qdata.HeaderValues{Values: tc.values}
+		t.Run(scenario.name, func(t *testing.T) {
+			t.Parallel()
+
+			query := &qdata.Query{Header: map[string]*qdata.HeaderValues{
+				"Authorization": {Values: scenario.values},
+			}}
 			_, err := authenticate(t.Context(), query)
 			require.Equal(t, qerror.CodeUnauthenticated, qerror.CodeOf(err))
 			require.NotContains(t, err.Error(), "wrong-password")
+
 			header := make(http.Header)
 			qerror.SetAuthenticationChallenge(header, err)
 			require.Equal(t, `Basic realm="Queries"`, header.Get("WWW-Authenticate"))
