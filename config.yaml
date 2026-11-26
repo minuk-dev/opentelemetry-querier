@@ -15,6 +15,8 @@ acceptors:
   otqp:
     grpc_endpoint: "0.0.0.0:4327"
     http_endpoint: "0.0.0.0:4328"
+    auth:
+      authenticator: bearertokenauth/dev
 
   # Alternative acceptor: the Prometheus HTTP query API (/api/v1/query, ...).
   # Add it to a pipeline's `acceptors` to let Prometheus clients query through
@@ -22,12 +24,16 @@ acceptors:
   # prometheus:
   #   endpoint: "0.0.0.0:9095"
 
+extensions:
+  bearertokenauth/dev:
+    authority: local
+    principal: alice
+    tenants: ["acme"]
+    tokens: ["dev-token"]
+
 processors:
-  # Gateway: bearer auth + per-tenant rate limiting. Runs after tenant resolution.
+  # Per-tenant rate limiting. Runs after tenant resolution.
   authratelimit:
-    require_bearer: true
-    tokens:
-      - "dev-token"
     requests_per_second: 50
     burst: 100
     per_tenant: true
@@ -43,13 +49,11 @@ processors:
     required: false
     enforce_label: "tenant_id"
 
-  # Per-subject authorization: reject a user's query or scope it down. Resolves
-  # the subject from X-Scope-User (or the tenant, with from_tenant) and applies
+  # Per-subject authorization uses the verified principal and applies
   # the first matching rule; an unmatched subject hits default_effect. Runs
   # after tenant (so from_tenant works) and before queryrewrite (so the injected
   # matchers are enforced). Fails closed — default_effect defaults to deny.
   simpleauthz:
-    subject_header: "X-Scope-User"
     default_effect: "deny"
     rules:
       # admins may query anything, unscoped.
@@ -92,6 +96,7 @@ dispatchers:
     timeout: 30s
 
 service:
+  extensions: [bearertokenauth/dev]
   pipelines:
     # Pipelines are signal-typed: the id's type token names the signal it carries
     # (metrics/logs/traces/profiles), mirroring the opentelemetry-collector.

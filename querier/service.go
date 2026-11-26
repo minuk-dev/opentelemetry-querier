@@ -8,6 +8,7 @@ import (
 
 	"github.com/minuk-dev/opentelemetry-querier/acceptor"
 	"github.com/minuk-dev/opentelemetry-querier/component"
+	"github.com/minuk-dev/opentelemetry-querier/component/extension"
 	"github.com/minuk-dev/opentelemetry-querier/connector"
 	"github.com/minuk-dev/opentelemetry-querier/dispatcher"
 	"github.com/minuk-dev/opentelemetry-querier/pipeline"
@@ -36,17 +37,24 @@ var (
 // Service is a fully assembled, runnable querier: a set of pipelines and the
 // acceptors that feed them.
 type Service struct {
-	buildInfo component.BuildInfo
-	logger    *slog.Logger
-	pipelines []*pipeline.Pipeline
-	acceptors []acceptor.Acceptor
-	host      component.Host
+	buildInfo      component.BuildInfo
+	logger         *slog.Logger
+	pipelines      []*pipeline.Pipeline
+	acceptors      []acceptor.Acceptor
+	host           host
+	extensionOrder []string
 }
 
 // host is a minimal component.Host implementation.
-type host struct{}
+type host map[string]extension.Extension
 
-func (host) GetComponent(string, string) any { return nil }
+func (h host) GetComponent(kind, name string) any {
+	if kind != "extension" {
+		return nil
+	}
+
+	return h[name]
+}
 
 // Build assembles a Service from the compiled factories and the runtime config.
 // Pipelines are built in two passes so a connector-terminated pipeline can bind
@@ -57,16 +65,22 @@ func (host) GetComponent(string, string) any { return nil }
 // resolved as a target binding rather than a listener.
 func Build(factories Factories, cfg *Config, buildInfo component.BuildInfo) (*Service, error) {
 	svc := &Service{
-		buildInfo: buildInfo,
-		logger:    slog.Default(),
-		pipelines: nil,
-		acceptors: nil,
-		host:      host{},
+		buildInfo:      buildInfo,
+		logger:         slog.Default(),
+		pipelines:      nil,
+		acceptors:      nil,
+		host:           make(host),
+		extensionOrder: nil,
 	}
 
 	built := map[string]*pipeline.Pipeline{}
 
-	err := svc.buildLeafPipelines(factories, cfg, built)
+	err := svc.buildExtensions(factories, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	err = svc.buildLeafPipelines(factories, cfg, built)
 	if err != nil {
 		return nil, err
 	}
@@ -93,8 +107,15 @@ func Build(factories Factories, cfg *Config, buildInfo component.BuildInfo) (*Se
 	return svc, nil
 }
 
-// Start starts every pipeline (dispatchers + processors) then every acceptor.
+// Start starts extensions, pipelines, then acceptors.
 func (svc *Service) Start(ctx context.Context) error {
+	for _, id := range svc.extensionOrder {
+		err := svc.host[id].Start(ctx, svc.host)
+		if err != nil {
+			return fmt.Errorf("querier: start extension %q: %w", id, err)
+		}
+	}
+
 	for _, pipe := range svc.pipelines {
 		err := pipe.Start(ctx, svc.host)
 		if err != nil {
@@ -112,7 +133,7 @@ func (svc *Service) Start(ctx context.Context) error {
 	return nil
 }
 
-// Shutdown stops acceptors first, then pipelines.
+// Shutdown stops acceptors, pipelines, then extensions.
 func (svc *Service) Shutdown(ctx context.Context) error {
 	var errs []error
 
@@ -127,6 +148,15 @@ func (svc *Service) Shutdown(ctx context.Context) error {
 		err := pipe.Shutdown(ctx)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("querier: stop pipeline %q: %w", pipe.Name, err))
+		}
+	}
+
+	for index := len(svc.extensionOrder) - 1; index >= 0; index-- {
+		id := svc.extensionOrder[index]
+
+		err := svc.host[id].Shutdown(ctx)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("querier: stop extension %q: %w", id, err))
 		}
 	}
 
@@ -159,11 +189,7 @@ func (svc *Service) buildLeafPipelines(factories Factories, cfg *Config, built m
 		}
 
 		built[name] = pipeline.New(name, procs, disp)
-
-		err = configureIdentity(built[name], pipelineCfg.Identity)
-		if err != nil {
-			return fmt.Errorf("pipeline %q: %w", name, err)
-		}
+		built[name].Timeout = pipelineCfg.QueryTimeout
 	}
 
 	return nil
@@ -241,11 +267,7 @@ func (svc *Service) buildConnectorPipelines(
 		}
 
 		built[name] = pipeline.New(name, procs, conn)
-
-		err = configureIdentity(built[name], pipelineCfg.Identity)
-		if err != nil {
-			return fmt.Errorf("pipeline %q: %w", name, err)
-		}
+		built[name].Timeout = pipelineCfg.QueryTimeout
 	}
 
 	return nil
@@ -378,7 +400,7 @@ func (svc *Service) buildAcceptor(
 	factories Factories,
 	cfg *Config,
 	idStr string,
-	next pipeline.Handler,
+	pipe *pipeline.Pipeline,
 ) (acceptor.Acceptor, error) {
 	id, err := parseID(idStr)
 	if err != nil {
@@ -390,7 +412,7 @@ func (svc *Service) buildAcceptor(
 		return nil, fmt.Errorf("%w %q", errUnknownAcceptor, id.Type())
 	}
 
-	compCfg, err := decodeComponentConfig(cfg.Acceptors, idStr, factory.CreateDefaultConfig())
+	compCfg, next, err := svc.acceptorConfig(cfg.Acceptors[idStr], idStr, factory.CreateDefaultConfig(), pipe)
 	if err != nil {
 		return nil, err
 	}
