@@ -53,20 +53,22 @@ func New(name string, processors []processor.Processor, disp dispatcher.Dispatch
 // reverse order). A validation or processor error on the request path
 // short-circuits before the dispatcher is reached.
 func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (*qdata.Result, error) {
-	var identity qdata.Identity
+	var (
+		identity  qdata.Identity
+		handleErr error
+	)
 
 	decision := auditDecision{identity: identity, verified: false, decision: "not_evaluated", reason: "validation"}
 
 	if p.AuditLogger != nil {
 		ctx = withAuditRequestID(ctx)
+
+		defer func() { p.audit(ctx, decision, handleErr) }()
 	}
 
-	result, err := p.handle(ctx, query, &decision)
-	if p.AuditLogger != nil {
-		p.audit(ctx, decision, err)
-	}
+	result, handleErr := p.handle(ctx, query, &decision)
 
-	return result, err
+	return result, handleErr
 }
 
 // Start starts the processor chain and the dispatcher (acceptors are started
