@@ -32,6 +32,8 @@ func newServer(t *testing.T, status int, body string) *httptest.Server {
 
 func newDispatcher(endpoint string) *elasticsearchdispatcher.Dispatcher {
 	return elasticsearchdispatcher.New(elasticsearchdispatcher.Config{
+		MaxResponseBytes: 0, MaxRecords: 0,
+
 		Endpoint:  endpoint,
 		Index:     "logs-*",
 		TimeField: "",

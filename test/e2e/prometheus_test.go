@@ -73,7 +73,9 @@ func TestPrometheusRealQuery(t *testing.T) { //nolint:paralleltest // containers
 	endpoint := containerURL(ctx, t, container, "9090/tcp")
 
 	pipe := pipeline.New("metrics", nil, prometheusdispatcher.New(
-		prometheusdispatcher.Config{Endpoint: endpoint, TenantHeader: "", Timeout: 0}))
+		prometheusdispatcher.Config{
+ MaxResponseBytes: 0, MaxSeries: 0, MaxSamples: 0,
+Endpoint: endpoint, TenantHeader: "", Timeout: 0}))
 	acc := prometheusacceptor.New(prometheusacceptor.Config{Endpoint: ""}, pipe)
 
 	front := httptest.NewServer(acc.Handler())

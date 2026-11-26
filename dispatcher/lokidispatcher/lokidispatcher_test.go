@@ -33,6 +33,8 @@ func newServer(t *testing.T, status int, body string) *httptest.Server {
 
 func newDispatcher(endpoint string) *lokidispatcher.Dispatcher {
 	return lokidispatcher.New(lokidispatcher.Config{
+		MaxResponseBytes: 0, MaxSeries: 0, MaxSamples: 0, MaxRecords: 0,
+
 		Endpoint:     endpoint,
 		TenantHeader: "",
 		Timeout:      0,
@@ -295,14 +297,20 @@ func TestValidateRejectsBadConfig(t *testing.T) {
 	t.Parallel()
 
 	require.Error(t, lokidispatcher.Validate(lokidispatcher.Config{
+		MaxResponseBytes: 0, MaxSeries: 0, MaxSamples: 0, MaxRecords: 0,
+
 		Endpoint: "", TenantHeader: "", Timeout: 0, Limit: 0, Direction: "sideways",
 	}), "unknown direction must be rejected")
 
 	require.Error(t, lokidispatcher.Validate(lokidispatcher.Config{
+		MaxResponseBytes: 0, MaxSeries: 0, MaxSamples: 0, MaxRecords: 0,
+
 		Endpoint: "", TenantHeader: "", Timeout: 0, Limit: -1, Direction: "",
 	}), "negative limit must be rejected")
 
 	require.NoError(t, lokidispatcher.Validate(lokidispatcher.Config{
+		MaxResponseBytes: 0, MaxSeries: 0, MaxSamples: 0, MaxRecords: 0,
+
 		Endpoint: "", TenantHeader: "", Timeout: 0, Limit: 100, Direction: "backward",
 	}), "well-formed config must pass")
 }

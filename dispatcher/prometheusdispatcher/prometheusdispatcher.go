@@ -67,6 +67,7 @@ func New(cfg Config) *Dispatcher {
 	if cfg.MaxResponseBytes < 0 || cfg.MaxResponseBytes > maxResponseBytes {
 		cfg.MaxResponseBytes = 0
 	}
+
 	if cfg.TenantHeader == "" {
 		cfg.TenantHeader = DefaultTenantHeader
 	}
@@ -114,21 +115,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, query *qdata.Query) (*qdata.R
 
 	defer func() { _ = resp.Body.Close() }()
 
-	limit := d.cfg.MaxResponseBytes
-	if limit == 0 {
-		limit = maxResponseBytes
-	}
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	body, err := d.readResponseBody(resp.Body)
 	if err != nil {
-		return nil, qerror.UpstreamTransportError(err)
-	}
-
-	if int64(len(body)) > limit {
-		if d.cfg.MaxResponseBytes > 0 {
-			return nil, qerror.New(qerror.CodeResourceExhausted, "result exceeds max_response_bytes (%d)", d.cfg.MaxResponseBytes)
-		}
-		return nil, qerror.New(qerror.CodeUnavailable, "upstream response exceeds %d bytes", maxResponseBytes)
+		return nil, err
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -136,6 +125,28 @@ func (d *Dispatcher) Dispatch(ctx context.Context, query *qdata.Query) (*qdata.R
 	}
 
 	return d.parseResponse(body)
+}
+
+func (d *Dispatcher) readResponseBody(reader io.Reader) ([]byte, error) {
+	limit := d.cfg.MaxResponseBytes
+	if limit == 0 {
+		limit = maxResponseBytes
+	}
+
+	body, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	if err != nil {
+		return nil, qerror.UpstreamTransportError(err)
+	}
+
+	if int64(len(body)) > limit {
+		if d.cfg.MaxResponseBytes > 0 {
+			return nil, qerror.New(qerror.CodeResourceExhausted, "result exceeds max_response_bytes (%d)", limit)
+		}
+
+		return nil, qerror.New(qerror.CodeUnavailable, "upstream response exceeds %d bytes", maxResponseBytes)
+	}
+
+	return body, nil
 }
 
 // queryText renders the query's structured plan to PromQL. The plan is the query
@@ -231,21 +242,9 @@ func (d *Dispatcher) parseResponse(body []byte) (*qdata.Result, error) {
 			return nil, qerror.New(qerror.CodeUnavailable, "promdispatcher: decode %s: %v", resp.Data.ResultType, err)
 		}
 
-		if d.cfg.MaxSeries > 0 && len(samples) > d.cfg.MaxSeries {
-			return nil, qerror.New(qerror.CodeResourceExhausted, "result exceeds max_series (%d)", d.cfg.MaxSeries)
-		}
-		points := 0
-		for _, sample := range samples {
-			points += len(sample.Values)
-			if len(sample.Value) > 0 {
-				points++
-			}
-			if d.cfg.MaxSamples > 0 && points > d.cfg.MaxSamples {
-				return nil, qerror.New(qerror.CodeResourceExhausted, "result exceeds max_samples (%d)", d.cfg.MaxSamples)
-			}
-			if len(sample.Histogram) > 0 || len(sample.Histograms) > 0 {
-				return nil, qerror.New(qerror.CodeUnavailable, "promdispatcher: native histogram results are unsupported")
-			}
+		err = d.checkSamples(samples)
+		if err != nil {
+			return nil, err
 		}
 
 		result.Data = &qdatav1.Result_Metrics{Metrics: samplesToMetrics(samples)}
@@ -258,6 +257,30 @@ func (d *Dispatcher) parseResponse(body []byte) (*qdata.Result, error) {
 	}
 
 	return result, nil
+}
+
+func (d *Dispatcher) checkSamples(samples []promSample) error {
+	if d.cfg.MaxSeries > 0 && len(samples) > d.cfg.MaxSeries {
+		return qerror.New(qerror.CodeResourceExhausted, "result exceeds max_series (%d)", d.cfg.MaxSeries)
+	}
+
+	points := 0
+	for _, sample := range samples {
+		points += len(sample.Values)
+		if len(sample.Value) > 0 {
+			points++
+		}
+
+		if d.cfg.MaxSamples > 0 && points > d.cfg.MaxSamples {
+			return qerror.New(qerror.CodeResourceExhausted, "result exceeds max_samples (%d)", d.cfg.MaxSamples)
+		}
+
+		if len(sample.Histogram) > 0 || len(sample.Histograms) > 0 {
+			return qerror.New(qerror.CodeUnavailable, "promdispatcher: native histogram results are unsupported")
+		}
+	}
+
+	return nil
 }
 
 func samplesToMetrics(samples []promSample) *qdata.Metrics {

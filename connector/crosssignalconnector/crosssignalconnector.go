@@ -35,7 +35,7 @@ var _ connector.Connector = (*Connector)(nil)
 
 // New builds a cross-signal connector over the given per-signal target pipelines.
 func New(targets map[qdata.Signal]pipeline.Handler) *Connector {
-	return &Connector{Base: dispatcher.Base{}, targets: targets}
+	return &Connector{Base: dispatcher.Base{}, targets: targets, maxRows: 0}
 }
 
 // Dispatch routes query to its target pipelines. A single-signal plan is
@@ -151,11 +151,14 @@ func (c *Connector) execSide(ctx context.Context, parent *qdata.Query, subtree *
 	}
 
 	if c.maxRows > 0 {
-		count := max(len(result.GetMetrics().GetSeries()), len(result.GetLogs().GetRecords()), len(result.GetTable().GetRows()))
+		count := max(
+			len(result.GetMetrics().GetSeries()), len(result.GetLogs().GetRecords()), len(result.GetTable().GetRows()),
+		)
 		if count > c.maxRows {
 			return nil, qerror.New(qerror.CodeResourceExhausted, "crosssignalconnector: operand exceeds %d rows", c.maxRows)
 		}
 	}
+
 	table, err := resultToTable(signal, result)
 	if err != nil {
 		return nil, err
@@ -195,5 +198,6 @@ func (c *Connector) rowLimit() int {
 	if c.maxRows > 0 {
 		return c.maxRows
 	}
+
 	return maxJoinRows
 }

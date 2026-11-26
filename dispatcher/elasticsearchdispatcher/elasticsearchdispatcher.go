@@ -75,6 +75,7 @@ func New(cfg Config) *Dispatcher {
 	if cfg.MaxResponseBytes < 0 || cfg.MaxResponseBytes > maxResponseBytes {
 		cfg.MaxResponseBytes = 0
 	}
+
 	if cfg.Endpoint == "" {
 		cfg.Endpoint = DefaultEndpoint
 	}
@@ -129,21 +130,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, query *qdata.Query) (*qdata.R
 
 	defer func() { _ = resp.Body.Close() }()
 
-	limit := d.cfg.MaxResponseBytes
-	if limit == 0 {
-		limit = maxResponseBytes
-	}
-
-	payload, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	payload, err := d.readResponseBody(resp.Body)
 	if err != nil {
-		return nil, qerror.UpstreamTransportError(err)
-	}
-
-	if int64(len(payload)) > limit {
-		if d.cfg.MaxResponseBytes > 0 {
-			return nil, qerror.New(qerror.CodeResourceExhausted, "result exceeds max_response_bytes (%d)", d.cfg.MaxResponseBytes)
-		}
-		return nil, qerror.New(qerror.CodeUnavailable, "upstream response exceeds %d bytes", maxResponseBytes)
+		return nil, err
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -151,6 +140,28 @@ func (d *Dispatcher) Dispatch(ctx context.Context, query *qdata.Query) (*qdata.R
 	}
 
 	return d.parseResponse(payload)
+}
+
+func (d *Dispatcher) readResponseBody(reader io.Reader) ([]byte, error) {
+	limit := d.cfg.MaxResponseBytes
+	if limit == 0 {
+		limit = maxResponseBytes
+	}
+
+	payload, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	if err != nil {
+		return nil, qerror.UpstreamTransportError(err)
+	}
+
+	if int64(len(payload)) > limit {
+		if d.cfg.MaxResponseBytes > 0 {
+			return nil, qerror.New(qerror.CodeResourceExhausted, "result exceeds max_response_bytes (%d)", limit)
+		}
+
+		return nil, qerror.New(qerror.CodeUnavailable, "upstream response exceeds %d bytes", maxResponseBytes)
+	}
+
+	return payload, nil
 }
 
 // queryClause renders the query's structured plan to an Elasticsearch query
@@ -263,6 +274,7 @@ func (d *Dispatcher) parseResponse(body []byte) (*qdata.Result, error) {
 	if d.cfg.MaxRecords > 0 && len(hits.Hits) > d.cfg.MaxRecords {
 		return nil, qerror.New(qerror.CodeResourceExhausted, "result exceeds max_records (%d)", d.cfg.MaxRecords)
 	}
+
 	metadata, err := parseSearchMetadata(envelope, hits.Total)
 	if err != nil {
 		return nil, err

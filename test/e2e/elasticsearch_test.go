@@ -52,6 +52,8 @@ func TestElasticsearchRealQuery(t *testing.T) { //nolint:paralleltest // contain
 	require.Contains(t, []int{http.StatusOK, http.StatusCreated}, code, "index doc: %s", body)
 
 	pipe := pipeline.New("logs", nil, elasticsearchdispatcher.New(elasticsearchdispatcher.Config{
+ MaxResponseBytes: 0, MaxRecords: 0,
+
 		Endpoint: endpoint, Index: "", TimeField: "", Size: 0, Timeout: 0, Username: "", Password: "",
 	}))
 	acc := elasticsearchacceptor.New(elasticsearchacceptor.Config{Endpoint: ""}, pipe)

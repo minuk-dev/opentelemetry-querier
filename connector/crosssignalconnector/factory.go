@@ -11,6 +11,8 @@ import (
 )
 
 // errInvalidConfig is returned when the factory receives an unexpected config type.
+var errMaxRows = errors.New("crosssignalconnector max_rows must be between 0 and 10000")
+
 var errInvalidConfig = errors.New("crosssignalconnector: invalid config type")
 
 // Config configures cross-signal result size.
@@ -28,7 +30,7 @@ func NewFactory() connector.Factory {
 }
 
 func createDefaultConfig() component.Config {
-	return &Config{}
+	return &Config{MaxRows: 0}
 }
 
 func createConnector(
@@ -43,9 +45,11 @@ func createConnector(
 	}
 
 	if conf.MaxRows < 0 || conf.MaxRows > maxJoinRows {
-		return nil, errors.New("crosssignalconnector max_rows must be between 0 and 10000")
+		return nil, errMaxRows
 	}
+
 	connector := New(targets)
 	connector.maxRows = conf.MaxRows
+
 	return connector, nil
 }

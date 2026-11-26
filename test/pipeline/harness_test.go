@@ -91,11 +91,13 @@ func (u *fakeUpstream) gotTenant() string {
 
 // front wires a Prometheus acceptor -> the given processor chain -> a real
 // Prometheus dispatcher pointed at up, and returns the client-facing base URL.
-func front(t *testing.T, up *fakeUpstream, procs ...processor.Processor) string {
+func front(t *testing.T, upstream *fakeUpstream, procs ...processor.Processor) string {
 	t.Helper()
 
 	disp := prometheusdispatcher.New(
-		prometheusdispatcher.Config{Endpoint: up.server.URL, TenantHeader: tenantHeader, Timeout: 0})
+		prometheusdispatcher.Config{
+			MaxResponseBytes: 0, MaxSeries: 0, MaxSamples: 0,
+			Endpoint: upstream.server.URL, TenantHeader: tenantHeader, Timeout: 0})
 
 	return frontWith(t, disp, procs...)
 }

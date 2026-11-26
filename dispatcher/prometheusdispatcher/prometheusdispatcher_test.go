@@ -32,7 +32,9 @@ func newServer(t *testing.T, status int, body string) *httptest.Server {
 }
 
 func newDispatcher(endpoint string) *prometheusdispatcher.Dispatcher {
-	return prometheusdispatcher.New(prometheusdispatcher.Config{Endpoint: endpoint, TenantHeader: "", Timeout: 0})
+	return prometheusdispatcher.New(prometheusdispatcher.Config{
+		MaxResponseBytes: 0, MaxSeries: 0, MaxSamples: 0,
+		Endpoint: endpoint, TenantHeader: "", Timeout: 0})
 }
 
 func TestDispatchVector(t *testing.T) {
