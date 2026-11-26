@@ -72,8 +72,8 @@ type Dispatcher struct {
 
 // New builds the dispatcher, applying defaults.
 func New(cfg Config) *Dispatcher {
-	if cfg.MaxResponseBytes <= 0 || cfg.MaxResponseBytes > maxResponseBytes {
-		cfg.MaxResponseBytes = maxResponseBytes
+	if cfg.MaxResponseBytes < 0 || cfg.MaxResponseBytes > maxResponseBytes {
+		cfg.MaxResponseBytes = 0
 	}
 	if cfg.Endpoint == "" {
 		cfg.Endpoint = DefaultEndpoint
@@ -129,13 +129,18 @@ func (d *Dispatcher) Dispatch(ctx context.Context, query *qdata.Query) (*qdata.R
 
 	defer func() { _ = resp.Body.Close() }()
 
-	payload, err := io.ReadAll(io.LimitReader(resp.Body, d.cfg.MaxResponseBytes+1))
+	limit := d.cfg.MaxResponseBytes
+	if limit == 0 {
+		limit = maxResponseBytes
+	}
+
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
 		return nil, qerror.UpstreamTransportError(err)
 	}
 
-	if int64(len(payload)) > d.cfg.MaxResponseBytes {
-		if d.cfg.MaxResponseBytes < maxResponseBytes {
+	if int64(len(payload)) > limit {
+		if d.cfg.MaxResponseBytes > 0 {
 			return nil, qerror.New(qerror.CodeResourceExhausted, "result exceeds max_response_bytes (%d)", d.cfg.MaxResponseBytes)
 		}
 		return nil, qerror.New(qerror.CodeUnavailable, "upstream response exceeds %d bytes", maxResponseBytes)
