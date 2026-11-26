@@ -95,7 +95,7 @@ func TestBuildWiresConnectorTargetsBySignal(t *testing.T) {
 		Processors:  nil,
 		Dispatchers: map[string]map[string]any{"prometheus": {}, "loki": {}},
 		Connectors:  map[string]map[string]any{"crosssignal": {}},
-		Service: querier.ServiceConfig{Pipelines: map[string]querier.PipelineConfig{
+		Service: querier.ServiceConfig{BackendRetries: nil, Pipelines: map[string]querier.PipelineConfig{
 			"metrics":    pipe("prometheus", "metricsin", "crosssignal"),
 			"logs":       pipe("loki", "logsin", "crosssignal"),
 			"logs/cross": pipe("crosssignal", "otqp"),
@@ -134,7 +134,7 @@ func TestBuildRejectsNestedConnectorTarget(t *testing.T) {
 		Processors:  nil,
 		Dispatchers: map[string]map[string]any{"prometheus": {}},
 		Connectors:  map[string]map[string]any{"crosssignal": {}},
-		Service: querier.ServiceConfig{Pipelines: map[string]querier.PipelineConfig{
+		Service: querier.ServiceConfig{BackendRetries: nil, Pipelines: map[string]querier.PipelineConfig{
 			"metrics":    pipe("prometheus", "metricsin"),
 			"logs/cross": pipe("crosssignal", "otqp", "crosssignal"),
 		}},
@@ -173,7 +173,7 @@ func TestBuildRejectsNamedSecurityDependency(t *testing.T) {
 		Acceptors:   map[string]map[string]any{"otqp": {}},
 		Processors:  map[string]map[string]any{"consumer/tenant-quota": {}},
 		Dispatchers: map[string]map[string]any{"prometheus": {}}, Connectors: nil,
-		Service: querier.ServiceConfig{Pipelines: map[string]querier.PipelineConfig{
+		Service: querier.ServiceConfig{BackendRetries: nil, Pipelines: map[string]querier.PipelineConfig{
 			"metrics/private": {QueryTimeout: 0, Acceptors: []string{"otqp"}, Processors: []string{"consumer/tenant-quota"},
 				Dispatchers: []string{"prometheus"}},
 		}},
@@ -198,7 +198,7 @@ func TestBuildRejectsDuplicateConnectorTargets(t *testing.T) {
 	cfg := &querier.Config{
 		Acceptors: nil, Processors: nil, Dispatchers: nil,
 		Connectors: map[string]map[string]any{"crosssignal/a": {}},
-		Service: querier.ServiceConfig{Pipelines: map[string]querier.PipelineConfig{
+		Service: querier.ServiceConfig{BackendRetries: nil, Pipelines: map[string]querier.PipelineConfig{
 			"metrics/a":    pipe("prometheus", "crosssignal/a"),
 			"metrics/b":    pipe("prometheus", "crosssignal/a"),
 			"metrics/join": pipe("crosssignal/a", "otqp"),

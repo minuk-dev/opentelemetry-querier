@@ -3,10 +3,11 @@ package querier
 import (
 	"errors"
 	"fmt"
-	"github.com/minuk-dev/opentelemetry-querier/pipeline"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/minuk-dev/opentelemetry-querier/pipeline"
 
 	"github.com/go-viper/mapstructure/v2"
 	"gopkg.in/yaml.v3"
@@ -16,7 +17,8 @@ import (
 )
 
 var (
-	errNegativeQueryTimeout = errors.New("query_timeout must be non-negative")
+	errRetryUnknownDispatcher = errors.New("backend_retries references unknown dispatcher")
+	errNegativeQueryTimeout   = errors.New("query_timeout must be non-negative")
 	// errEmptyPipelines is returned when no pipelines are configured.
 	errEmptyPipelines = errors.New("querier: service.pipelines is empty")
 	// errNoAcceptors is returned when a pipeline lists no acceptors.
@@ -80,7 +82,7 @@ func LoadConfig(path string) (*Config, error) {
 		Processors:  nil,
 		Dispatchers: nil,
 		Connectors:  nil,
-		Service:     ServiceConfig{Pipelines: nil},
+		Service:     ServiceConfig{BackendRetries: nil, Pipelines: nil},
 	}
 
 	err = decodeStrict(tree, cfg)
@@ -99,12 +101,15 @@ func LoadConfig(path string) (*Config, error) {
 func (c *Config) validate() error {
 	for id, retry := range c.Service.BackendRetries {
 		if _, exists := c.Dispatchers[id]; !exists {
-			return fmt.Errorf("backend_retries references unknown dispatcher %q", id)
+			return fmt.Errorf("%w %q", errRetryUnknownDispatcher, id)
 		}
-		if err := retry.Validate(); err != nil {
+
+		err := retry.Validate()
+		if err != nil {
 			return fmt.Errorf("dispatcher %q: %w", id, err)
 		}
 	}
+
 	if len(c.Service.Pipelines) == 0 {
 		return errEmptyPipelines
 	}

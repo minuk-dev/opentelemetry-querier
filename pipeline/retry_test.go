@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/minuk-dev/opentelemetry-querier/dispatcher"
 	"github.com/minuk-dev/opentelemetry-querier/pipeline"
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
 	"github.com/minuk-dev/opentelemetry-querier/qerror"
@@ -15,7 +16,8 @@ import (
 
 func TestBackendRetry(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []struct {
+
+	for _, scenario := range []struct {
 		name         string
 		status, want int
 		recover      bool
@@ -24,19 +26,25 @@ func TestBackendRetry(t *testing.T) {
 		{"permanent", http.StatusUnauthorized, 1, false},
 		{"attempts exhausted", http.StatusBadGateway, 3, false},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run(scenario.name, func(t *testing.T) {
+			t.Parallel()
+
 			calls := 0
-			backend := deadlineDispatcher{run: func(context.Context) (*qdata.Result, error) {
+			backend := deadlineDispatcher{Base: dispatcher.Base{}, run: func(context.Context) (*qdata.Result, error) {
 				calls++
-				if tc.recover && calls == 2 {
+				if scenario.recover && calls == 2 {
 					return &qdata.Result{}, nil
 				}
-				return nil, qerror.UpstreamHTTPError(tc.status, nil)
+
+				return nil, qerror.UpstreamHTTPError(scenario.status, nil)
 			}}
-			retry := pipeline.WithBackendRetry(backend, pipeline.RetryConfig{MaxAttempts: 3, Backoff: time.Nanosecond}, slog.Default())
+			retry := pipeline.WithBackendRetry(
+				backend, pipeline.RetryConfig{MaxAttempts: 3, Backoff: time.Nanosecond}, slog.Default(),
+			)
 			_, err := retry.Dispatch(t.Context(), &qdata.Query{})
-			require.Equal(t, tc.want, calls)
-			if tc.recover {
+			require.Equal(t, scenario.want, calls)
+
+			if scenario.recover {
 				require.NoError(t, err)
 			} else {
 				require.Error(t, err)
@@ -47,23 +55,31 @@ func TestBackendRetry(t *testing.T) {
 
 func TestBackendRetryStopsDuringBackoff(t *testing.T) {
 	t.Parallel()
+
 	called := make(chan struct{}, 1)
+
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	backend := deadlineDispatcher{run: func(context.Context) (*qdata.Result, error) {
+
+	backend := deadlineDispatcher{Base: dispatcher.Base{}, run: func(context.Context) (*qdata.Result, error) {
 		called <- struct{}{}
+
 		return nil, qerror.UpstreamHTTPError(http.StatusServiceUnavailable, nil)
 	}}
 	retry := pipeline.WithBackendRetry(backend, pipeline.RetryConfig{MaxAttempts: 3, Backoff: time.Minute}, slog.Default())
 	done := make(chan error, 1)
+
 	go func() { _, err := retry.Dispatch(ctx, &qdata.Query{}); done <- err }()
+
 	<-called
 	cancel()
+
 	select {
 	case err := <-done:
 		require.Equal(t, qerror.CodeCanceled, qerror.CodeOf(err))
 	case <-time.After(time.Second):
 		t.Fatal("retry did not stop")
 	}
+
 	require.Empty(t, called)
 }

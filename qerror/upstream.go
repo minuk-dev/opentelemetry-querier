@@ -26,10 +26,8 @@ func UpstreamTransportError(err error) *Error {
 	}
 
 	out := New(code, "upstream request: %v", err)
-	if code != CodeCanceled && !errors.Is(err, context.DeadlineExceeded) {
-		out.retryable = (networkError != nil && networkError.Timeout()) || errors.Is(err, io.ErrUnexpectedEOF) ||
-			errors.Is(err, io.EOF) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.EPIPE)
-	}
+	out.retryable = transientTransportFailure(err)
+
 	return out
 }
 
@@ -60,8 +58,9 @@ func UpstreamHTTPError(status int, body []byte) *Error {
 
 	out := New(code, "upstream status %d: %s", status, string(body))
 	if code == CodeUnavailable || code == CodeDeadlineExceeded {
-		out.retryable = status == http.StatusBadGateway || status == http.StatusServiceUnavailable || status == http.StatusGatewayTimeout
+		out.retryable = transientHTTPStatus(status)
 	}
+
 	return out
 }
 
@@ -83,5 +82,24 @@ func upstreamStatusCode(status int) Code {
 // RetryableRead reports whether a dispatcher classified a read failure as transient.
 func RetryableRead(err error) bool {
 	var coded *Error
+
 	return errors.As(err, &coded) && coded.retryable
+}
+
+func transientTransportFailure(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+
+	var timeout net.Error
+
+	return (errors.As(err, &timeout) && timeout.Timeout()) ||
+		errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) ||
+		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ECONNREFUSED) ||
+		errors.Is(err, syscall.EPIPE)
+}
+
+func transientHTTPStatus(status int) bool {
+	return status == http.StatusBadGateway || status == http.StatusServiceUnavailable ||
+		status == http.StatusGatewayTimeout
 }
