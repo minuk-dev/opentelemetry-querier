@@ -3,9 +3,10 @@ package querier
 import (
 	"errors"
 	"fmt"
-	"github.com/minuk-dev/opentelemetry-querier/pipeline"
 	"os"
 	"path/filepath"
+
+	"github.com/minuk-dev/opentelemetry-querier/pipeline"
 
 	"github.com/go-viper/mapstructure/v2"
 	"gopkg.in/yaml.v3"
@@ -78,7 +79,8 @@ func LoadConfig(path string) (*Config, error) {
 		Processors:  nil,
 		Dispatchers: nil,
 		Connectors:  nil,
-		Service:     ServiceConfig{Pipelines: nil},
+		Service: ServiceConfig{Concurrency: pipeline.ConcurrencyConfig{PerTenant: 0, Backends: nil, QueueSize: 0},
+			Pipelines: nil},
 	}
 
 	err = decodeStrict(tree, cfg)

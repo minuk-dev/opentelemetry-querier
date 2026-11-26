@@ -42,7 +42,9 @@ type Pipeline struct {
 
 // New builds a pipeline.
 func New(name string, processors []processor.Processor, disp dispatcher.Dispatcher) *Pipeline {
-	return &Pipeline{Name: name, Authenticate: nil, TenantHeader: "", Processors: processors, Dispatcher: disp}
+	return &Pipeline{
+		Name: name, Authenticate: nil, TenantHeader: "", Concurrency: nil, Processors: processors, Dispatcher: disp,
+	}
 }
 
 // Handle validates the client's plan, runs the request path (processors in
@@ -67,12 +69,14 @@ func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (*qdata.Resul
 
 	if p.Concurrency != nil {
 		var release func()
+
 		ctx, release, err = p.Concurrency.admitTenant(ctx)
 		if err != nil {
 			return nil, err
 		}
 		defer release()
 	}
+
 	return p.execute(ctx, query, p.Processors)
 }
 
