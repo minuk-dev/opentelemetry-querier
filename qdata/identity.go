@@ -22,6 +22,7 @@ func (i Identity) clone() Identity {
 	i.Groups = slices.Clone(i.Groups)
 	i.Roles = slices.Clone(i.Roles)
 	i.Scopes = slices.Clone(i.Scopes)
+
 	return i
 }
 
@@ -33,16 +34,19 @@ func WithIdentity(ctx context.Context, identity Identity) context.Context {
 // IdentityFromContext retrieves a copy of the server-owned identity.
 func IdentityFromContext(ctx context.Context) (Identity, bool) {
 	identity, ok := ctx.Value(identityKey{}).(Identity)
+
 	return identity.clone(), ok
 }
 
 // HeaderValuesFor returns transport values after acceptor ingress sanitization.
 func HeaderValuesFor(query *Query, name string) []string {
 	var result []string
+
 	for key, values := range query.GetHeader() {
 		if strings.EqualFold(key, name) {
 			result = append(result, values.GetValues()...)
 		}
 	}
+
 	return result
 }
