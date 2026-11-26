@@ -61,6 +61,10 @@ const (
 
 // Config configures the upstream Loki.
 type Config struct {
+	MaxResponseBytes int64 `mapstructure:"max_response_bytes"`
+	MaxSeries        int   `mapstructure:"max_series"`
+	MaxSamples       int   `mapstructure:"max_samples"`
+	MaxRecords       int   `mapstructure:"max_records"`
 	// Endpoint is the upstream base URL, e.g. http://localhost:3100.
 	Endpoint string `mapstructure:"endpoint"`
 	// TenantHeader is the header used to forward the resolved tenant id.
@@ -84,6 +88,10 @@ type Dispatcher struct {
 
 // New builds the dispatcher, applying defaults.
 func New(cfg Config) *Dispatcher {
+	if cfg.MaxResponseBytes < 0 || cfg.MaxResponseBytes > maxResponseBytes {
+		cfg.MaxResponseBytes = 0
+	}
+
 	if cfg.Endpoint == "" {
 		cfg.Endpoint = DefaultEndpoint
 	}
@@ -146,20 +154,38 @@ func (d *Dispatcher) Dispatch(ctx context.Context, query *qdata.Query) (*qdata.R
 
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	body, err := d.readResponseBody(resp.Body)
 	if err != nil {
-		return nil, qerror.UpstreamTransportError(err)
-	}
-
-	if len(body) > maxResponseBytes {
-		return nil, qerror.New(qerror.CodeUnavailable, "upstream response exceeds %d bytes", maxResponseBytes)
+		return nil, err
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, qerror.UpstreamHTTPError(resp.StatusCode, body)
 	}
 
-	return parseResponse(body)
+	return d.parseResponse(body)
+}
+
+func (d *Dispatcher) readResponseBody(reader io.Reader) ([]byte, error) {
+	limit := d.cfg.MaxResponseBytes
+	if limit == 0 {
+		limit = maxResponseBytes
+	}
+
+	body, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	if err != nil {
+		return nil, qerror.UpstreamTransportError(err)
+	}
+
+	if int64(len(body)) > limit {
+		if d.cfg.MaxResponseBytes > 0 {
+			return nil, qerror.New(qerror.CodeResourceExhausted, "result exceeds max_response_bytes (%d)", limit)
+		}
+
+		return nil, qerror.New(qerror.CodeUnavailable, "upstream response exceeds %d bytes", maxResponseBytes)
+	}
+
+	return body, nil
 }
 
 // queryText renders the query's structured plan to LogQL. The plan is the query
@@ -268,7 +294,7 @@ type lokiMetric struct {
 
 // parseResponse converts a Loki JSON body into a qdata Result: streams become a
 // logs payload; matrix/vector (from LogQL metric queries) become metrics.
-func parseResponse(body []byte) (*qdata.Result, error) {
+func (d *Dispatcher) parseResponse(body []byte) (*qdata.Result, error) {
 	var resp lokiResponse
 
 	err := json.Unmarshal(body, &resp)
@@ -282,20 +308,28 @@ func parseResponse(body []byte) (*qdata.Result, error) {
 
 	switch resp.Data.ResultType {
 	case "streams":
-		return streamsResult(resp.Data.Result)
+		return d.streamsResult(resp.Data.Result)
 	case "matrix", "vector":
-		return metricsResult(resp.Data.Result, resp.Data.ResultType)
+		return d.metricsResult(resp.Data.Result, resp.Data.ResultType)
 	default:
 		return nil, qerror.New(qerror.CodeUnavailable, "lokidispatcher: unsupported result type %q", resp.Data.ResultType)
 	}
 }
 
-func streamsResult(raw json.RawMessage) (*qdata.Result, error) {
+func (d *Dispatcher) streamsResult(raw json.RawMessage) (*qdata.Result, error) {
 	var streams []lokiStream
 
 	err := json.Unmarshal(raw, &streams)
 	if err != nil {
 		return nil, qerror.New(qerror.CodeUnavailable, "lokidispatcher: decode streams: %v", err)
+	}
+
+	records := 0
+	for _, stream := range streams {
+		records += len(stream.Values)
+		if d.cfg.MaxRecords > 0 && records > d.cfg.MaxRecords {
+			return nil, qerror.New(qerror.CodeResourceExhausted, "result exceeds max_records (%d)", d.cfg.MaxRecords)
+		}
 	}
 
 	logs := &qdata.Logs{}
@@ -382,12 +416,17 @@ func cloneAttrs(base *qdata.KeyValueList) *qdata.KeyValueList {
 	return out
 }
 
-func metricsResult(raw json.RawMessage, resultType string) (*qdata.Result, error) {
+func (d *Dispatcher) metricsResult(raw json.RawMessage, resultType string) (*qdata.Result, error) {
 	var samples []lokiMetric
 
 	err := json.Unmarshal(raw, &samples)
 	if err != nil {
 		return nil, qerror.New(qerror.CodeUnavailable, "lokidispatcher: decode %s: %v", resultType, err)
+	}
+
+	err = d.checkSamples(samples)
+	if err != nil {
+		return nil, err
 	}
 
 	metrics := &qdata.Metrics{}
@@ -424,6 +463,26 @@ func metricsResult(raw json.RawMessage, resultType string) (*qdata.Result, error
 	}
 
 	return &qdata.Result{Signal: qdata.SignalMetrics, Data: &qdatav1.Result_Metrics{Metrics: metrics}}, nil
+}
+
+func (d *Dispatcher) checkSamples(samples []lokiMetric) error {
+	if d.cfg.MaxSeries > 0 && len(samples) > d.cfg.MaxSeries {
+		return qerror.New(qerror.CodeResourceExhausted, "result exceeds max_series (%d)", d.cfg.MaxSeries)
+	}
+
+	points := 0
+	for _, sample := range samples {
+		points += len(sample.Values)
+		if len(sample.Value) > 0 {
+			points++
+		}
+
+		if d.cfg.MaxSamples > 0 && points > d.cfg.MaxSamples {
+			return qerror.New(qerror.CodeResourceExhausted, "result exceeds max_samples (%d)", d.cfg.MaxSamples)
+		}
+	}
+
+	return nil
 }
 
 // sampleToPoint converts a [unixSeconds, "value"] pair into a MetricPoint.

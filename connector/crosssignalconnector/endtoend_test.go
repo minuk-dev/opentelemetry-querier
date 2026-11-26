@@ -61,9 +61,13 @@ func TestEndToEndMetricsLogsJoinThroughPipelines(t *testing.T) {
 
 	metricsProc := &recordingProcessor{Base: processor.Base{}, queries: 0}
 	metricsPipe := pipeline.New("metrics", []processor.Processor{metricsProc},
-		prometheusdispatcher.New(prometheusdispatcher.Config{Endpoint: promSrv.URL, TenantHeader: "", Timeout: 0}))
+		prometheusdispatcher.New(prometheusdispatcher.Config{
+			MaxResponseBytes: 0, MaxSeries: 0, MaxSamples: 0,
+			Endpoint: promSrv.URL, TenantHeader: "", Timeout: 0}))
 	logsPipe := pipeline.New("logs", nil, lokidispatcher.New(
-		lokidispatcher.Config{Endpoint: lokiSrv.URL, TenantHeader: "", Timeout: 0, Limit: 0, Direction: ""}))
+		lokidispatcher.Config{
+			MaxResponseBytes: 0, MaxSeries: 0, MaxSamples: 0, MaxRecords: 0,
+			Endpoint: lokiSrv.URL, TenantHeader: "", Timeout: 0, Limit: 0, Direction: ""}))
 
 	sut := crosssignalconnector.New(map[qdata.Signal]pipeline.Handler{
 		qdata.SignalMetrics: metricsPipe,

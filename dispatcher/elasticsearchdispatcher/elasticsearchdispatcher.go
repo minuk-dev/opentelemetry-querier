@@ -45,6 +45,8 @@ const maxResponseBytes = 16 << 20
 
 // Config configures the upstream Elasticsearch.
 type Config struct {
+	MaxResponseBytes int64 `mapstructure:"max_response_bytes"`
+	MaxRecords       int   `mapstructure:"max_records"`
 	// Endpoint is the upstream base URL, e.g. http://localhost:9200.
 	Endpoint string `mapstructure:"endpoint"`
 	// Index is the index or index pattern to search; defaults to _all.
@@ -70,6 +72,10 @@ type Dispatcher struct {
 
 // New builds the dispatcher, applying defaults.
 func New(cfg Config) *Dispatcher {
+	if cfg.MaxResponseBytes < 0 || cfg.MaxResponseBytes > maxResponseBytes {
+		cfg.MaxResponseBytes = 0
+	}
+
 	if cfg.Endpoint == "" {
 		cfg.Endpoint = DefaultEndpoint
 	}
@@ -124,13 +130,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, query *qdata.Query) (*qdata.R
 
 	defer func() { _ = resp.Body.Close() }()
 
-	payload, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	payload, err := d.readResponseBody(resp.Body)
 	if err != nil {
-		return nil, qerror.UpstreamTransportError(err)
-	}
-
-	if len(payload) > maxResponseBytes {
-		return nil, qerror.New(qerror.CodeUnavailable, "upstream response exceeds %d bytes", maxResponseBytes)
+		return nil, err
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -138,6 +140,28 @@ func (d *Dispatcher) Dispatch(ctx context.Context, query *qdata.Query) (*qdata.R
 	}
 
 	return d.parseResponse(payload)
+}
+
+func (d *Dispatcher) readResponseBody(reader io.Reader) ([]byte, error) {
+	limit := d.cfg.MaxResponseBytes
+	if limit == 0 {
+		limit = maxResponseBytes
+	}
+
+	payload, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	if err != nil {
+		return nil, qerror.UpstreamTransportError(err)
+	}
+
+	if int64(len(payload)) > limit {
+		if d.cfg.MaxResponseBytes > 0 {
+			return nil, qerror.New(qerror.CodeResourceExhausted, "result exceeds max_response_bytes (%d)", limit)
+		}
+
+		return nil, qerror.New(qerror.CodeUnavailable, "upstream response exceeds %d bytes", maxResponseBytes)
+	}
+
+	return payload, nil
 }
 
 // queryClause renders the query's structured plan to an Elasticsearch query
@@ -245,6 +269,10 @@ func (d *Dispatcher) parseResponse(body []byte) (*qdata.Result, error) {
 	err = json.Unmarshal(envelope["hits"], &hits)
 	if err != nil {
 		return nil, qerror.New(qerror.CodeUnavailable, "elasticsearchdispatcher: decode hits: %v", err)
+	}
+
+	if d.cfg.MaxRecords > 0 && len(hits.Hits) > d.cfg.MaxRecords {
+		return nil, qerror.New(qerror.CodeResourceExhausted, "result exceeds max_records (%d)", d.cfg.MaxRecords)
 	}
 
 	metadata, err := parseSearchMetadata(envelope, hits.Total)

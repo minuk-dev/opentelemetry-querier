@@ -39,6 +39,8 @@ func TestEndToEndLuceneThroughPipeline(t *testing.T) {
 	defer upstream.Close()
 
 	pipe := pipeline.New("logs", nil, elasticsearchdispatcher.New(elasticsearchdispatcher.Config{
+		MaxResponseBytes: 0, MaxRecords: 0,
+
 		Endpoint: upstream.URL, Index: "", TimeField: "", Size: 0, Timeout: 0, Username: "", Password: "",
 	}))
 	acc := elasticsearchacceptor.New(elasticsearchacceptor.Config{Endpoint: ""}, pipe)
@@ -95,6 +97,8 @@ func TestSearchMetadataRoundTrip(t *testing.T) {
 			t.Cleanup(upstream.Close)
 
 			dispatch := elasticsearchdispatcher.New(elasticsearchdispatcher.Config{
+				MaxResponseBytes: 0, MaxRecords: 0,
+
 				Endpoint: upstream.URL, Index: "logs", TimeField: "", Size: 0, Timeout: 0, Username: "", Password: "",
 			})
 			front := serve(t, pipeline.New("logs", nil, dispatch))

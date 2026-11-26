@@ -22,3 +22,15 @@ a `qdata.Result`.
 The built-in HTTP dispatchers accept up to 16 MiB of decoded response data
 per upstream request. This limit also applies to upstream error responses.
 Larger responses fail with an upstream error.
+
+### Configurable result limits
+
+Set `max_response_bytes` up to 16 MiB on any built-in HTTP dispatcher to
+lower the decoded body limit. `max_series` and `max_samples` apply to
+Prometheus and Loki metric results. `max_records` applies to Loki streams
+and Elasticsearch hits. Counts are checked before constructing qdata
+records. Configure `max_rows` on a cross-signal connector to constrain
+each operand before table conversion and cap joined output. The default
+join output limit is 10,000 rows. Configured limits reject oversized
+results with HTTP 429 or gRPC RESOURCE_EXHAUSTED. Elasticsearch hit totals
+and partial flags retain their upstream meanings for permitted results.

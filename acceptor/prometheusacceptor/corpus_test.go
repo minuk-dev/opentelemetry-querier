@@ -73,7 +73,9 @@ func TestPromQLCorpusRoundTrip(t *testing.T) {
 	defer upstream.Close()
 
 	pipe := pipeline.New("metrics", nil, prometheusdispatcher.New(
-		prometheusdispatcher.Config{Endpoint: upstream.URL, TenantHeader: "", Timeout: 0}))
+		prometheusdispatcher.Config{
+			MaxResponseBytes: 0, MaxSeries: 0, MaxSamples: 0,
+			Endpoint: upstream.URL, TenantHeader: "", Timeout: 0}))
 	acc := prometheusacceptor.New(prometheusacceptor.Config{Endpoint: ""}, pipe)
 
 	front := httptest.NewServer(acc.Handler())

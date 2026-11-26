@@ -24,6 +24,8 @@ const (
 	directionBackward = "backward"
 )
 
+var errResultLimits = errors.New("result counts must be non-negative and max_response_bytes must not exceed 16 MiB")
+
 // NewFactory returns the factory for the Loki dispatcher.
 func NewFactory() dispatcher.Factory {
 	return dispatcher.NewFactory(
@@ -35,6 +37,7 @@ func NewFactory() dispatcher.Factory {
 
 func createDefaultConfig() component.Config {
 	return &Config{
+		MaxResponseBytes: 0, MaxSeries: 0, MaxSamples: 0, MaxRecords: 0,
 		Endpoint:     DefaultEndpoint,
 		TenantHeader: DefaultTenantHeader,
 		Timeout:      defaultTimeout,
@@ -52,6 +55,11 @@ func createDispatcher(_ context.Context, _ component.Settings, cfg component.Con
 	err := Validate(*conf)
 	if err != nil {
 		return nil, err
+	}
+
+	if conf.MaxSeries < 0 || conf.MaxSamples < 0 || conf.MaxRecords < 0 ||
+		conf.MaxResponseBytes < 0 || conf.MaxResponseBytes > maxResponseBytes {
+		return nil, errResultLimits
 	}
 
 	return New(*conf), nil

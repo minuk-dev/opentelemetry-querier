@@ -74,7 +74,9 @@ func TestLokiRealQuery(t *testing.T) { //nolint:paralleltest // containers run s
 	}, 30*time.Second, 1*time.Second, "loki never accepted the push")
 
 	pipe := pipeline.New("logs", nil, lokidispatcher.New(
-		lokidispatcher.Config{Endpoint: endpoint, TenantHeader: "", Timeout: 0, Limit: 0, Direction: ""}))
+		lokidispatcher.Config{
+ MaxResponseBytes: 0, MaxSeries: 0, MaxSamples: 0, MaxRecords: 0,
+Endpoint: endpoint, TenantHeader: "", Timeout: 0, Limit: 0, Direction: ""}))
 	acc := lokiacceptor.New(lokiacceptor.Config{Endpoint: ""}, pipe)
 
 	front := httptest.NewServer(acc.Handler())

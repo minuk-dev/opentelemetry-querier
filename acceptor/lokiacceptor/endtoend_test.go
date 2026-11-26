@@ -40,7 +40,9 @@ func TestEndToEndLogQLThroughPipeline(t *testing.T) {
 	defer upstream.Close()
 
 	pipe := pipeline.New("logs", nil, lokidispatcher.New(
-		lokidispatcher.Config{Endpoint: upstream.URL, TenantHeader: "", Timeout: 0, Limit: 0, Direction: ""}))
+		lokidispatcher.Config{
+			MaxResponseBytes: 0, MaxSeries: 0, MaxSamples: 0, MaxRecords: 0,
+			Endpoint: upstream.URL, TenantHeader: "", Timeout: 0, Limit: 0, Direction: ""}))
 	acc := lokiacceptor.New(lokiacceptor.Config{Endpoint: ""}, pipe)
 
 	front := httptest.NewServer(acc.Handler())
@@ -107,6 +109,8 @@ func TestLogRequestOptions(t *testing.T) {
 			t.Cleanup(upstream.Close)
 
 			pipe := pipeline.New("logs", nil, lokidispatcher.New(lokidispatcher.Config{
+				MaxResponseBytes: 0, MaxSeries: 0, MaxSamples: 0, MaxRecords: 0,
+
 				Endpoint: upstream.URL, TenantHeader: "", Timeout: 0, Limit: 100, Direction: "backward",
 			}))
 			acc := lokiacceptor.New(lokiacceptor.Config{Endpoint: ""}, pipe)
