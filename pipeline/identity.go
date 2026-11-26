@@ -11,6 +11,7 @@ import (
 // Principal is a verified identity and the set of tenants it may select.
 type Principal struct {
 	qdata.Identity
+
 	Tenants []string
 }
 
@@ -23,6 +24,7 @@ func (p *Pipeline) authorizeIdentity(ctx context.Context, query *qdata.Query) (c
 		if hasInherited {
 			qdata.SetTenantID(query, inherited.Tenant)
 		}
+
 		return ctx, nil
 	}
 
@@ -30,40 +32,59 @@ func (p *Pipeline) authorizeIdentity(ctx context.Context, query *qdata.Query) (c
 	if err != nil {
 		return ctx, err
 	}
+
 	if principal.Principal == "" || principal.Authority == "" {
 		return ctx, qerror.New(qerror.CodeUnauthenticated, "missing verified principal")
 	}
 
-	header := p.TenantHeader
-	if header == "" {
-		header = "X-Scope-OrgID"
-	}
-	values := qdata.HeaderValuesFor(query, header)
-	if len(values) > 1 {
-		return ctx, qerror.New(qerror.CodePermissionDenied, "ambiguous tenant selection")
-	}
-	var tenant string
-	switch {
-	case hasInherited:
-		tenant = inherited.Tenant
-	case len(values) == 1:
-		tenant = values[0]
-	case len(principal.Tenants) == 1:
-		tenant = principal.Tenants[0]
-	}
-	if tenant == "" || !slices.Contains(principal.Tenants, tenant) {
-		return ctx, qerror.New(qerror.CodePermissionDenied, "tenant outside verified scope")
+	tenant, err := p.selectTenant(query, principal.Tenants, inherited.Tenant, hasInherited)
+	if err != nil {
+		return ctx, err
 	}
 
 	if hasInherited {
 		if inherited.Principal != principal.Principal || inherited.Authority != principal.Authority {
 			return ctx, qerror.New(qerror.CodePermissionDenied, "leaf identity differs from parent identity")
 		}
+
 		qdata.SetTenantID(query, inherited.Tenant)
+
 		return ctx, nil
 	}
 
 	principal.Tenant = tenant
 	qdata.SetTenantID(query, tenant)
+
 	return qdata.WithIdentity(ctx, principal.Identity), nil
+}
+
+func (p *Pipeline) selectTenant(
+	query *qdata.Query, allowed []string, inherited string, hasInherited bool,
+) (string, error) {
+	header := p.TenantHeader
+	if header == "" {
+		header = "X-Scope-OrgID"
+	}
+
+	values := qdata.HeaderValuesFor(query, header)
+	if len(values) > 1 {
+		return "", qerror.New(qerror.CodePermissionDenied, "ambiguous tenant selection")
+	}
+
+	var tenant string
+
+	switch {
+	case hasInherited:
+		tenant = inherited
+	case len(values) == 1:
+		tenant = values[0]
+	case len(allowed) == 1:
+		tenant = allowed[0]
+	}
+
+	if tenant == "" || !slices.Contains(allowed, tenant) {
+		return "", qerror.New(qerror.CodePermissionDenied, "tenant outside verified scope")
+	}
+
+	return tenant, nil
 }
