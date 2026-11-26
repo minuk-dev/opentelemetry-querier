@@ -375,7 +375,9 @@ func (svc *Service) buildDispatcher(factories Factories, cfg *Config, idStr stri
 	}
 
 	retry := cfg.Service.BackendRetries[idStr]
-	if err := retry.Validate(); err != nil {
+
+	err = retry.Validate()
+	if err != nil {
 		return nil, fmt.Errorf("dispatcher %q: %w", idStr, err)
 	}
 	disp = pipeline.WithBackendRetry(disp, retry, svc.logger.With("backend", idStr))

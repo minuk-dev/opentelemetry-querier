@@ -38,7 +38,7 @@ func (e *Error) Error() string { return e.Msg }
 
 // New builds a coded error.
 func New(code Code, format string, args ...any) *Error {
-	return &Error{Code: code, Msg: fmt.Sprintf(format, args...)}
+	return &Error{Code: code, Msg: fmt.Sprintf(format, args...), retryable: false}
 }
 
 // HTTPStatus maps a Code onto an HTTP status code.
