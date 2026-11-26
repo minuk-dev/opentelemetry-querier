@@ -68,7 +68,11 @@ func recordingConnFactory(captured *map[qdata.Signal]pipeline.Handler) connector
 
 // pipe builds a PipelineConfig terminated by terminal, fed by acceptors.
 func pipe(terminal string, acceptors ...string) querier.PipelineConfig {
-	return querier.PipelineConfig{Acceptors: acceptors, Processors: nil, Dispatchers: []string{terminal}}
+	var identity querier.IdentityConfig
+
+	return querier.PipelineConfig{
+		Identity: identity, Acceptors: acceptors, Processors: nil, Dispatchers: []string{terminal},
+	}
 }
 
 func buildInfo() component.BuildInfo { return component.BuildInfo{Command: "test", Version: "test"} }
@@ -95,11 +99,12 @@ func TestBuildWiresConnectorTargetsBySignal(t *testing.T) {
 		Processors:  nil,
 		Dispatchers: map[string]map[string]any{"prometheus": {}, "loki": {}},
 		Connectors:  map[string]map[string]any{"crosssignal": {}},
-		Service: querier.ServiceConfig{Pipelines: map[string]querier.PipelineConfig{
-			"metrics":    pipe("prometheus", "metricsin", "crosssignal"),
-			"logs":       pipe("loki", "logsin", "crosssignal"),
-			"logs/cross": pipe("crosssignal", "otqp"),
-		}},
+		Service: querier.ServiceConfig{Concurrency: pipeline.ConcurrencyConfig{PerTenant: 0, Backends: nil, QueueSize: 0},
+			Pipelines: map[string]querier.PipelineConfig{
+				"metrics":    pipe("prometheus", "metricsin", "crosssignal"),
+				"logs":       pipe("loki", "logsin", "crosssignal"),
+				"logs/cross": pipe("crosssignal", "otqp"),
+			}},
 	}
 
 	svc, err := querier.Build(factories, cfg, buildInfo())
@@ -134,10 +139,11 @@ func TestBuildRejectsNestedConnectorTarget(t *testing.T) {
 		Processors:  nil,
 		Dispatchers: map[string]map[string]any{"prometheus": {}},
 		Connectors:  map[string]map[string]any{"crosssignal": {}},
-		Service: querier.ServiceConfig{Pipelines: map[string]querier.PipelineConfig{
-			"metrics":    pipe("prometheus", "metricsin"),
-			"logs/cross": pipe("crosssignal", "otqp", "crosssignal"),
-		}},
+		Service: querier.ServiceConfig{Concurrency: pipeline.ConcurrencyConfig{PerTenant: 0, Backends: nil, QueueSize: 0},
+			Pipelines: map[string]querier.PipelineConfig{
+				"metrics":    pipe("prometheus", "metricsin"),
+				"logs/cross": pipe("crosssignal", "otqp", "crosssignal"),
+			}},
 	}
 
 	_, err = querier.Build(factories, cfg, buildInfo())
@@ -169,14 +175,18 @@ func TestBuildRejectsNamedSecurityDependency(t *testing.T) {
 		},
 		Connectors: nil,
 	}
+
+	var identity querier.IdentityConfig
+
 	cfg := &querier.Config{
 		Acceptors:   map[string]map[string]any{"otqp": {}},
 		Processors:  map[string]map[string]any{"consumer/tenant-quota": {}},
 		Dispatchers: map[string]map[string]any{"prometheus": {}}, Connectors: nil,
-		Service: querier.ServiceConfig{Pipelines: map[string]querier.PipelineConfig{
-			"metrics/private": {Acceptors: []string{"otqp"}, Processors: []string{"consumer/tenant-quota"},
-				Dispatchers: []string{"prometheus"}},
-		}},
+		Service: querier.ServiceConfig{Concurrency: pipeline.ConcurrencyConfig{PerTenant: 0, Backends: nil, QueueSize: 0},
+			Pipelines: map[string]querier.PipelineConfig{
+				"metrics/private": {Identity: identity, Acceptors: []string{"otqp"}, Processors: []string{"consumer/tenant-quota"},
+					Dispatchers: []string{"prometheus"}},
+			}},
 	}
 	_, err := querier.Build(factories, cfg, buildInfo())
 	require.ErrorContains(t, err, "tenant resolver")
@@ -198,11 +208,12 @@ func TestBuildRejectsDuplicateConnectorTargets(t *testing.T) {
 	cfg := &querier.Config{
 		Acceptors: nil, Processors: nil, Dispatchers: nil,
 		Connectors: map[string]map[string]any{"crosssignal/a": {}},
-		Service: querier.ServiceConfig{Pipelines: map[string]querier.PipelineConfig{
-			"metrics/a":    pipe("prometheus", "crosssignal/a"),
-			"metrics/b":    pipe("prometheus", "crosssignal/a"),
-			"metrics/join": pipe("crosssignal/a", "otqp"),
-		}},
+		Service: querier.ServiceConfig{Concurrency: pipeline.ConcurrencyConfig{PerTenant: 0, Backends: nil, QueueSize: 0},
+			Pipelines: map[string]querier.PipelineConfig{
+				"metrics/a":    pipe("prometheus", "crosssignal/a"),
+				"metrics/b":    pipe("prometheus", "crosssignal/a"),
+				"metrics/join": pipe("crosssignal/a", "otqp"),
+			}},
 	}
 
 	_, err = querier.Build(factories, cfg, buildInfo())

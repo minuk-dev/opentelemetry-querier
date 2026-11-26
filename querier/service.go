@@ -16,6 +16,7 @@ import (
 )
 
 var (
+	errUnknownConcurrencyBackend = errors.New("concurrency references unknown dispatcher")
 	// errAcceptorReused is returned when an acceptor feeds more than one pipeline.
 	errAcceptorReused = errors.New("querier: acceptor may feed only one pipeline")
 	// errUnknownProcessor is returned for a processor type with no factory.
@@ -62,6 +63,7 @@ func Build(factories Factories, cfg *Config, buildInfo component.BuildInfo) (*Se
 	svc := &Service{
 		buildInfo: buildInfo,
 		logger:    slog.Default(),
+		concurrency: nil,
 		pipelines: nil,
 		acceptors: nil,
 		host:      host{},
@@ -69,13 +71,15 @@ func Build(factories Factories, cfg *Config, buildInfo component.BuildInfo) (*Se
 
 	for backend := range cfg.Service.Concurrency.Backends {
 		if _, ok := cfg.Dispatchers[backend]; !ok {
-			return nil, fmt.Errorf("concurrency references unknown dispatcher %q", backend)
+			return nil, fmt.Errorf("%w %q", errUnknownConcurrencyBackend, backend)
 		}
 	}
+
 	concurrency, err := pipeline.NewConcurrency(cfg.Service.Concurrency)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("configure concurrency: %w", err)
 	}
+
 	svc.concurrency = concurrency
 	built := map[string]*pipeline.Pipeline{}
 
@@ -186,7 +190,9 @@ func (svc *Service) buildLeafPipelines(factories Factories, cfg *Config, built m
 
 		built[name] = pipeline.New(name, procs, disp)
 		built[name].Concurrency = svc.concurrency
-		if err := configureIdentity(built[name], pipelineCfg.Identity); err != nil {
+
+		err = configureIdentity(built[name], pipelineCfg.Identity)
+		if err != nil {
 			return fmt.Errorf("pipeline %q: %w", name, err)
 		}
 	}
@@ -268,7 +274,9 @@ func (svc *Service) buildConnectorPipelines(
 		built[name] = pipeline.New(name, procs, conn)
 		built[name].Connector = true
 		built[name].Concurrency = svc.concurrency
-		if err := configureIdentity(built[name], pipelineCfg.Identity); err != nil {
+
+		err = configureIdentity(built[name], pipelineCfg.Identity)
+		if err != nil {
 			return fmt.Errorf("pipeline %q: %w", name, err)
 		}
 	}
