@@ -106,7 +106,14 @@ func frontWith(t *testing.T, disp dispatcher.Dispatcher, procs ...processor.Proc
 	t.Helper()
 
 	pipe := pipeline.New("metrics", procs, disp)
-	acc := prometheusacceptor.New(prometheusacceptor.Config{Endpoint: ""}, pipe)
+
+	return frontHandler(t, pipe)
+}
+
+func frontHandler(t *testing.T, handler pipeline.Handler) string {
+	t.Helper()
+
+	acc := prometheusacceptor.New(prometheusacceptor.Config{Endpoint: ""}, handler)
 
 	server := httptest.NewServer(acc.Handler())
 	t.Cleanup(server.Close)

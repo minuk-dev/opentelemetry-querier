@@ -25,8 +25,7 @@ func defaultChain() []processor.Processor {
 			EnforceLabel: "tenant_id",
 		}),
 		authratelimitprocessor.New(authratelimitprocessor.Config{
-			RequireBearer:     true,
-			Tokens:            []string{"dev-token"},
+
 			RequestsPerSecond: 1000,
 			Burst:             1000,
 			PerTenant:         true,
@@ -79,12 +78,12 @@ func TestFullChain(t *testing.T) {
 			`{"__name__":"up","job":"api","__internal__":"secret","user_email":"a@b.com"},` +
 			`"value":[1700000000,"1"]}]}}`)
 
-		base := front(t, upstream, defaultChain()...)
+		base := authFront(t, upstream, "alice", []string{"acme"}, defaultChain()...)
 
 		code, body := getWith(t, base, map[string]string{
 			"Authorization": "Bearer dev-token",
 			tenantHeader:    "acme",
-			"X-Scope-User":  "alice",
+			"X-Scope-User":  "admin",
 		})
 
 		assert.Equal(t, http.StatusOK, code, "body: %s", body)
@@ -103,7 +102,7 @@ func TestFullChain(t *testing.T) {
 		t.Parallel()
 
 		upstream := newUpstream(t)
-		base := front(t, upstream, defaultChain()...)
+		base := authFront(t, upstream, "alice", []string{"acme"}, defaultChain()...)
 
 		code, body := getWith(t, base, map[string]string{tenantHeader: "acme", "X-Scope-User": "admin"})
 
@@ -115,12 +114,12 @@ func TestFullChain(t *testing.T) {
 		t.Parallel()
 
 		upstream := newUpstream(t)
-		base := front(t, upstream, defaultChain()...)
+		base := authFront(t, upstream, "stranger", []string{"acme"}, defaultChain()...)
 
 		code, body := getWith(t, base, map[string]string{
 			"Authorization": "Bearer dev-token",
 			tenantHeader:    "acme",
-			"X-Scope-User":  "stranger",
+			"X-Scope-User":  "admin",
 		})
 
 		assert.Equal(t, http.StatusForbidden, code, "no rule matches; default_effect denies. body: %s", body)
