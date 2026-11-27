@@ -17,6 +17,7 @@ import (
 )
 
 var (
+	errUnknownConcurrencyBackend = errors.New("concurrency references unknown dispatcher")
 	// errAcceptorReused is returned when an acceptor feeds more than one pipeline.
 	errAcceptorReused = errors.New("querier: acceptor may feed only one pipeline")
 	// errUnknownProcessor is returned for a processor type with no factory.
@@ -37,6 +38,7 @@ var (
 // Service is a fully assembled, runnable querier: a set of pipelines and the
 // acceptors that feed them.
 type Service struct {
+	concurrency    *pipeline.Concurrency
 	buildInfo      component.BuildInfo
 	logger         *slog.Logger
 	pipelines      []*pipeline.Pipeline
@@ -65,6 +67,7 @@ func (h host) GetComponent(kind, name string) any {
 // resolved as a target binding rather than a listener.
 func Build(factories Factories, cfg *Config, buildInfo component.BuildInfo) (*Service, error) {
 	svc := &Service{
+		concurrency:    nil,
 		buildInfo:      buildInfo,
 		logger:         slog.Default(),
 		pipelines:      nil,
@@ -73,9 +76,22 @@ func Build(factories Factories, cfg *Config, buildInfo component.BuildInfo) (*Se
 		extensionOrder: nil,
 	}
 
+	for backend := range cfg.Service.Concurrency.Backends {
+		if _, ok := cfg.Dispatchers[backend]; !ok {
+			return nil, fmt.Errorf("%w %q", errUnknownConcurrencyBackend, backend)
+		}
+	}
+
+	concurrency, err := pipeline.NewConcurrency(cfg.Service.Concurrency)
+	if err != nil {
+		return nil, fmt.Errorf("configure concurrency: %w", err)
+	}
+
+	svc.concurrency = concurrency
+
 	built := map[string]*pipeline.Pipeline{}
 
-	err := svc.buildExtensions(factories, cfg)
+	err = svc.buildExtensions(factories, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -190,6 +206,7 @@ func (svc *Service) buildLeafPipelines(factories Factories, cfg *Config, built m
 
 		built[name] = pipeline.New(name, procs, disp)
 		built[name].Timeout = pipelineCfg.QueryTimeout
+		built[name].Concurrency = svc.concurrency
 	}
 
 	return nil
@@ -268,6 +285,7 @@ func (svc *Service) buildConnectorPipelines(
 
 		built[name] = pipeline.New(name, procs, conn)
 		built[name].Timeout = pipelineCfg.QueryTimeout
+		built[name].Concurrency = svc.concurrency
 	}
 
 	return nil
@@ -393,7 +411,7 @@ func (svc *Service) buildDispatcher(factories Factories, cfg *Config, idStr stri
 		return nil, fmt.Errorf("querier: create dispatcher %q: %w", idStr, err)
 	}
 
-	return disp, nil
+	return svc.concurrency.WrapBackend(idStr, disp), nil
 }
 
 func (svc *Service) buildAcceptor(
