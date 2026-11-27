@@ -3,6 +3,7 @@ module github.com/minuk-dev/opentelemetry-querier/test/pipeline
 go 1.25.4
 
 require (
+	github.com/minuk-dev/opentelemetry-querier/extension/bearertokenauthextension v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/acceptor/prometheusacceptor v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/dispatcher v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/dispatcher/prometheusdispatcher v0.0.0
@@ -74,3 +75,5 @@ replace github.com/minuk-dev/opentelemetry-querier/processor/tenantprocessor => 
 replace github.com/minuk-dev/opentelemetry-querier/qdata => ../../qdata
 
 replace github.com/minuk-dev/opentelemetry-querier/qerror => ../../qerror
+
+replace github.com/minuk-dev/opentelemetry-querier/extension/bearertokenauthextension => ../../extension/bearertokenauthextension

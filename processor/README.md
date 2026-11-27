@@ -17,7 +17,7 @@ dispatcher is reached; return a `*qerror.Error` to control the transport status.
 
 | Module | Type | Description |
 | --- | --- | --- |
-| [authratelimitprocessor](./authratelimitprocessor) | `authratelimit` | Bearer-token auth + per-tenant rate limiting. |
+| [authratelimitprocessor](./authratelimitprocessor) | `authratelimit` | Per-tenant rate limiting. |
 | [tenantprocessor](./tenantprocessor) | `tenant` | Resolve the tenant and register an isolation label matcher. |
 | [simpleauthzprocessor](./simpleauthzprocessor) | `simpleauthz` | Per-subject authorization: reject or scope a user's query. |
 | [queryrewriteprocessor](./queryrewriteprocessor) | `queryrewrite` | AND enforced constraints into every Select in the query plan. |

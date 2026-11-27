@@ -108,7 +108,9 @@ func standaloneRequirements(manifest *Manifest, data tmplData) ([]string, error)
 		pins[corePath+"/"+name] = manifest.Dist.CoreVersion
 	}
 
-	for _, spec := range slices.Concat(data.Acceptors, data.Processors, data.Dispatchers, data.Connectors) {
+	components := slices.Concat(data.Acceptors, data.Processors, data.Dispatchers, data.Connectors, data.Extensions)
+
+	for _, spec := range components {
 		if _, exists := pins[spec.Import]; exists {
 			return nil, fmt.Errorf("%w: component duplicates framework module %q", errManifest, spec.Import)
 		}

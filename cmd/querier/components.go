@@ -8,12 +8,15 @@ import (
 	lokiacceptor "github.com/minuk-dev/opentelemetry-querier/acceptor/lokiacceptor"
 	otqpacceptor "github.com/minuk-dev/opentelemetry-querier/acceptor/otqpacceptor"
 	prometheusacceptor "github.com/minuk-dev/opentelemetry-querier/acceptor/prometheusacceptor"
+	"github.com/minuk-dev/opentelemetry-querier/component/extension"
 	"github.com/minuk-dev/opentelemetry-querier/connector"
 	crosssignalconnector "github.com/minuk-dev/opentelemetry-querier/connector/crosssignalconnector"
 	"github.com/minuk-dev/opentelemetry-querier/dispatcher"
 	elasticsearchdispatcher "github.com/minuk-dev/opentelemetry-querier/dispatcher/elasticsearchdispatcher"
 	lokidispatcher "github.com/minuk-dev/opentelemetry-querier/dispatcher/lokidispatcher"
 	prometheusdispatcher "github.com/minuk-dev/opentelemetry-querier/dispatcher/prometheusdispatcher"
+	bearertokenauthextension "github.com/minuk-dev/opentelemetry-querier/extension/bearertokenauthextension"
+	gatewayauthextension "github.com/minuk-dev/opentelemetry-querier/extension/gatewayauthextension"
 	"github.com/minuk-dev/opentelemetry-querier/processor"
 	authratelimitprocessor "github.com/minuk-dev/opentelemetry-querier/processor/authratelimitprocessor"
 	cacheprocessor "github.com/minuk-dev/opentelemetry-querier/processor/cacheprocessor"
@@ -59,6 +62,12 @@ func components() (querier.Factories, error) {
 
 	if factories.Connectors, err = connector.MakeFactoryMap(
 		crosssignalconnector.NewFactory(),
+	); err != nil {
+		return factories, err
+	}
+	if factories.Extensions, err = extension.MakeFactoryMap(
+		bearertokenauthextension.NewFactory(),
+		gatewayauthextension.NewFactory(),
 	); err != nil {
 		return factories, err
 	}

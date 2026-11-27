@@ -19,6 +19,10 @@ acceptors:
   - gomod: github.com/minuk-dev/opentelemetry-querier/acceptor/lokiacceptor
   - gomod: github.com/minuk-dev/opentelemetry-querier/acceptor/elasticsearchacceptor
 
+extensions:
+  - gomod: github.com/minuk-dev/opentelemetry-querier/extension/bearertokenauthextension
+  - gomod: github.com/minuk-dev/opentelemetry-querier/extension/gatewayauthextension
+
 processors:
   - gomod: github.com/minuk-dev/opentelemetry-querier/processor/cacheprocessor
   - gomod: github.com/minuk-dev/opentelemetry-querier/processor/authratelimitprocessor

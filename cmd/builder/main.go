@@ -48,6 +48,7 @@ type Manifest struct {
 	Processors  []Component `mapstructure:"processors"`
 	Dispatchers []Component `mapstructure:"dispatchers"`
 	Connectors  []Component `mapstructure:"connectors"`
+	Extensions  []Component `mapstructure:"extensions"`
 }
 
 // Component is one selected component, identified by its Go module/import path.
@@ -69,6 +70,7 @@ type tmplData struct {
 	Processors  []tmplComponent
 	Dispatchers []tmplComponent
 	Connectors  []tmplComponent
+	Extensions  []tmplComponent
 }
 
 func main() {
@@ -204,6 +206,9 @@ package main
 import (
 	"` + corePath + `/acceptor"
 	"` + corePath + `/connector"
+{{- if .Extensions }}
+	"` + corePath + `/component/extension"
+{{- end }}
 	"` + corePath + `/dispatcher"
 	"` + corePath + `/processor"
 	"` + corePath + `/querier"
@@ -217,6 +222,9 @@ import (
 	{{ .Alias }} "{{ .Import }}"
 {{- end }}
 {{- range .Connectors }}
+	{{ .Alias }} "{{ .Import }}"
+{{- end }}
+{{- range .Extensions }}
 	{{ .Alias }} "{{ .Import }}"
 {{- end }}
 )
@@ -257,6 +265,16 @@ func components() (querier.Factories, error) {
 	); err != nil {
 		return factories, err
 	}
+
+{{- if .Extensions }}
+	if factories.Extensions, err = extension.MakeFactoryMap(
+{{- range .Extensions }}
+		{{ .Alias }}.NewFactory(),
+{{- end }}
+	); err != nil {
+		return factories, err
+	}
+{{- end }}
 
 	return factories, nil
 }
