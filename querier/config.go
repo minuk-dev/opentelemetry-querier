@@ -49,8 +49,9 @@ type Config struct {
 // the opentelemetry-collector. The type token names the signal the pipeline
 // carries (metrics/logs/traces/profiles).
 type ServiceConfig struct {
-	Extensions []string                  `mapstructure:"extensions"`
-	Pipelines  map[string]PipelineConfig `mapstructure:"pipelines"`
+	SharedQuota *SharedQuotaConfig        `mapstructure:"shared_quota"`
+	Extensions  []string                  `mapstructure:"extensions"`
+	Pipelines   map[string]PipelineConfig `mapstructure:"pipelines"`
 }
 
 // PipelineConfig references component instances by ID, defining processor order.
@@ -81,7 +82,7 @@ func LoadConfig(path string) (*Config, error) {
 		Processors:  nil,
 		Dispatchers: nil,
 		Connectors:  nil,
-		Service:     ServiceConfig{Extensions: nil, Pipelines: nil},
+		Service:     ServiceConfig{Extensions: nil, SharedQuota: nil, Pipelines: nil},
 	}
 
 	err = decodeStrict(tree, cfg)

@@ -61,3 +61,25 @@ See [the default config](../config.yaml) for a complete example. A legacy
 `authratelimit` config with `require_bearer` or `tokens` now fails validation.
 Move the tokens into a `bearertokenauth` extension and specify the identity
 and tenants the tokens represent. Leave rate settings under `processors`.
+
+## Shared tenant quotas
+
+```yaml
+service:
+  shared_quota:
+    redis_url_file: /run/secrets/querier-redis-url
+    namespace: production
+    timeout: 250ms
+    tenant: {rate: 50, burst: 100}
+    deployment: {rate: 500, burst: 1000}
+```
+
+Use one Redis endpoint and namespace for all replicas and pipelines sharing
+the deployment ceiling. The mounted file contains a Redis connection URL.
+Use `rediss://` for TLS. Redis time drives both buckets. The two token
+charges are atomic, and every top-level query consumes one token from each
+bucket before dispatch. Connector operands reuse the parent admission.
+Over-quota requests return HTTP 429 or gRPC RESOURCE_EXHAUSTED.
+Timeout or unavailability returns 502 or UNAVAILABLE and stops dispatch.
+Omit `shared_quota` to use the local `authratelimit` processor where
+configured. Its bucket is scoped to one processor instance.

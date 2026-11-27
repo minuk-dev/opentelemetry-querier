@@ -37,6 +37,7 @@ var (
 // Service is a fully assembled, runnable querier: a set of pipelines and the
 // acceptors that feed them.
 type Service struct {
+	quota          *sharedQuota
 	buildInfo      component.BuildInfo
 	logger         *slog.Logger
 	pipelines      []*pipeline.Pipeline
@@ -65,6 +66,7 @@ func (h host) GetComponent(kind, name string) any {
 // resolved as a target binding rather than a listener.
 func Build(factories Factories, cfg *Config, buildInfo component.BuildInfo) (*Service, error) {
 	svc := &Service{
+		quota:          nil,
 		buildInfo:      buildInfo,
 		logger:         slog.Default(),
 		pipelines:      nil,
@@ -72,6 +74,19 @@ func Build(factories Factories, cfg *Config, buildInfo component.BuildInfo) (*Se
 		host:           make(host),
 		extensionOrder: nil,
 	}
+
+	if cfg.Service.SharedQuota != nil {
+		quota, err := newSharedQuota(*cfg.Service.SharedQuota)
+		if err != nil {
+			return nil, err
+		}
+
+		svc.quota = quota
+	}
+
+	builtOK := false
+
+	defer svc.closeQuotaOnBuildFailure(&builtOK)
 
 	built := map[string]*pipeline.Pipeline{}
 
@@ -103,6 +118,8 @@ func Build(factories Factories, cfg *Config, buildInfo component.BuildInfo) (*Se
 	if err != nil {
 		return nil, err
 	}
+
+	builtOK = true
 
 	return svc, nil
 }
@@ -160,6 +177,10 @@ func (svc *Service) Shutdown(ctx context.Context) error {
 		}
 	}
 
+	if svc.quota != nil {
+		errs = append(errs, svc.quota.client.Close())
+	}
+
 	return errors.Join(errs...)
 }
 
@@ -189,7 +210,11 @@ func (svc *Service) buildLeafPipelines(factories Factories, cfg *Config, built m
 		}
 
 		built[name] = pipeline.New(name, procs, disp)
+
 		built[name].Timeout = pipelineCfg.QueryTimeout
+		if svc.quota != nil {
+			built[name].AdmitQuota = svc.quota.admit
+		}
 	}
 
 	return nil
@@ -267,7 +292,11 @@ func (svc *Service) buildConnectorPipelines(
 		}
 
 		built[name] = pipeline.New(name, procs, conn)
+
 		built[name].Timeout = pipelineCfg.QueryTimeout
+		if svc.quota != nil {
+			built[name].AdmitQuota = svc.quota.admit
+		}
 	}
 
 	return nil

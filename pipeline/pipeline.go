@@ -32,9 +32,12 @@ func (f HandlerFunc) Handle(ctx context.Context, q *qdata.Query) (*qdata.Result,
 	return f(ctx, q)
 }
 
+type quotaAdmittedKey struct{}
+
 // Pipeline is an ordered processor chain terminated by a dispatcher.
 type Pipeline struct {
-	Name string
+	AdmitQuota func(context.Context) error
+	Name       string
 	// Timeout bounds the entire query. A zero value uses the caller deadline.
 	Timeout    time.Duration
 	Processors []processor.Processor
@@ -43,7 +46,7 @@ type Pipeline struct {
 
 // New builds a pipeline.
 func New(name string, processors []processor.Processor, disp dispatcher.Dispatcher) *Pipeline {
-	return &Pipeline{Name: name, Timeout: 0, Processors: processors, Dispatcher: disp}
+	return &Pipeline{Name: name, Timeout: 0, AdmitQuota: nil, Processors: processors, Dispatcher: disp}
 }
 
 // Handle validates the client's plan, runs the request path (processors in
@@ -129,6 +132,15 @@ func (p *Pipeline) handle(ctx context.Context, query *qdata.Query) (*qdata.Resul
 	err = p.processQuery(ctx, query)
 	if err != nil {
 		return nil, err
+	}
+
+	if p.AdmitQuota != nil && ctx.Value(quotaAdmittedKey{}) == nil {
+		err := p.AdmitQuota(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		ctx = context.WithValue(ctx, quotaAdmittedKey{}, true)
 	}
 
 	return p.execute(ctx, query, p.Processors)
