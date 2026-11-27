@@ -47,10 +47,12 @@ func TestAuthorizationTenantDependencies(t *testing.T) {
 
 	cases := map[string]simpleauthzprocessor.Config{
 		"subject": {
+			GroupRules:    nil,
 			SubjectHeader: "", FromTenant: true, DefaultSubject: "", Required: false,
 			DefaultEffect: "allow", Rules: nil,
 		},
 		"allow matcher": {
+			GroupRules:    nil,
 			SubjectHeader: "", FromTenant: false, DefaultSubject: "", Required: false, DefaultEffect: "deny",
 			Rules: []simpleauthzprocessor.Rule{{Subjects: nil, Effect: "allow",
 				EnforceLabels: []simpleauthzprocessor.EnforceLabel{{Name: "tenant_id", Value: "", FromTenant: true}}}},
