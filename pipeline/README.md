@@ -33,3 +33,20 @@ it with its own message.
 
 A [dispatch processor](../processor#dispatch-processors) can supply the result
 at its configured position in the response chain.
+
+## Query deadline
+
+Set `query_timeout: 10s` under a service pipeline to bound query processing
+through response handling. The default is zero, which uses any caller
+deadline. Connector operands share the parent deadline, and a leaf can
+shorten it. Expiration returns HTTP 504 or gRPC DEADLINE_EXCEEDED.
+
+## Query cost budget
+
+Set `query_budget: {max_range: 24h, max_points: 10000, max_plan_nodes: 50}`
+on a pipeline. Limits are disabled by default. Plan nodes include selectors
+and operations. A range with a step counts both endpoints when aligned.
+The estimated evaluation count is multiplied by the number of selectors,
+including both cross-signal operands. Instant queries and ranges with no
+step cost one point per selector. An exceeded limit returns HTTP 429 or
+gRPC RESOURCE_EXHAUSTED and names the limit.
