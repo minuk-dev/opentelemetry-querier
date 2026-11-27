@@ -119,8 +119,12 @@ func (c *Processor) ProcessDispatch(
 
 	entry, flight := c.acquire(ctx, key, next, snapshot)
 	if entry != nil {
+		processor.ObserveCache(ctx, true)
+
 		return serveEntry(ctx, query, entry, next, respond)
 	}
+
+	processor.ObserveCache(ctx, false)
 
 	defer c.release(key, flight)
 

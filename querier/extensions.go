@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/http"
 
 	"github.com/minuk-dev/opentelemetry-querier/acceptor"
 	"github.com/minuk-dev/opentelemetry-querier/component"
@@ -101,5 +102,25 @@ func (svc *Service) bindAuthenticator(raw any, pipe *pipeline.Pipeline) (pipelin
 		return nil, fmt.Errorf("%w: %q", errAuthenticatorUnavailable, config.Authenticator)
 	}
 
-	return acceptor.WithAuthentication(pipe, verifier, config.TenantHeader, pipe.Timeout), nil
+	traced := tracedAuthenticator{ServerAuthenticator: verifier, pipe: pipe}
+
+	return pipe.ObserveIngress(acceptor.WithAuthentication(pipe, traced, config.TenantHeader, pipe.Timeout)), nil
+}
+
+type tracedAuthenticator struct {
+	acceptor.ServerAuthenticator
+
+	pipe *pipeline.Pipeline
+}
+
+func (a tracedAuthenticator) Authenticate(ctx context.Context, headers http.Header) (acceptor.Principal, error) {
+	ctx, finish := a.pipe.StartAuthentication(ctx)
+	principal, err := a.ServerAuthenticator.Authenticate(ctx, headers)
+	finish(err)
+
+	if err != nil {
+		return principal, fmt.Errorf("verify ingress credentials: %w", err)
+	}
+
+	return principal, nil
 }

@@ -38,6 +38,7 @@ var (
 // Service is a fully assembled, runnable querier: a set of pipelines and the
 // acceptors that feed them.
 type Service struct {
+	stopTelemetry  func(context.Context) error
 	concurrency    *pipeline.Concurrency
 	buildInfo      component.BuildInfo
 	logger         *slog.Logger
@@ -67,6 +68,7 @@ func (h host) GetComponent(kind, name string) any {
 // resolved as a target binding rather than a listener.
 func Build(factories Factories, cfg *Config, buildInfo component.BuildInfo) (*Service, error) {
 	svc := &Service{
+		stopTelemetry:  nil,
 		concurrency:    nil,
 		buildInfo:      buildInfo,
 		logger:         slog.Default(),
@@ -76,18 +78,10 @@ func Build(factories Factories, cfg *Config, buildInfo component.BuildInfo) (*Se
 		extensionOrder: nil,
 	}
 
-	for backend := range cfg.Service.Concurrency.Backends {
-		if _, ok := cfg.Dispatchers[backend]; !ok {
-			return nil, fmt.Errorf("%w %q", errUnknownConcurrencyBackend, backend)
-		}
-	}
-
-	concurrency, err := pipeline.NewConcurrency(cfg.Service.Concurrency)
+	err := svc.configureConcurrency(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("configure concurrency: %w", err)
+		return nil, err
 	}
-
-	svc.concurrency = concurrency
 
 	built := map[string]*pipeline.Pipeline{}
 
@@ -116,6 +110,11 @@ func Build(factories Factories, cfg *Config, buildInfo component.BuildInfo) (*Se
 	}
 
 	err = svc.wireAcceptors(factories, cfg, built)
+	if err != nil {
+		return nil, err
+	}
+
+	err = svc.configureTelemetry(cfg.Service.Telemetry)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +175,28 @@ func (svc *Service) Shutdown(ctx context.Context) error {
 		}
 	}
 
+	if svc.stopTelemetry != nil {
+		errs = append(errs, svc.stopTelemetry(ctx))
+	}
+
 	return errors.Join(errs...)
+}
+
+func (svc *Service) configureConcurrency(cfg *Config) error {
+	for backend := range cfg.Service.Concurrency.Backends {
+		if _, ok := cfg.Dispatchers[backend]; !ok {
+			return fmt.Errorf("%w %q", errUnknownConcurrencyBackend, backend)
+		}
+	}
+
+	concurrency, err := pipeline.NewConcurrency(cfg.Service.Concurrency)
+	if err != nil {
+		return fmt.Errorf("configure concurrency: %w", err)
+	}
+
+	svc.concurrency = concurrency
+
+	return nil
 }
 
 // isConnectorID reports whether idStr names a connector (declared in the
@@ -284,6 +304,7 @@ func (svc *Service) buildConnectorPipelines(
 		}
 
 		built[name] = pipeline.New(name, procs, conn)
+		built[name].Connector = true
 		built[name].Timeout = pipelineCfg.QueryTimeout
 		built[name].Concurrency = svc.concurrency
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/minuk-dev/opentelemetry-querier/dispatcher"
@@ -115,6 +116,24 @@ func admissionContextError(ctx context.Context) error {
 }
 
 func (c *Concurrency) acquire(ctx context.Context, key string, limit int) (func(), error) {
+	telemetry, _ := ctx.Value(telemetryKey{}).(*Telemetry)
+	if telemetry == nil {
+		return c.acquireSlot(ctx, key, limit)
+	}
+
+	stage := "tenant_admission"
+	if strings.HasPrefix(key, "backend:") {
+		stage = "backend_admission"
+	}
+
+	admissionCtx, finish := telemetry.stage(ctx, stage)
+	release, err := c.acquireSlot(admissionCtx, key, limit)
+	finish(err)
+
+	return release, err
+}
+
+func (c *Concurrency) acquireSlot(ctx context.Context, key string, limit int) (func(), error) {
 	queued := false
 
 	for {

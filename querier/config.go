@@ -50,6 +50,7 @@ type Config struct {
 // the opentelemetry-collector. The type token names the signal the pipeline
 // carries (metrics/logs/traces/profiles).
 type ServiceConfig struct {
+	Telemetry   bool                       `mapstructure:"telemetry"`
 	Concurrency pipeline.ConcurrencyConfig `mapstructure:"concurrency"`
 	Extensions  []string                   `mapstructure:"extensions"`
 	Pipelines   map[string]PipelineConfig  `mapstructure:"pipelines"`
@@ -84,8 +85,9 @@ func LoadConfig(path string) (*Config, error) {
 		Dispatchers: nil,
 		Connectors:  nil,
 		Service: ServiceConfig{
-			Extensions: nil, Concurrency: pipeline.ConcurrencyConfig{PerTenant: 0, Backends: nil, QueueSize: 0},
-			Pipelines: nil,
+			Telemetry: false, Extensions: nil,
+			Concurrency: pipeline.ConcurrencyConfig{PerTenant: 0, Backends: nil, QueueSize: 0},
+			Pipelines:   nil,
 		},
 	}
 
