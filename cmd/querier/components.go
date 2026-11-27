@@ -18,11 +18,13 @@ import (
 	bearertokenauthextension "github.com/minuk-dev/opentelemetry-querier/extension/bearertokenauthextension"
 	gatewayauthextension "github.com/minuk-dev/opentelemetry-querier/extension/gatewayauthextension"
 	jwtauthextension "github.com/minuk-dev/opentelemetry-querier/extension/jwtauthextension"
+	oauthauthextension "github.com/minuk-dev/opentelemetry-querier/extension/oauthauthextension"
 	"github.com/minuk-dev/opentelemetry-querier/processor"
 	authratelimitprocessor "github.com/minuk-dev/opentelemetry-querier/processor/authratelimitprocessor"
 	cacheprocessor "github.com/minuk-dev/opentelemetry-querier/processor/cacheprocessor"
 	queryrewriteprocessor "github.com/minuk-dev/opentelemetry-querier/processor/queryrewriteprocessor"
 	responsefilterprocessor "github.com/minuk-dev/opentelemetry-querier/processor/responsefilterprocessor"
+	scopeauthzprocessor "github.com/minuk-dev/opentelemetry-querier/processor/scopeauthzprocessor"
 	simpleauthzprocessor "github.com/minuk-dev/opentelemetry-querier/processor/simpleauthzprocessor"
 	tenantprocessor "github.com/minuk-dev/opentelemetry-querier/processor/tenantprocessor"
 	"github.com/minuk-dev/opentelemetry-querier/querier"
@@ -43,6 +45,7 @@ func components() (querier.Factories, error) {
 	}
 
 	if factories.Processors, err = processor.MakeFactoryMap(
+		scopeauthzprocessor.NewFactory(),
 		cacheprocessor.NewFactory(),
 		authratelimitprocessor.NewFactory(),
 		tenantprocessor.NewFactory(),
@@ -67,6 +70,7 @@ func components() (querier.Factories, error) {
 		return factories, err
 	}
 	if factories.Extensions, err = extension.MakeFactoryMap(
+		oauthauthextension.NewFactory(),
 		jwtauthextension.NewFactory(),
 		bearertokenauthextension.NewFactory(),
 		gatewayauthextension.NewFactory(),
