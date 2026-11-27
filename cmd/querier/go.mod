@@ -3,6 +3,8 @@ module github.com/minuk-dev/opentelemetry-querier/cmd/querier
 go 1.25.4
 
 require (
+	github.com/minuk-dev/opentelemetry-querier/processor/scopeauthzprocessor v0.0.0
+	github.com/minuk-dev/opentelemetry-querier/extension/oauthauthextension v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/extension/jwtauthextension v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/extension/bearertokenauthextension v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/extension/gatewayauthextension v0.0.0
@@ -112,3 +114,7 @@ replace github.com/minuk-dev/opentelemetry-querier/extension/gatewayauthextensio
 replace github.com/minuk-dev/opentelemetry-querier/extension/bearertokenauthextension => ../../extension/bearertokenauthextension
 
 replace github.com/minuk-dev/opentelemetry-querier/extension/jwtauthextension => ../../extension/jwtauthextension
+
+replace github.com/minuk-dev/opentelemetry-querier/extension/oauthauthextension => ../../extension/oauthauthextension
+
+replace github.com/minuk-dev/opentelemetry-querier/processor/scopeauthzprocessor => ../../processor/scopeauthzprocessor

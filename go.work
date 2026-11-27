@@ -18,6 +18,8 @@ use (
 	./extension/gatewayauthextension
 	./extension/bearertokenauthextension
 	./extension/jwtauthextension
+	./extension/oauthauthextension
+	./processor/scopeauthzprocessor
 	./gen
 	./pipeline
 	./processor
