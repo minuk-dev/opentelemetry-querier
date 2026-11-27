@@ -27,8 +27,7 @@ func perTenant(t *testing.T, maxKeys, burst int) *authratelimitprocessor.Process
 	t.Helper()
 
 	return authratelimitprocessor.New(authratelimitprocessor.Config{
-		RequireBearer:     false,
-		Tokens:            nil,
+
 		RequestsPerSecond: 0.001,
 		Burst:             burst,
 		PerTenant:         true,
@@ -104,8 +103,7 @@ func TestBurstDefaultsToCeil(t *testing.T) {
 	t.Parallel()
 
 	proc := authratelimitprocessor.New(authratelimitprocessor.Config{
-		RequireBearer:     false,
-		Tokens:            nil,
+
 		RequestsPerSecond: 1.9,
 		Burst:             0,
 		PerTenant:         false,

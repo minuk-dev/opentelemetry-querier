@@ -2,7 +2,6 @@ package pipeline_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"log/slog"
 	"testing"
@@ -33,24 +32,17 @@ func TestAuthorizationAudit(t *testing.T) {
 
 			pipe := pipeline.New("test", nil, &backend)
 			pipe.AuditLogger = slog.New(slog.NewJSONHandler(&output, nil))
-			pipe.Authenticate = func(context.Context, *qdata.Query) (pipeline.Principal, error) {
-				if !scenario.authenticated {
-					return pipeline.Principal{}, qerror.New(qerror.CodeUnauthenticated, "credential secret-token")
-				}
-
-				return pipeline.Principal{
-					Identity: qdata.Identity{Authority: "idp", Principal: "alice", Tenant: "", Groups: nil, Roles: nil, Scopes: nil},
-					Tenants:  []string{"a"},
-				}, nil
-			}
 			query := &qdata.Query{Header: map[string]*qdata.HeaderValues{"Authorization": {Values: []string{"secret-token"}}}}
 			qdata.SetMetadata(query, "client-principal", "spoofed-user")
 
-			_, err := pipe.Handle(t.Context(), query)
 			if scenario.authenticated {
+				ctx := qdata.WithIdentity(t.Context(), qdata.Identity{
+					Authority: "idp", Principal: "alice", Tenant: "a", Groups: nil, Roles: nil, Scopes: nil,
+				})
+				_, err := pipe.Handle(ctx, query)
 				require.NoError(t, err)
 			} else {
-				require.Error(t, err)
+				pipe.AuthenticationFailed(t.Context(), qerror.New(qerror.CodeUnauthenticated, "credential secret-token"))
 			}
 
 			require.NotContains(t, output.String(), "secret-token")

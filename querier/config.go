@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/go-viper/mapstructure/v2"
 	"gopkg.in/yaml.v3"
@@ -14,6 +15,7 @@ import (
 )
 
 var (
+	errNegativeQueryTimeout = errors.New("query_timeout must be non-negative")
 	// errEmptyPipelines is returned when no pipelines are configured.
 	errEmptyPipelines = errors.New("querier: service.pipelines is empty")
 	// errNoAcceptors is returned when a pipeline lists no acceptors.
@@ -34,6 +36,7 @@ var (
 // untyped tree and then structurally decoding it with mapstructure, so keys use
 // mapstructure tags (snake_case) throughout.
 type Config struct {
+	Extensions  map[string]map[string]any `mapstructure:"extensions"`
 	Acceptors   map[string]map[string]any `mapstructure:"acceptors"`
 	Processors  map[string]map[string]any `mapstructure:"processors"`
 	Dispatchers map[string]map[string]any `mapstructure:"dispatchers"`
@@ -46,16 +49,17 @@ type Config struct {
 // the opentelemetry-collector. The type token names the signal the pipeline
 // carries (metrics/logs/traces/profiles).
 type ServiceConfig struct {
-	Pipelines map[string]PipelineConfig `mapstructure:"pipelines"`
+	Extensions []string                  `mapstructure:"extensions"`
+	Pipelines  map[string]PipelineConfig `mapstructure:"pipelines"`
 }
 
 // PipelineConfig references component instances by ID, defining processor order.
 type PipelineConfig struct {
-	AuthorizationAudit bool           `mapstructure:"authorization_audit"`
-	Identity           IdentityConfig `mapstructure:"identity"`
-	Acceptors          []string       `mapstructure:"acceptors"`
-	Processors         []string       `mapstructure:"processors"`
-	Dispatchers        []string       `mapstructure:"dispatchers"`
+	AuthorizationAudit bool          `mapstructure:"authorization_audit"`
+	QueryTimeout       time.Duration `mapstructure:"query_timeout"`
+	Acceptors          []string      `mapstructure:"acceptors"`
+	Processors         []string      `mapstructure:"processors"`
+	Dispatchers        []string      `mapstructure:"dispatchers"`
 }
 
 // LoadConfig reads a YAML config file and structurally decodes it.
@@ -73,11 +77,12 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	cfg := &Config{
+		Extensions:  nil,
 		Acceptors:   nil,
 		Processors:  nil,
 		Dispatchers: nil,
 		Connectors:  nil,
-		Service:     ServiceConfig{Pipelines: nil},
+		Service:     ServiceConfig{Extensions: nil, Pipelines: nil},
 	}
 
 	err = decodeStrict(tree, cfg)
@@ -99,6 +104,10 @@ func (c *Config) validate() error {
 	}
 
 	for name, pipe := range c.Service.Pipelines {
+		if pipe.QueryTimeout < 0 {
+			return fmt.Errorf("pipeline %q: %w", name, errNegativeQueryTimeout)
+		}
+
 		_, err := pipelineSignal(name)
 		if err != nil {
 			return err

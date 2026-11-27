@@ -62,3 +62,16 @@ func (p *Pipeline) audit(ctx context.Context, decision auditDecision, err error)
 
 	p.AuditLogger.LogAttrs(ctx, slog.LevelInfo, "query authorization", args...)
 }
+
+// AuthenticationFailed records a rejection at the acceptor boundary.
+func (p *Pipeline) AuthenticationFailed(ctx context.Context, err error) {
+	if p.AuditLogger == nil {
+		return
+	}
+
+	var identity qdata.Identity
+
+	decision := auditDecision{identity: identity, verified: false, decision: "not_evaluated", reason: "authentication"}
+	decision.recordDenial(err, "authentication")
+	p.audit(withAuditRequestID(ctx), decision, err)
+}
