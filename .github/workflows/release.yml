@@ -80,10 +80,12 @@ jobs:
         run: |
           set -euo pipefail
           consumer=$(mktemp -d)
-          cp examples/standalone/builder.yaml "$consumer/"
+          cp examples/standalone/{builder,config}.yaml "$consumer/"
+          smoke="$PWD/scripts/smoke-standalone.py"
           cd "$consumer"
           GOBIN="$consumer/bin" go install "github.com/minuk-dev/opentelemetry-querier/cmd/builder@$VERSION"
           ./bin/builder --build --config builder.yaml
+          python3 "$smoke"
 
       - name: publish release
         env:

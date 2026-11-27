@@ -1,18 +1,25 @@
 package pipeline_test
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/minuk-dev/opentelemetry-querier/acceptor"
+	"github.com/minuk-dev/opentelemetry-querier/component"
+	"github.com/minuk-dev/opentelemetry-querier/dispatcher/prometheusdispatcher"
+	"github.com/minuk-dev/opentelemetry-querier/extension/bearertokenauthextension"
+	"github.com/minuk-dev/opentelemetry-querier/pipeline"
 	"github.com/minuk-dev/opentelemetry-querier/processor"
 	"github.com/minuk-dev/opentelemetry-querier/processor/authratelimitprocessor"
 	"github.com/minuk-dev/opentelemetry-querier/processor/tenantprocessor"
 )
 
-// TestAuthRateLimit adds the gateway processor (bearer auth + rate limiting) to
+// TestAuthRateLimit adds bearer authentication and a rate limiter to
 // an otherwise empty chain and asserts its short-circuits end to end: a missing
 // or invalid token is rejected with 401 before the dispatcher runs, a valid
 // token passes through to the upstream, and an over-limit request gets 429.
@@ -23,7 +30,7 @@ func TestAuthRateLimit(t *testing.T) {
 		t.Parallel()
 
 		upstream := newUpstream(t)
-		base := front(t, upstream, authProc(1000))
+		base := authFront(t, upstream, "alice", []string{"acme"}, authProc(1000))
 
 		code, body := getWith(t, base, nil)
 
@@ -35,7 +42,7 @@ func TestAuthRateLimit(t *testing.T) {
 		t.Parallel()
 
 		upstream := newUpstream(t)
-		base := front(t, upstream, authProc(1000))
+		base := authFront(t, upstream, "alice", []string{"acme"}, authProc(1000))
 
 		code, body := getWith(t, base, map[string]string{"Authorization": "Bearer wrong"})
 
@@ -47,7 +54,7 @@ func TestAuthRateLimit(t *testing.T) {
 		t.Parallel()
 
 		upstream := newUpstream(t)
-		base := front(t, upstream, authProc(1000))
+		base := authFront(t, upstream, "alice", []string{"acme"}, authProc(1000))
 
 		code, body := getWith(t, base, map[string]string{"Authorization": "Bearer dev-token"})
 
@@ -64,7 +71,7 @@ func TestAuthRateLimit(t *testing.T) {
 		// the single token, and refilling one more takes ~1000s, so the second
 		// request is rate-limited regardless of any GC/CI/scheduler stall between
 		// the two calls. This keeps the assertion independent of wall-clock timing.
-		base := front(t, upstream, authProc(0.001))
+		base := authFront(t, upstream, "alice", []string{"acme"}, authProc(0.001))
 
 		headers := map[string]string{"Authorization": "Bearer dev-token"}
 
@@ -117,13 +124,11 @@ func TestAuthRateLimitTenantChurn(t *testing.T) {
 	assert.Equal(t, maxKeys+1, okCount, "a fresh tenant id must not buy a fresh full burst")
 }
 
-// authProc builds the gateway processor requiring the "dev-token" bearer and
-// limiting to rps requests per second with a burst of 1. A fractional rps starves
+// authProc limits to rps requests per second with a burst of 1. A fractional rps starves
 // the refill so over-limit tests stay independent of wall-clock timing.
 func authProc(rps float64) processor.Processor {
 	return authratelimitprocessor.New(authratelimitprocessor.Config{
-		RequireBearer:     true,
-		Tokens:            []string{"dev-token"},
+
 		RequestsPerSecond: rps,
 		Burst:             1,
 		PerTenant:         false,
@@ -136,8 +141,7 @@ func authProc(rps float64) processor.Processor {
 // rather than one the elapsed wall-clock refilled.
 func perTenantProc(maxKeys int) processor.Processor {
 	return authratelimitprocessor.New(authratelimitprocessor.Config{
-		RequireBearer:     false,
-		Tokens:            nil,
+
 		RequestsPerSecond: 0.001,
 		Burst:             1,
 		PerTenant:         true,
@@ -153,13 +157,13 @@ func TestPerTenantRateLimit(t *testing.T) {
 		Header: tenantHeader, Default: "", Required: false, EnforceLabel: "",
 	})
 	limiter := authratelimitprocessor.New(authratelimitprocessor.Config{
-		RequireBearer: true, Tokens: []string{"dev-token"}, RequestsPerSecond: 0.001, Burst: 1, PerTenant: true,
+		RequestsPerSecond: 0.001, Burst: 1, PerTenant: true,
 		MaxKeys: 0,
 	})
-	base := front(t, upstream, tenant, limiter)
+	base := authFront(t, upstream, "alice", []string{"a", "b"}, tenant, limiter)
 	headers := map[string]string{"Authorization": "Bearer dev-token"}
 	code, body := getWith(t, base, headers)
-	assert.Equal(t, http.StatusUnauthorized, code, "unresolved tenant: %s", body)
+	assert.Equal(t, http.StatusForbidden, code, "unresolved tenant: %s", body)
 
 	headers[tenantHeader] = "a"
 	code, body = getWith(t, base, headers)
@@ -172,4 +176,31 @@ func TestPerTenantRateLimit(t *testing.T) {
 	headers[tenantHeader] = "a"
 	code, body = getWith(t, base, headers)
 	assert.Equal(t, http.StatusTooManyRequests, code, "second request from A: %s", body)
+}
+
+func authFront(
+	t *testing.T, upstream *fakeUpstream, principal string, tenants []string, procs ...processor.Processor,
+) string {
+	t.Helper()
+
+	factory := bearertokenauthextension.NewFactory()
+	authenticator, err := factory.CreateExtension(t.Context(), component.Settings{
+		ID:     component.NewID(component.MustNewType("bearertokenauth")),
+		Logger: nil, BuildInfo: component.BuildInfo{Command: "test", Version: "test"},
+	}, &bearertokenauthextension.Config{
+		Authority: "test", Principal: principal, Tenants: tenants, Tokens: []string{"dev-token"},
+	})
+	require.NoError(t, err)
+
+	verifier, ok := authenticator.(acceptor.ServerAuthenticator)
+	require.True(t, ok)
+	require.NoError(t, verifier.Start(t.Context(), nil))
+	t.Cleanup(func() { assert.NoError(t, verifier.Shutdown(context.Background())) })
+
+	disp := prometheusdispatcher.New(
+		prometheusdispatcher.Config{Endpoint: upstream.server.URL, TenantHeader: tenantHeader, Timeout: 0},
+	)
+	pipe := pipeline.New("metrics", procs, disp)
+
+	return frontHandler(t, acceptor.WithAuthentication(pipe, verifier, tenantHeader, 0))
 }

@@ -136,3 +136,29 @@ func failedQueryOutcome(code qerror.Code) string {
 
 	return "error"
 }
+
+type ingressTelemetryKey struct{}
+
+// ObserveIngress includes extension authentication in the query request span.
+func (p *Pipeline) ObserveIngress(handler HandlerFunc) HandlerFunc {
+	return func(ctx context.Context, query *qdata.Query) (*qdata.Result, error) {
+		return p.observe(context.WithValue(ctx, ingressTelemetryKey{}, p), query, handler)
+	}
+}
+
+// StartAuthentication records the authentication stage at the acceptor.
+func (p *Pipeline) StartAuthentication(ctx context.Context) (context.Context, func(error)) {
+	return p.Telemetry.stage(ctx, "identity")
+}
+
+func (p *Pipeline) observe(ctx context.Context, query *qdata.Query, next HandlerFunc) (*qdata.Result, error) {
+	if p.Telemetry == nil {
+		return next(ctx, query)
+	}
+
+	ctx, finish := p.Telemetry.request(ctx, query)
+	result, err := next(ctx, query)
+	finish(err)
+
+	return result, err
+}

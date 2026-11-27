@@ -31,10 +31,14 @@ func TestExportedQueryTelemetry(t *testing.T) {
 	_, err = pipe.Handle(t.Context(), &qdata.Query{})
 	require.NoError(t, err)
 
-	pipe.Authenticate = func(context.Context, *qdata.Query) (pipeline.Principal, error) {
-		return pipeline.Principal{}, qerror.New(qerror.CodePermissionDenied, "secret")
-	}
-	_, err = pipe.Handle(t.Context(), &qdata.Query{})
+	denied := pipe.ObserveIngress(func(ctx context.Context, _ *qdata.Query) (*qdata.Result, error) {
+		_, finish := pipe.StartAuthentication(ctx)
+		err := qerror.New(qerror.CodePermissionDenied, "secret")
+		finish(err)
+
+		return nil, err
+	})
+	_, err = denied(t.Context(), &qdata.Query{})
 	require.Error(t, err)
 
 	var data metricdata.ResourceMetrics

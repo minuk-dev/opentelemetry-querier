@@ -7,7 +7,6 @@ import (
 	"github.com/minuk-dev/opentelemetry-querier/dispatcher"
 	"github.com/minuk-dev/opentelemetry-querier/pipeline"
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
-	"github.com/minuk-dev/opentelemetry-querier/qerror"
 	"github.com/stretchr/testify/require"
 )
 
@@ -26,52 +25,16 @@ func (d *identityBackend) Dispatch(ctx context.Context, query *qdata.Query) (*qd
 	return &qdata.Result{}, nil
 }
 
-func TestVerifiedTenantSelection(t *testing.T) {
+func TestVerifiedTenantReachesBackend(t *testing.T) {
 	t.Parallel()
 
-	for _, selection := range []struct {
-		name     string
-		tenants  []string
-		selected string
-		want     qerror.Code
-	}{
-		{"single tenant default", []string{"a"}, "", qerror.CodeInternal},
-		{"scoped choice", []string{"a", "b"}, "a", qerror.CodeInternal},
-		{"missing selection", []string{"a", "b"}, "", qerror.CodePermissionDenied},
-		{"outside scope", []string{"b"}, "a", qerror.CodePermissionDenied},
-	} {
-		t.Run(selection.name, func(t *testing.T) {
-			t.Parallel()
+	var backend identityBackend
 
-			var backend identityBackend
-
-			pipe := pipeline.New("test", nil, &backend)
-			pipe.Authenticate = func(context.Context, *qdata.Query) (pipeline.Principal, error) {
-				return pipeline.Principal{
-					Identity: qdata.Identity{Authority: "idp", Principal: "alice", Tenant: "", Groups: nil, Roles: nil, Scopes: nil},
-					Tenants:  selection.tenants,
-				}, nil
-			}
-
-			query := &qdata.Query{}
-			if selection.selected != "" {
-				query.Header = map[string]*qdata.HeaderValues{"X-Scope-OrgID": {Values: []string{selection.selected}}}
-			}
-
-			qdata.SetTenantID(query, "client")
-
-			_, err := pipe.Handle(t.Context(), query)
-			if selection.want == qerror.CodePermissionDenied {
-				require.Error(t, err)
-				require.Equal(t, selection.want, qerror.CodeOf(err))
-				require.Empty(t, backend.seen.Principal)
-
-				return
-			}
-
-			require.NoError(t, err)
-			require.Equal(t, "alice", backend.seen.Principal)
-			require.Equal(t, "a", backend.seen.Tenant)
-		})
-	}
+	pipe := pipeline.New("test", nil, &backend)
+	identity := qdata.Identity{Authority: "idp", Principal: "alice", Tenant: "a", Groups: nil, Roles: nil, Scopes: nil}
+	query := new(qdata.Query)
+	qdata.SetTenantID(query, "client")
+	_, err := pipe.Handle(qdata.WithIdentity(t.Context(), identity), query)
+	require.NoError(t, err)
+	require.Equal(t, identity, backend.seen)
 }

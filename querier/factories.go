@@ -7,6 +7,7 @@ package querier
 import (
 	"github.com/minuk-dev/opentelemetry-querier/acceptor"
 	"github.com/minuk-dev/opentelemetry-querier/component"
+	"github.com/minuk-dev/opentelemetry-querier/component/extension"
 	"github.com/minuk-dev/opentelemetry-querier/connector"
 	"github.com/minuk-dev/opentelemetry-querier/dispatcher"
 	"github.com/minuk-dev/opentelemetry-querier/processor"
@@ -15,6 +16,7 @@ import (
 // Factories is the set of component factories compiled into a distribution. A
 // builder-generated components.go populates this (cf. otelcol.Factories).
 type Factories struct {
+	Extensions  map[component.Type]extension.Factory
 	Acceptors   map[component.Type]acceptor.Factory
 	Processors  map[component.Type]processor.Factory
 	Dispatchers map[component.Type]dispatcher.Factory

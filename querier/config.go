@@ -5,17 +5,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-
-	"github.com/minuk-dev/opentelemetry-querier/pipeline"
+	"time"
 
 	"github.com/go-viper/mapstructure/v2"
 	"gopkg.in/yaml.v3"
 
 	"github.com/minuk-dev/opentelemetry-querier/component"
+	"github.com/minuk-dev/opentelemetry-querier/pipeline"
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
 )
 
 var (
+	errNegativeQueryTimeout = errors.New("query_timeout must be non-negative")
 	// errEmptyPipelines is returned when no pipelines are configured.
 	errEmptyPipelines = errors.New("querier: service.pipelines is empty")
 	// errNoAcceptors is returned when a pipeline lists no acceptors.
@@ -36,6 +37,7 @@ var (
 // untyped tree and then structurally decoding it with mapstructure, so keys use
 // mapstructure tags (snake_case) throughout.
 type Config struct {
+	Extensions  map[string]map[string]any `mapstructure:"extensions"`
 	Acceptors   map[string]map[string]any `mapstructure:"acceptors"`
 	Processors  map[string]map[string]any `mapstructure:"processors"`
 	Dispatchers map[string]map[string]any `mapstructure:"dispatchers"`
@@ -50,15 +52,16 @@ type Config struct {
 type ServiceConfig struct {
 	Telemetry   bool                       `mapstructure:"telemetry"`
 	Concurrency pipeline.ConcurrencyConfig `mapstructure:"concurrency"`
+	Extensions  []string                   `mapstructure:"extensions"`
 	Pipelines   map[string]PipelineConfig  `mapstructure:"pipelines"`
 }
 
 // PipelineConfig references component instances by ID, defining processor order.
 type PipelineConfig struct {
-	Identity    IdentityConfig `mapstructure:"identity"`
-	Acceptors   []string       `mapstructure:"acceptors"`
-	Processors  []string       `mapstructure:"processors"`
-	Dispatchers []string       `mapstructure:"dispatchers"`
+	QueryTimeout time.Duration `mapstructure:"query_timeout"`
+	Acceptors    []string      `mapstructure:"acceptors"`
+	Processors   []string      `mapstructure:"processors"`
+	Dispatchers  []string      `mapstructure:"dispatchers"`
 }
 
 // LoadConfig reads a YAML config file and structurally decodes it.
@@ -76,13 +79,16 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	cfg := &Config{
+		Extensions:  nil,
 		Acceptors:   nil,
 		Processors:  nil,
 		Dispatchers: nil,
 		Connectors:  nil,
-		Service: ServiceConfig{Telemetry: false,
+		Service: ServiceConfig{
+			Telemetry: false, Extensions: nil,
 			Concurrency: pipeline.ConcurrencyConfig{PerTenant: 0, Backends: nil, QueueSize: 0},
-			Pipelines:   nil},
+			Pipelines:   nil,
+		},
 	}
 
 	err = decodeStrict(tree, cfg)
@@ -104,6 +110,10 @@ func (c *Config) validate() error {
 	}
 
 	for name, pipe := range c.Service.Pipelines {
+		if pipe.QueryTimeout < 0 {
+			return fmt.Errorf("pipeline %q: %w", name, errNegativeQueryTimeout)
+		}
+
 		_, err := pipelineSignal(name)
 		if err != nil {
 			return err

@@ -21,7 +21,7 @@ func prepare(manifest *Manifest) (tmplData, error) {
 	data := tmplData{
 		Version:   orDefault(manifest.Dist.Version, "dev"),
 		Command:   orDefault(manifest.Dist.Name, "querier"),
-		Acceptors: nil, Processors: nil, Dispatchers: nil, Connectors: nil,
+		Acceptors: nil, Processors: nil, Dispatchers: nil, Connectors: nil, Extensions: nil,
 	}
 	if !binaryName.MatchString(data.Command) {
 		return data, fmt.Errorf("%w: invalid dist.name %q", errManifest, data.Command)
@@ -29,7 +29,7 @@ func prepare(manifest *Manifest) (tmplData, error) {
 
 	paths := map[string]bool{}
 	aliases := map[string]bool{
-		"acceptor": true, "connector": true, "dispatcher": true, "processor": true, "querier": true,
+		"acceptor": true, "connector": true, "dispatcher": true, "processor": true, "querier": true, "extension": true,
 	}
 
 	for _, group := range []struct {
@@ -40,6 +40,7 @@ func prepare(manifest *Manifest) (tmplData, error) {
 		{manifest.Processors, &data.Processors},
 		{manifest.Dispatchers, &data.Dispatchers},
 		{manifest.Connectors, &data.Connectors},
+		{manifest.Extensions, &data.Extensions},
 	} {
 		for _, component := range group.components {
 			spec, err := parseComponent(component.GoMod)

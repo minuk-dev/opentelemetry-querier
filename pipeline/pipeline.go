@@ -6,8 +6,10 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/minuk-dev/opentelemetry-querier/component"
 	"github.com/minuk-dev/opentelemetry-querier/dispatcher"
@@ -32,21 +34,20 @@ func (f HandlerFunc) Handle(ctx context.Context, q *qdata.Query) (*qdata.Result,
 
 // Pipeline is an ordered processor chain terminated by a dispatcher.
 type Pipeline struct {
-	Name         string
-	Authenticate Authenticator
-	TenantHeader string
-	Concurrency  *Concurrency
-	Telemetry    *Telemetry
-	Connector    bool
-	Processors   []processor.Processor
-	Dispatcher   dispatcher.Dispatcher
+	Concurrency *Concurrency
+	Telemetry   *Telemetry
+	Connector   bool
+	Name        string
+	// Timeout bounds the entire query. A zero value uses the caller deadline.
+	Timeout    time.Duration
+	Processors []processor.Processor
+	Dispatcher dispatcher.Dispatcher
 }
 
 // New builds a pipeline.
 func New(name string, processors []processor.Processor, disp dispatcher.Dispatcher) *Pipeline {
 	return &Pipeline{
-		Name: name, Authenticate: nil, TenantHeader: "", Concurrency: nil,
-		Telemetry: nil, Connector: false, Processors: processors, Dispatcher: disp,
+		Name: name, Timeout: 0, Concurrency: nil, Telemetry: nil, Connector: false, Processors: processors, Dispatcher: disp,
 	}
 }
 
@@ -55,19 +56,19 @@ func New(name string, processors []processor.Processor, disp dispatcher.Dispatch
 // reverse order). A validation or processor error on the request path
 // short-circuits before the dispatcher is reached.
 func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (*qdata.Result, error) {
-	if p.Telemetry == nil {
-		return p.handle(ctx, query)
+	if ctx.Value(ingressTelemetryKey{}) == p {
+		return p.handleWithDeadline(ctx, query)
 	}
 
-	ctx, finish := p.Telemetry.request(ctx, query)
+	return p.observe(ctx, query, p.handleWithDeadline)
+}
 
-	var err error
+func queryContextError(ctx context.Context) error {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return qerror.New(qerror.CodeDeadlineExceeded, "query deadline exceeded")
+	}
 
-	defer func() { finish(err) }()
-
-	result, err := p.handle(ctx, query)
-
-	return result, err
+	return qerror.New(qerror.CodeCanceled, "query canceled")
 }
 
 // Start starts the processor chain and the dispatcher (acceptors are started
@@ -108,33 +109,41 @@ func (p *Pipeline) Shutdown(ctx context.Context) error {
 	return nil
 }
 
+func (p *Pipeline) handleWithDeadline(ctx context.Context, query *qdata.Query) (*qdata.Result, error) {
+	if p.Timeout > 0 {
+		var cancel context.CancelFunc
+
+		ctx, cancel = context.WithTimeout(ctx, p.Timeout)
+		defer cancel()
+	}
+
+	result, err := p.handle(ctx, query)
+	if ctx.Err() != nil {
+		return nil, queryContextError(ctx)
+	}
+
+	return result, err
+}
+
 func (p *Pipeline) handle(ctx context.Context, query *qdata.Query) (*qdata.Result, error) {
+	if ctx.Err() != nil {
+		return nil, queryContextError(ctx)
+	}
+
 	_, finishValidation := p.Telemetry.stage(ctx, "validation")
 
 	err := qdata.ValidateQueryTime(query)
 	if err != nil {
-		finishValidation(qerror.New(qerror.CodeInvalidArgument, "invalid query time"))
-	} else {
-		finishValidation(nil)
-	}
+		err = fmt.Errorf("pipeline %q: %w", p.Name, qerror.New(qerror.CodeInvalidArgument, "%v", err))
+		finishValidation(err)
 
-	if err != nil {
-		return nil, qerror.New(qerror.CodeInvalidArgument, "pipeline %q: %v", p.Name, err)
-	}
-
-	authCtx, finishAuth := p.Telemetry.stage(ctx, "identity")
-
-	var authorized context.Context
-
-	authorized, err = p.authorizeIdentity(authCtx, query)
-	finishAuth(err)
-
-	if identity, ok := qdata.IdentityFromContext(authorized); ok {
-		ctx = qdata.WithIdentity(ctx, identity)
-	}
-
-	if err != nil {
 		return nil, err
+	}
+
+	finishValidation(nil)
+
+	if identity, verified := qdata.IdentityFromContext(ctx); verified {
+		qdata.SetTenantID(query, identity.Tenant)
 	}
 
 	processCtx, finishProcess := p.Telemetry.stage(ctx, "request_processing")
@@ -162,6 +171,10 @@ func (p *Pipeline) handle(ctx context.Context, query *qdata.Query) (*qdata.Resul
 func (p *Pipeline) execute(
 	ctx context.Context, query *qdata.Query, processors []processor.Processor,
 ) (*qdata.Result, error) {
+	if ctx.Err() != nil {
+		return nil, queryContextError(ctx)
+	}
+
 	for index, proc := range processors {
 		middleware, ok := proc.(processor.DispatchProcessor)
 		if !ok {
@@ -183,7 +196,7 @@ func (p *Pipeline) execute(
 		return result, nil
 	}
 
-	if identity, ok := qdata.IdentityFromContext(ctx); ok {
+	if identity, verified := qdata.IdentityFromContext(ctx); verified {
 		qdata.SetTenantID(query, identity.Tenant)
 	}
 
@@ -243,6 +256,10 @@ func (p *Pipeline) processQuery(ctx context.Context, query *qdata.Query) error {
 	qdata.SyncPlanSignals(query)
 
 	for _, proc := range p.Processors {
+		if ctx.Err() != nil {
+			return queryContextError(ctx)
+		}
+
 		err = proc.ProcessQuery(ctx, query)
 		if err != nil {
 			return fmt.Errorf("pipeline %q: %w", p.Name, err)
