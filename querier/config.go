@@ -55,10 +55,11 @@ type ServiceConfig struct {
 
 // PipelineConfig references component instances by ID, defining processor order.
 type PipelineConfig struct {
-	QueryTimeout time.Duration `mapstructure:"query_timeout"`
-	Acceptors    []string      `mapstructure:"acceptors"`
-	Processors   []string      `mapstructure:"processors"`
-	Dispatchers  []string      `mapstructure:"dispatchers"`
+	AuthorizationAudit bool          `mapstructure:"authorization_audit"`
+	QueryTimeout       time.Duration `mapstructure:"query_timeout"`
+	Acceptors          []string      `mapstructure:"acceptors"`
+	Processors         []string      `mapstructure:"processors"`
+	Dispatchers        []string      `mapstructure:"dispatchers"`
 }
 
 // LoadConfig reads a YAML config file and structurally decodes it.

@@ -66,6 +66,12 @@ func WithAuthentication(
 
 		authenticated, err := authenticate(ctx, verifier, query, tenantHeader)
 		if err != nil {
+			if observer, ok := next.(interface {
+				AuthenticationFailed(ctx context.Context, err error)
+			}); ok {
+				observer.AuthenticationFailed(ctx, err)
+			}
+
 			return nil, err
 		}
 

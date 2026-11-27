@@ -189,7 +189,11 @@ func (svc *Service) buildLeafPipelines(factories Factories, cfg *Config, built m
 		}
 
 		built[name] = pipeline.New(name, procs, disp)
+
 		built[name].Timeout = pipelineCfg.QueryTimeout
+		if pipelineCfg.AuthorizationAudit {
+			built[name].AuditLogger = svc.logger
+		}
 	}
 
 	return nil
@@ -267,7 +271,11 @@ func (svc *Service) buildConnectorPipelines(
 		}
 
 		built[name] = pipeline.New(name, procs, conn)
+
 		built[name].Timeout = pipelineCfg.QueryTimeout
+		if pipelineCfg.AuthorizationAudit {
+			built[name].AuditLogger = svc.logger
+		}
 	}
 
 	return nil

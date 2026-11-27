@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"time"
 
@@ -34,7 +35,8 @@ func (f HandlerFunc) Handle(ctx context.Context, q *qdata.Query) (*qdata.Result,
 
 // Pipeline is an ordered processor chain terminated by a dispatcher.
 type Pipeline struct {
-	Name string
+	AuditLogger *slog.Logger
+	Name        string
 	// Timeout bounds the entire query. A zero value uses the caller deadline.
 	Timeout    time.Duration
 	Processors []processor.Processor
@@ -43,7 +45,7 @@ type Pipeline struct {
 
 // New builds a pipeline.
 func New(name string, processors []processor.Processor, disp dispatcher.Dispatcher) *Pipeline {
-	return &Pipeline{Name: name, Timeout: 0, Processors: processors, Dispatcher: disp}
+	return &Pipeline{Name: name, Timeout: 0, AuditLogger: nil, Processors: processors, Dispatcher: disp}
 }
 
 // Handle validates the client's plan, runs the request path (processors in
@@ -58,9 +60,20 @@ func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (*qdata.Resul
 		defer cancel()
 	}
 
-	result, err := p.handle(ctx, query)
+	identity, verified := qdata.IdentityFromContext(ctx)
+	decision := auditDecision{identity: identity, verified: verified, decision: "not_evaluated", reason: "validation"}
+
+	if p.AuditLogger != nil {
+		ctx = withAuditRequestID(ctx)
+	}
+
+	result, err := p.handle(ctx, query, &decision)
 	if ctx.Err() != nil {
-		return nil, queryContextError(ctx)
+		result, err = nil, queryContextError(ctx)
+	}
+
+	if p.AuditLogger != nil {
+		p.audit(ctx, decision, err)
 	}
 
 	return result, err
@@ -112,7 +125,9 @@ func (p *Pipeline) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func (p *Pipeline) handle(ctx context.Context, query *qdata.Query) (*qdata.Result, error) {
+func (p *Pipeline) handle(
+	ctx context.Context, query *qdata.Query, decision *auditDecision,
+) (*qdata.Result, error) {
 	if ctx.Err() != nil {
 		return nil, queryContextError(ctx)
 	}
@@ -128,8 +143,13 @@ func (p *Pipeline) handle(ctx context.Context, query *qdata.Query) (*qdata.Resul
 
 	err = p.processQuery(ctx, query)
 	if err != nil {
+		decision.recordDenial(err, "request_policy")
+
 		return nil, err
 	}
+
+	decision.decision = "allow"
+	decision.reason = "request_policy"
 
 	return p.execute(ctx, query, p.Processors)
 }

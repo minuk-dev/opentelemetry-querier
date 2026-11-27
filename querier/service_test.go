@@ -70,7 +70,9 @@ func recordingConnFactory(captured *map[qdata.Signal]pipeline.Handler) connector
 
 // pipe builds a PipelineConfig terminated by terminal, fed by acceptors.
 func pipe(terminal string, acceptors ...string) querier.PipelineConfig {
-	return querier.PipelineConfig{QueryTimeout: 0, Acceptors: acceptors, Processors: nil, Dispatchers: []string{terminal}}
+	return querier.PipelineConfig{
+		QueryTimeout: 0, AuthorizationAudit: false, Acceptors: acceptors, Processors: nil, Dispatchers: []string{terminal},
+	}
 }
 
 func buildInfo() component.BuildInfo { return component.BuildInfo{Command: "test", Version: "test"} }
@@ -185,7 +187,8 @@ func TestBuildRejectsNamedSecurityDependency(t *testing.T) {
 		Dispatchers: map[string]map[string]any{"prometheus": {}}, Connectors: nil,
 		Service: querier.ServiceConfig{
 			Extensions: nil, Pipelines: map[string]querier.PipelineConfig{
-				"metrics/private": {QueryTimeout: 0, Acceptors: []string{"otqp"}, Processors: []string{"consumer/tenant-quota"},
+				"metrics/private": {QueryTimeout: 0, AuthorizationAudit: false,
+					Acceptors: []string{"otqp"}, Processors: []string{"consumer/tenant-quota"},
 					Dispatchers: []string{"prometheus"}},
 			}},
 	}
@@ -283,7 +286,6 @@ func TestBuildBindsEnabledServerAuthenticator(t *testing.T) {
 	_, err = handler.Handle(t.Context(), query)
 	require.NoError(t, err)
 	assert.Equal(t, "acme", qdata.TenantID(query))
-
 	acceptor.PrepareIngress(query, http.Header{"X-Test-Principal": {"alice"}, "X-Scope-Orgid": {"other"}})
 	_, err = handler.Handle(t.Context(), query)
 	require.ErrorContains(t, err, "tenant outside verified scope")

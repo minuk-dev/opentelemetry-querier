@@ -61,3 +61,13 @@ See [the default config](../config.yaml) for a complete example. A legacy
 `authratelimit` config with `require_bearer` or `tokens` now fails validation.
 Move the tokens into a `bearertokenauth` extension and specify the identity
 and tenants the tokens represent. Leave rate settings under `processors`.
+
+## Authorization audit events
+
+Enable `authorization_audit: true` on a service pipeline. Querier sends
+`query.authorization` events through its structured logger at INFO. Route
+this event type to an audit sink. The fields include a server-generated
+`request_id` shared by audited connector operands, pipeline, decision, stage
+reason and execution outcome. Principal, authority and tenant appear when
+verified. The event excludes authorization values, raw tokens, query data
+and upstream error text.
