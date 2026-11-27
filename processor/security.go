@@ -29,6 +29,11 @@ func ValidateOrder(processors []Processor) error {
 	pending := -1
 
 	for index, proc := range processors {
+		err := validateTerminalPosition(proc, index, len(processors)-1)
+		if err != nil {
+			return err
+		}
+
 		security, ok := proc.(SecurityProcessor)
 		if !ok {
 			continue
@@ -52,6 +57,20 @@ func ValidateOrder(processors []Processor) error {
 	if pending >= 0 {
 		return fmt.Errorf("%w: processor %d (%T) requires a subsequent query rewrite",
 			errSecurityOrder, pending, processors[pending])
+	}
+
+	return nil
+}
+
+func validateTerminalPosition(proc Processor, index, last int) error {
+	if index == last {
+		return nil
+	}
+
+	terminal, ok := proc.(interface{ RequiresTerminalDispatchPosition() bool })
+	if ok && terminal.RequiresTerminalDispatchPosition() {
+		return fmt.Errorf("%w: processor %d (%T) must be last so result processors run on every response",
+			errSecurityOrder, index, proc)
 	}
 
 	return nil
