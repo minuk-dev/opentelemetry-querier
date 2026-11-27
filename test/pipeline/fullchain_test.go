@@ -37,6 +37,7 @@ func defaultChain() []processor.Processor {
 			DefaultSubject: "",
 			Required:       false,
 			DefaultEffect:  simpleauthzprocessor.EffectDeny,
+			GroupRules:     nil,
 			Rules: []simpleauthzprocessor.Rule{
 				{Subjects: []string{"admin"}, Effect: simpleauthzprocessor.EffectAllow, EnforceLabels: nil},
 				{

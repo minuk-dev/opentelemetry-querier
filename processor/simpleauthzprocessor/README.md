@@ -75,3 +75,26 @@ PromQL today. For a dialect with no injector the enforced matchers cannot be
 applied and `queryrewrite` fails closed. `enforce_labels` express an AND of
 equality constraints; richer boolean enforcement is the `enforced_predicates`
 path (see [the design note](../../docs/design/qdata-cross-language-query.md)).
+
+## Verified group rules
+
+Set the authenticator's `group_claim` and configure `group_rules`:
+
+```yaml
+processors:
+  simpleauthz:
+    group_rules:
+      - groups: [team-a]
+        effect: allow
+        enforce_labels:
+          - name: team
+            value: a
+      - groups: [suspended]
+        effect: deny
+```
+
+A group grant is required whenever group rules are configured. Any matching
+group deny or an explicit matching subject deny takes precedence. Labels
+from all matching grants are applied together, including labels from the
+matching subject allow. Add a query rewrite processor after authorization
+when a rule enforces labels. Group names come from authenticated identity.

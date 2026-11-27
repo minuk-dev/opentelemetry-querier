@@ -16,6 +16,7 @@ import (
 // individual fields without tripping exhaustruct on partial literals.
 func baseConfig() simpleauthzprocessor.Config {
 	return simpleauthzprocessor.Config{
+		GroupRules:     nil,
 		SubjectHeader:  simpleauthzprocessor.DefaultSubjectHeader,
 		FromTenant:     false,
 		DefaultSubject: "",
