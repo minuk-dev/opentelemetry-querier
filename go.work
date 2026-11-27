@@ -17,6 +17,8 @@ use (
 	./dispatcher/prometheusdispatcher
 	./extension/gatewayauthextension
 	./extension/bearertokenauthextension
+	./extension/athenzauthextension
+	./processor/athenzauthzprocessor
 	./gen
 	./pipeline
 	./processor

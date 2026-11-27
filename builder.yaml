@@ -20,10 +20,12 @@ acceptors:
   - gomod: github.com/minuk-dev/opentelemetry-querier/acceptor/elasticsearchacceptor
 
 extensions:
+  - gomod: github.com/minuk-dev/opentelemetry-querier/extension/athenzauthextension
   - gomod: github.com/minuk-dev/opentelemetry-querier/extension/bearertokenauthextension
   - gomod: github.com/minuk-dev/opentelemetry-querier/extension/gatewayauthextension
 
 processors:
+  - gomod: github.com/minuk-dev/opentelemetry-querier/processor/athenzauthzprocessor
   - gomod: github.com/minuk-dev/opentelemetry-querier/processor/cacheprocessor
   - gomod: github.com/minuk-dev/opentelemetry-querier/processor/authratelimitprocessor
   - gomod: github.com/minuk-dev/opentelemetry-querier/processor/tenantprocessor

@@ -15,9 +15,11 @@ import (
 	elasticsearchdispatcher "github.com/minuk-dev/opentelemetry-querier/dispatcher/elasticsearchdispatcher"
 	lokidispatcher "github.com/minuk-dev/opentelemetry-querier/dispatcher/lokidispatcher"
 	prometheusdispatcher "github.com/minuk-dev/opentelemetry-querier/dispatcher/prometheusdispatcher"
+	athenzauthextension "github.com/minuk-dev/opentelemetry-querier/extension/athenzauthextension"
 	bearertokenauthextension "github.com/minuk-dev/opentelemetry-querier/extension/bearertokenauthextension"
 	gatewayauthextension "github.com/minuk-dev/opentelemetry-querier/extension/gatewayauthextension"
 	"github.com/minuk-dev/opentelemetry-querier/processor"
+	athenzauthzprocessor "github.com/minuk-dev/opentelemetry-querier/processor/athenzauthzprocessor"
 	authratelimitprocessor "github.com/minuk-dev/opentelemetry-querier/processor/authratelimitprocessor"
 	cacheprocessor "github.com/minuk-dev/opentelemetry-querier/processor/cacheprocessor"
 	queryrewriteprocessor "github.com/minuk-dev/opentelemetry-querier/processor/queryrewriteprocessor"
@@ -42,6 +44,7 @@ func components() (querier.Factories, error) {
 	}
 
 	if factories.Processors, err = processor.MakeFactoryMap(
+		athenzauthzprocessor.NewFactory(),
 		cacheprocessor.NewFactory(),
 		authratelimitprocessor.NewFactory(),
 		tenantprocessor.NewFactory(),
@@ -66,6 +69,7 @@ func components() (querier.Factories, error) {
 		return factories, err
 	}
 	if factories.Extensions, err = extension.MakeFactoryMap(
+		athenzauthextension.NewFactory(),
 		bearertokenauthextension.NewFactory(),
 		gatewayauthextension.NewFactory(),
 	); err != nil {
