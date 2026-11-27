@@ -116,3 +116,9 @@ func (q *sharedQuota) admit(ctx context.Context) error {
 
 	return nil
 }
+
+func (svc *Service) closeQuotaOnBuildFailure(builtOK *bool) {
+	if !*builtOK && svc.quota != nil {
+		_ = svc.quota.client.Close()
+	}
+}

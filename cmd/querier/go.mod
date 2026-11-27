@@ -3,6 +3,8 @@ module github.com/minuk-dev/opentelemetry-querier/cmd/querier
 go 1.25.4
 
 require (
+	github.com/minuk-dev/opentelemetry-querier/extension/bearertokenauthextension v0.0.0
+	github.com/minuk-dev/opentelemetry-querier/extension/gatewayauthextension v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/acceptor v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/acceptor/elasticsearchacceptor v0.0.0
 	github.com/minuk-dev/opentelemetry-querier/acceptor/lokiacceptor v0.0.0
@@ -103,3 +105,7 @@ replace github.com/minuk-dev/opentelemetry-querier/querier => ../../querier
 replace github.com/minuk-dev/opentelemetry-querier/connector => ../../connector
 
 replace github.com/minuk-dev/opentelemetry-querier/connector/crosssignalconnector => ../../connector/crosssignalconnector
+
+replace github.com/minuk-dev/opentelemetry-querier/extension/gatewayauthextension => ../../extension/gatewayauthextension
+
+replace github.com/minuk-dev/opentelemetry-querier/extension/bearertokenauthextension => ../../extension/bearertokenauthextension

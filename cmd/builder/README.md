@@ -57,3 +57,7 @@ Prometheus on port 9090. Set the upstream endpoint in `config.yaml`.
 
 Omit `--build` for source generation in the repository workspace. Existing
 manifests can keep unversioned entries in that mode.
+
+The release workflow installs the published builder outside the source tree,
+builds the standalone example, and checks a Prometheus query against a stub
+backend with the resulting binary.

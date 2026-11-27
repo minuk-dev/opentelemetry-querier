@@ -1,11 +1,12 @@
 # authratelimit processor
 
-The gateway processor: **bearer-token authentication** and **per-tenant rate
-limiting**. With per-tenant limiting enabled, it runs after the tenant processor and short-circuits with a coded
-error (`Unauthenticated` / `ResourceExhausted`) so no unauthenticated or
-over-quota query reaches storage.
+Rate-limits queries with a token bucket keyed globally or per tenant. Put
+per-tenant limiting after the tenant processor. The limiter rejects an
+unresolved tenant before consuming quota.
 
-Rate limiting uses a token-bucket keyed globally or per tenant. Per-tenant limiting rejects unresolved tenants before consuming quota. Authentication still runs before quota consumption and storage access.
+Configure [bearer authentication](../../extension/bearertokenauthextension)
+on the acceptor. Move legacy `require_bearer` and `tokens` settings out of the
+processor when upgrading.
 
 Use `processors: [tenant, authratelimit, simpleauthz, queryrewrite, responsefilter]` when combining these processors.
 
@@ -46,8 +47,6 @@ loss, not a capacity loss or an OOM.
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `require_bearer` | `false` | Require `Authorization: Bearer <token>`. |
-| `tokens` | `[]` | Accepted bearer tokens. |
 | `requests_per_second` | `0` | Sustained per-key query rate (0 disables limiting). |
 | `burst` | `ceil(rps)` | Token-bucket capacity. |
 | `per_tenant` | `false` | Key the limiter by tenant id instead of one global bucket. |
@@ -56,8 +55,6 @@ loss, not a capacity loss or an OOM.
 ```yaml
 processors:
   authratelimit:
-    require_bearer: true
-    tokens: ["dev-token"]
     requests_per_second: 50
     burst: 100
     per_tenant: true

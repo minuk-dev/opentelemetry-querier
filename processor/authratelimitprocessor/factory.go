@@ -11,7 +11,7 @@ import (
 // errInvalidConfig is returned when the factory receives an unexpected config type.
 var errInvalidConfig = errors.New("authratelimit: invalid config type")
 
-// NewFactory returns the factory for the auth + rate-limit processor.
+// NewFactory returns the factory for the rate-limit processor.
 func NewFactory() processor.Factory {
 	return processor.NewFactory(
 		component.MustNewType("authratelimit"),
@@ -22,8 +22,7 @@ func NewFactory() processor.Factory {
 
 func createDefaultConfig() component.Config {
 	return &Config{
-		RequireBearer:     false,
-		Tokens:            nil,
+
 		RequestsPerSecond: 0,
 		Burst:             0,
 		PerTenant:         false,
