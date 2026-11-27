@@ -11,6 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/minuk-dev/opentelemetry-querier/component"
+	"github.com/minuk-dev/opentelemetry-querier/pipeline"
 	"github.com/minuk-dev/opentelemetry-querier/qdata"
 )
 
@@ -53,10 +54,11 @@ type ServiceConfig struct {
 
 // PipelineConfig references component instances by ID, defining processor order.
 type PipelineConfig struct {
-	QueryTimeout time.Duration `mapstructure:"query_timeout"`
-	Acceptors    []string      `mapstructure:"acceptors"`
-	Processors   []string      `mapstructure:"processors"`
-	Dispatchers  []string      `mapstructure:"dispatchers"`
+	QueryBudget  pipeline.CostBudget `mapstructure:"query_budget"`
+	QueryTimeout time.Duration       `mapstructure:"query_timeout"`
+	Acceptors    []string            `mapstructure:"acceptors"`
+	Processors   []string            `mapstructure:"processors"`
+	Dispatchers  []string            `mapstructure:"dispatchers"`
 }
 
 // LoadConfig reads a YAML config file and structurally decodes it.
@@ -104,7 +106,12 @@ func (c *Config) validate() error {
 			return fmt.Errorf("pipeline %q: %w", name, errNegativeQueryTimeout)
 		}
 
-		_, err := pipelineSignal(name)
+		err := pipe.QueryBudget.Validate()
+		if err != nil {
+			return fmt.Errorf("pipeline %q: %w", name, err)
+		}
+
+		_, err = pipelineSignal(name)
 		if err != nil {
 			return err
 		}
