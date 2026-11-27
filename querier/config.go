@@ -36,6 +36,7 @@ var (
 // untyped tree and then structurally decoding it with mapstructure, so keys use
 // mapstructure tags (snake_case) throughout.
 type Config struct {
+	Extensions  map[string]map[string]any `mapstructure:"extensions"`
 	Acceptors   map[string]map[string]any `mapstructure:"acceptors"`
 	Processors  map[string]map[string]any `mapstructure:"processors"`
 	Dispatchers map[string]map[string]any `mapstructure:"dispatchers"`
@@ -48,7 +49,8 @@ type Config struct {
 // the opentelemetry-collector. The type token names the signal the pipeline
 // carries (metrics/logs/traces/profiles).
 type ServiceConfig struct {
-	Pipelines map[string]PipelineConfig `mapstructure:"pipelines"`
+	Extensions []string                  `mapstructure:"extensions"`
+	Pipelines  map[string]PipelineConfig `mapstructure:"pipelines"`
 }
 
 // PipelineConfig references component instances by ID, defining processor order.
@@ -74,11 +76,12 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	cfg := &Config{
+		Extensions:  nil,
 		Acceptors:   nil,
 		Processors:  nil,
 		Dispatchers: nil,
 		Connectors:  nil,
-		Service:     ServiceConfig{Pipelines: nil},
+		Service:     ServiceConfig{Extensions: nil, Pipelines: nil},
 	}
 
 	err = decodeStrict(tree, cfg)

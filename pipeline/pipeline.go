@@ -122,6 +122,10 @@ func (p *Pipeline) handle(ctx context.Context, query *qdata.Query) (*qdata.Resul
 		return nil, qerror.New(qerror.CodeInvalidArgument, "pipeline %q: %v", p.Name, err)
 	}
 
+	if identity, verified := qdata.IdentityFromContext(ctx); verified {
+		qdata.SetTenantID(query, identity.Tenant)
+	}
+
 	err = p.processQuery(ctx, query)
 	if err != nil {
 		return nil, err
@@ -157,6 +161,10 @@ func (p *Pipeline) execute(
 		}
 
 		return result, nil
+	}
+
+	if identity, verified := qdata.IdentityFromContext(ctx); verified {
+		qdata.SetTenantID(query, identity.Tenant)
 	}
 
 	result, err := p.Dispatcher.Dispatch(ctx, query)

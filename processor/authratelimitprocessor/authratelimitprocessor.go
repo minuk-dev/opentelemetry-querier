@@ -1,11 +1,4 @@
-// Package authratelimitprocessor implements the gateway processor: bearer-token
-// authentication and per-tenant rate limiting. It runs after tenant resolution on the request
-// path and short-circuits with a coded error (Unauthenticated / Resource
-// Exhausted) so no unauthenticated or over-quota query reaches storage.
-//
-// Per-tenant keys are request-derived, so the limiter holds at most max_keys
-// buckets and gates the creation of any further bucket on a shared admission
-// bucket; see the package README for what that does and does not guarantee.
+// Package authratelimitprocessor implements per-tenant query rate limiting.
 package authratelimitprocessor
 
 import (
@@ -13,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"math"
-	"strings"
 	"sync"
 	"time"
 
@@ -22,13 +14,8 @@ import (
 	"github.com/minuk-dev/opentelemetry-querier/qerror"
 )
 
-// Config configures auth and rate limiting.
+// Config configures rate limiting.
 type Config struct {
-	// RequireBearer enables Authorization: Bearer <token> checking.
-	RequireBearer bool `mapstructure:"require_bearer"`
-	// Tokens is the set of accepted bearer tokens.
-	Tokens []string `mapstructure:"tokens"`
-
 	// RequestsPerSecond is the sustained per-key query rate; zero disables rate
 	// limiting.
 	RequestsPerSecond float64 `mapstructure:"requests_per_second"`
@@ -45,12 +32,11 @@ type Config struct {
 	MaxKeys int `mapstructure:"max_keys"`
 }
 
-// Processor authenticates and rate-limits queries.
+// Processor rate-limits queries.
 type Processor struct {
 	processor.Base
 
 	cfg     Config
-	tokens  map[string]struct{}
 	limiter *limiter
 }
 
@@ -64,11 +50,6 @@ func (p *Processor) SecurityRequirements() processor.SecurityRequirements {
 
 // New builds the processor.
 func New(cfg Config) *Processor {
-	tokens := make(map[string]struct{}, len(cfg.Tokens))
-	for _, token := range cfg.Tokens {
-		tokens[token] = struct{}{}
-	}
-
 	var lim *limiter
 
 	if cfg.RequestsPerSecond > 0 {
@@ -85,15 +66,11 @@ func New(cfg Config) *Processor {
 		lim = newLimiter(cfg.RequestsPerSecond, float64(burst), maxKeys)
 	}
 
-	return &Processor{Base: processor.Base{}, cfg: cfg, tokens: tokens, limiter: lim}
+	return &Processor{Base: processor.Base{}, cfg: cfg, limiter: lim}
 }
 
-// ProcessQuery checks the bearer token then the rate limit.
+// ProcessQuery checks the rate limit.
 func (p *Processor) ProcessQuery(_ context.Context, query *qdata.Query) error {
-	if p.cfg.RequireBearer && !p.authorized(query) {
-		return qerror.New(qerror.CodeUnauthenticated, "authratelimit: missing or invalid bearer token")
-	}
-
 	if p.limiter != nil {
 		key := "global"
 		if p.cfg.PerTenant {
@@ -109,28 +86,6 @@ func (p *Processor) ProcessQuery(_ context.Context, query *qdata.Query) error {
 	}
 
 	return nil
-}
-
-func (p *Processor) authorized(query *qdata.Query) bool {
-	const prefix = "Bearer "
-
-	var raw string
-
-	for key, values := range query.GetHeader() {
-		if strings.EqualFold(key, "Authorization") && len(values.GetValues()) > 0 {
-			raw = values.GetValues()[0]
-
-			break
-		}
-	}
-
-	if !strings.HasPrefix(raw, prefix) {
-		return false
-	}
-
-	_, ok := p.tokens[strings.TrimPrefix(raw, prefix)]
-
-	return ok
 }
 
 // ---- token-bucket limiter ----
