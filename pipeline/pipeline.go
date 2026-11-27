@@ -6,8 +6,10 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/minuk-dev/opentelemetry-querier/component"
 	"github.com/minuk-dev/opentelemetry-querier/dispatcher"
@@ -32,8 +34,10 @@ func (f HandlerFunc) Handle(ctx context.Context, q *qdata.Query) (*qdata.Result,
 
 // Pipeline is an ordered processor chain terminated by a dispatcher.
 type Pipeline struct {
-	Name       string
-	Cost       CostBudget
+	Cost CostBudget
+	Name string
+	// Timeout bounds the entire query. A zero value uses the caller deadline.
+	Timeout    time.Duration
 	Processors []processor.Processor
 	Dispatcher dispatcher.Dispatcher
 }
@@ -42,7 +46,7 @@ type Pipeline struct {
 func New(name string, processors []processor.Processor, disp dispatcher.Dispatcher) *Pipeline {
 	var budget CostBudget
 
-	return &Pipeline{Name: name, Cost: budget, Processors: processors, Dispatcher: disp}
+	return &Pipeline{Name: name, Timeout: 0, Cost: budget, Processors: processors, Dispatcher: disp}
 }
 
 // Handle validates the client's plan, runs the request path (processors in
@@ -50,22 +54,27 @@ func New(name string, processors []processor.Processor, disp dispatcher.Dispatch
 // reverse order). A validation or processor error on the request path
 // short-circuits before the dispatcher is reached.
 func (p *Pipeline) Handle(ctx context.Context, query *qdata.Query) (*qdata.Result, error) {
-	err := qdata.ValidateQueryTime(query)
-	if err != nil {
-		return nil, qerror.New(qerror.CodeInvalidArgument, "pipeline %q: %v", p.Name, err)
+	if p.Timeout > 0 {
+		var cancel context.CancelFunc
+
+		ctx, cancel = context.WithTimeout(ctx, p.Timeout)
+		defer cancel()
 	}
 
-	err = p.processQuery(ctx, query)
-	if err != nil {
-		return nil, err
+	result, err := p.handle(ctx, query)
+	if ctx.Err() != nil {
+		return nil, queryContextError(ctx)
 	}
 
-	err = p.Cost.check(query)
-	if err != nil {
-		return nil, err
+	return result, err
+}
+
+func queryContextError(ctx context.Context) error {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return qerror.New(qerror.CodeDeadlineExceeded, "query deadline exceeded")
 	}
 
-	return p.execute(ctx, query, p.Processors)
+	return qerror.New(qerror.CodeCanceled, "query canceled")
 }
 
 // Start starts the processor chain and the dispatcher (acceptors are started
@@ -106,10 +115,37 @@ func (p *Pipeline) Shutdown(ctx context.Context) error {
 	return nil
 }
 
+func (p *Pipeline) handle(ctx context.Context, query *qdata.Query) (*qdata.Result, error) {
+	if ctx.Err() != nil {
+		return nil, queryContextError(ctx)
+	}
+
+	err := qdata.ValidateQueryTime(query)
+	if err != nil {
+		return nil, qerror.New(qerror.CodeInvalidArgument, "pipeline %q: %v", p.Name, err)
+	}
+
+	err = p.processQuery(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+
+	err = p.Cost.check(query)
+	if err != nil {
+		return nil, err
+	}
+
+	return p.execute(ctx, query, p.Processors)
+}
+
 // execute builds the response chain around each dispatch processor's position.
 func (p *Pipeline) execute(
 	ctx context.Context, query *qdata.Query, processors []processor.Processor,
 ) (*qdata.Result, error) {
+	if ctx.Err() != nil {
+		return nil, queryContextError(ctx)
+	}
+
 	for index, proc := range processors {
 		middleware, ok := proc.(processor.DispatchProcessor)
 		if !ok {
@@ -175,6 +211,10 @@ func (p *Pipeline) processQuery(ctx context.Context, query *qdata.Query) error {
 	qdata.SyncPlanSignals(query)
 
 	for _, proc := range p.Processors {
+		if ctx.Err() != nil {
+			return queryContextError(ctx)
+		}
+
 		err = proc.ProcessQuery(ctx, query)
 		if err != nil {
 			return fmt.Errorf("pipeline %q: %w", p.Name, err)
